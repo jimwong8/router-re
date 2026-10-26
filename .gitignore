@@ -1,0 +1,6 @@
+# 构建产物
+mgmtd/bin/
+web/node_modules/
+web/dist/
+# 环境
+.env
