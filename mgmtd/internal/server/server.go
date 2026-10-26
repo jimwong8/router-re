@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -11,7 +12,10 @@ import (
 	"github.com/jimwong/router-re/mgmtd/internal/dhcp"
 	"github.com/jimwong/router-re/mgmtd/internal/firewall"
 	"github.com/jimwong/router-re/mgmtd/internal/nat"
+	"github.com/jimwong/router-re/mgmtd/internal/qos"
 	"github.com/jimwong/router-re/mgmtd/internal/system"
+	"github.com/jimwong/router-re/mgmtd/internal/wan"
+	"github.com/jimwong/router-re/mgmtd/internal/vpn"
 )
 
 type Config struct {
@@ -43,13 +47,19 @@ func (s *Server) routes() {
 	})
 	s.mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
 	s.mux.HandleFunc("GET /api/v1/system/info", s.auth(s.handleSystemInfo))
+	s.mux.HandleFunc("GET /api/v1/qos/limits", s.auth(s.handleGetQoSLimits))
+	s.mux.HandleFunc("POST /api/v1/qos/limits", s.auth(s.handleSetQoSLimits))
 	s.mux.HandleFunc("GET /api/v1/interfaces", s.auth(s.handleInterfaces))
 	s.mux.HandleFunc("GET /api/v1/firewall/rules", s.auth(s.handleGetFirewallRules))
 	s.mux.HandleFunc("POST /api/v1/firewall/rules", s.auth(s.handleSetFirewallRules))
 	s.mux.HandleFunc("GET /api/v1/nat/rules", s.auth(s.handleGetNATRules))
 	s.mux.HandleFunc("POST /api/v1/nat/rules", s.auth(s.handleSetNATRules))
+	s.mux.HandleFunc("GET /api/v1/wan/links", s.auth(s.handleGetWANLinks))
+	s.mux.HandleFunc("POST /api/v1/wan/links", s.auth(s.handleSetWANLinks))
 	s.mux.HandleFunc("GET /api/v1/dhcp/config", s.auth(s.handleGetDHCPConfig))
 	s.mux.HandleFunc("POST /api/v1/dhcp/config", s.auth(s.handleSetDHCPConfig))
+	s.mux.HandleFunc("POST /api/v1/vpn/wireguard/keypair", s.auth(s.handleWireGuardKeypair))
+	s.mux.HandleFunc("POST /api/v1/vpn/wireguard/config", s.auth(s.handleWireGuardConfig))
 }
 
 // handleLogin authenticates a fixed dev account and issues a JWT session token.
@@ -258,6 +268,186 @@ func (s *Server) handleSetNATRules(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleGetWANLinks returns the persisted WAN links and their policy-routing
+// commands.
+func (s *Server) handleGetWANLinks(w http.ResponseWriter, r *http.Request) {
+	var links []wan.WANLink
+	for i := 0; ; i++ {
+		name, err := s.store.Get("wan", itoa(i)+".name")
+		if err != nil || name == "" {
+			break
+		}
+		iface, _ := s.store.Get("wan", itoa(i)+".interface")
+		gw, _ := s.store.Get("wan", itoa(i)+".gateway")
+		weight, _ := s.store.Get("wan", itoa(i)+".weight")
+		table, _ := s.store.Get("wan", itoa(i)+".table")
+		ht, _ := s.store.Get("wan", itoa(i)+".health_target")
+		wl := wan.WANLink{Name: name, Interface: iface, Gateway: gw, HealthTarget: ht}
+		if weight != "" {
+			fmt.Sscan(weight, &wl.Weight)
+		}
+		if table != "" {
+			fmt.Sscan(table, &wl.Table)
+		}
+		links = append(links, wl)
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"links":    links,
+		"commands": wan.RenderPolicyRouting(links),
+	})
+}
+
+// handleSetWANLinks persists the submitted WAN links and returns their
+// policy-routing commands.
+func (s *Server) handleSetWANLinks(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Links []wan.WANLink `json:"links"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+		return
+	}
+	for i, l := range req.Links {
+		key := itoa(i)
+		s.store.Set("wan", key+".name", l.Name)
+		s.store.Set("wan", key+".interface", l.Interface)
+		s.store.Set("wan", key+".gateway", l.Gateway)
+		s.store.Set("wan", key+".weight", itoa(l.Weight))
+		s.store.Set("wan", key+".table", itoa(l.Table))
+		s.store.Set("wan", key+".health_target", l.HealthTarget)
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"links":    req.Links,
+		"commands": wan.RenderPolicyRouting(req.Links),
+	})
+}
+
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.mux.ServeHTTP(w, r)
+}
+
+// handleWireGuardKeypair 生成一对 WireGuard 密钥并返回。
+// 私钥仅在响应中返回（一次），不写入日志。
+func (s *Server) handleWireGuardKeypair(w http.ResponseWriter, r *http.Request) {
+	priv, pub, err := vpn.GenerateKeypair()
+	if err != nil {
+		writeJSON(w, 500, errBody(10000, "wg keypair generate fail", err.Error()))
+		return
+	}
+	writeJSON(w, 200, map[string]string{
+		"private_key": priv,
+		"public_key":  pub,
+	})
+}
+
+// handleWireGuardConfig 保存 WireGuard 配置并返回渲染的 wg0.conf 文本。
+// 私钥写入 store 但绝不写入响应日志/输出（渲染文本含 PrivateKey 行是 wg0.conf 正常内容，
+// 此处仅返回给调用方；错误路径不回显私钥）。
+func (s *Server) handleWireGuardConfig(w http.ResponseWriter, r *http.Request) {
+	var cfg vpn.WireGuardConfig
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+		return
+	}
+	// 持久化到 config.Store（section=wg），私钥单独一个键
+	if cfg.Interface != "" {
+		s.store.Set("wg", "interface", cfg.Interface)
+	}
+	if cfg.Address != "" {
+		s.store.Set("wg", "address", cfg.Address)
+	}
+	if cfg.ListenPort != 0 {
+		s.store.Set("wg", "listen_port", itoa(cfg.ListenPort))
+	}
+	if cfg.PrivateKey != "" {
+		s.store.Set("wg", "private_key", cfg.PrivateKey)
+	}
+	// 返回渲染文本（含 PrivateKey 是 wg0.conf 的正常内容，仅本次响应返回）
+	writeJSON(w, 200, map[string]string{
+		"config":  vpn.RenderConfig(cfg),
+		"message": "wireguard config saved",
+	})
+}
+
+
+// handleGetQoSLimits returns the current QoS limits and their tc/nft commands.
+func (s *Server) handleGetQoSLimits(w http.ResponseWriter, r *http.Request) {
+	var limits []qos.RateLimit
+	for i := 0; ; i++ {
+		iface, err := s.store.Get("qos", itoa(i)+".interface")
+		if err != nil || iface == "" {
+			break
+		}
+		rateStr, _ := s.store.Get("qos", itoa(i)+".rate")
+		burstStr, _ := s.store.Get("qos", itoa(i)+".burst")
+		dirStr, _ := s.store.Get("qos", itoa(i)+".direction")
+		priorityStr, _ := s.store.Get("qos", itoa(i)+".priority")
+		var rateMbps, burstKB, priority int
+		fmt.Sscanf(rateStr, "%d", &rateMbps)
+		fmt.Sscanf(burstStr, "%d", &burstKB)
+		fmt.Sscanf(priorityStr, "%d", &priority)
+		limits = append(limits, qos.RateLimit{
+			Interface: iface, RateMbps: rateMbps, BurstKB: burstKB,
+			Direction: dirStr, Priority: priority,
+		})
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"limits": limits,
+		"tc":     qos.RenderTcCommands(limits),
+		"nft":    qos.RenderNftLimit(limits),
+	})
+}
+
+// handleSetQoSLimits validates, applies, and stores submitted QoS rules.
+func (s *Server) handleSetQoSLimits(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Limits []qos.RateLimit `json:"limits"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+		return
+	}
+	for _, lim := range req.Limits {
+		if lim.Interface == "" {
+			writeJSON(w, 422, errBody(10020, "invalid qos rule", "interface required"))
+			return
+		}
+	}
+	if err := qos.Validate(req.Limits); err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "permission") || strings.Contains(strings.ToLower(msg), "operation not permitted") {
+			msg = "nft requires root privileges"
+		}
+		writeJSON(w, 422, errBody(10021, "qos validation failed", msg))
+		return
+	}
+	if err := qos.Apply(req.Limits); err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "permission") || strings.Contains(strings.ToLower(msg), "operation not permitted") {
+			msg = "nft apply requires root privileges"
+		}
+		writeJSON(w, 500, errBody(10022, "qos apply failed", msg))
+		return
+	}
+	for i, lim := range req.Limits {
+		key := itoa(i)
+		s.store.Set("qos", key+".interface", lim.Interface)
+		s.store.Set("qos", key+".rate", fmt.Sprintf("%d", lim.RateMbps))
+		s.store.Set("qos", key+".burst", fmt.Sprintf("%d", lim.BurstKB))
+		s.store.Set("qos", key+".direction", lim.Direction)
+		s.store.Set("qos", key+".priority", fmt.Sprintf("%d", lim.Priority))
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"limits": req.Limits,
+		"tc":     qos.RenderTcCommands(req.Limits),
+		"nft":    qos.RenderNftLimit(req.Limits),
+	})
+}
+
+func (s *Server) Run() error {
+	return http.ListenAndServe(s.cfg.Addr, s.mux)
+}
+
 // auth is a Bearer-token middleware guarding all endpoints except health/login.
 func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -307,10 +497,3 @@ func itoa(n int) string {
 	return string(b[i:])
 }
 
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.mux.ServeHTTP(w, r)
-}
-
-func (s *Server) Run() error {
-	return http.ListenAndServe(s.cfg.Addr, s.mux)
-}
