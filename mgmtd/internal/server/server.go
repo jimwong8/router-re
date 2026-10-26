@@ -1,21 +1,29 @@
 package server
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jimwong/router-re/mgmtd/internal/auth"
+	"github.com/jimwong/router-re/mgmtd/internal/audit"
 	"github.com/jimwong/router-re/mgmtd/internal/cloud"
 	"github.com/jimwong/router-re/mgmtd/internal/config"
 	"github.com/jimwong/router-re/mgmtd/internal/dhcp"
+	"github.com/jimwong/router-re/mgmtd/internal/client"
 	"github.com/jimwong/router-re/mgmtd/internal/dpi"
+	"github.com/jimwong/router-re/mgmtd/internal/execx"
 	"github.com/jimwong/router-re/mgmtd/internal/firewall"
+	"github.com/jimwong/router-re/mgmtd/internal/iface"
 	"github.com/jimwong/router-re/mgmtd/internal/nat"
 	"github.com/jimwong/router-re/mgmtd/internal/qos"
 	"github.com/jimwong/router-re/mgmtd/internal/route"
@@ -36,11 +44,13 @@ type Config struct {
 }
 
 type Server struct {
-	cfg      Config
+	cfg         Config
+	dhcpApplier *dhcp.Applier
 	mux      *http.ServeMux
 	store    config.Store
 	tm       *auth.TokenManager
 	cloudMgr *cloud.Manager
+	audit    *audit.Logger
 }
 
 func New(cfg Config) *Server {
@@ -56,8 +66,19 @@ func New(cfg Config) *Server {
 		mux:      http.NewServeMux(),
 		store:    config.NewMockStore(),
 		tm:       auth.NewTokenManager(cfg.SecretKey, 15*time.Minute),
-		cloudMgr: cloud.NewManager(),
+		cloudMgr:    cloud.NewManager(),
+		dhcpApplier: dhcp.NewApplier(),
 	}
+	// Audit logger: MGM_AUDIT_LOG env or default; degrade to ./audit.jsonl
+	// if the default dir cannot be created (never fail startup for logging).
+	auditPath := os.Getenv("MGM_AUDIT_LOG")
+	if auditPath == "" {
+		auditPath = "/var/log/router-re/audit.jsonl"
+	}
+	if err := os.MkdirAll(filepath.Dir(auditPath), 0o755); err != nil {
+		auditPath = "./audit.jsonl"
+	}
+	s.audit = audit.New(auditPath)
 	s.routes()
 	return s
 }
@@ -69,32 +90,39 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
 	s.mux.HandleFunc("GET /api/v1/system/info", s.auth(s.handleSystemInfo))
 	s.mux.HandleFunc("GET /api/v1/qos/limits", s.auth(s.handleGetQoSLimits))
-	s.mux.HandleFunc("POST /api/v1/qos/limits", s.auth(s.handleSetQoSLimits))
+	s.mux.HandleFunc("POST /api/v1/qos/limits", s.auth(s.auditWrap("qos.limits.set", s.handleSetQoSLimits)))
 	s.mux.HandleFunc("GET /api/v1/interfaces", s.auth(s.handleInterfaces))
 	s.mux.HandleFunc("GET /api/v1/firewall/rules", s.auth(s.handleGetFirewallRules))
-	s.mux.HandleFunc("POST /api/v1/firewall/rules", s.auth(s.handleSetFirewallRules))
+	s.mux.HandleFunc("POST /api/v1/firewall/rules", s.auth(s.auditWrap("firewall.rules.set", s.handleSetFirewallRules)))
 	s.mux.HandleFunc("GET /api/v1/nat/rules", s.auth(s.handleGetNATRules))
-	s.mux.HandleFunc("POST /api/v1/nat/rules", s.auth(s.handleSetNATRules))
+	s.mux.HandleFunc("POST /api/v1/nat/rules", s.auth(s.auditWrap("nat.rules.set", s.handleSetNATRules)))
 	s.mux.HandleFunc("GET /api/v1/wan/links", s.auth(s.handleGetWANLinks))
-	s.mux.HandleFunc("POST /api/v1/wan/links", s.auth(s.handleSetWANLinks))
+	s.mux.HandleFunc("POST /api/v1/wan/links", s.auth(s.auditWrap("wan.links.set", s.handleSetWANLinks)))
 	s.mux.HandleFunc("GET /api/v1/route/bgp", s.auth(s.handleGetBGP))
-	s.mux.HandleFunc("POST /api/v1/route/bgp", s.auth(s.handleSetBGP))
+	s.mux.HandleFunc("POST /api/v1/route/bgp", s.auth(s.auditWrap("route.bgp.set", s.handleSetBGP)))
 	s.mux.HandleFunc("GET /api/v1/route/ospf", s.auth(s.handleGetOSPF))
-	s.mux.HandleFunc("POST /api/v1/route/ospf", s.auth(s.handleSetOSPF))
+	s.mux.HandleFunc("POST /api/v1/route/ospf", s.auth(s.auditWrap("route.ospf.set", s.handleSetOSPF)))
 	s.mux.HandleFunc("GET /api/v1/dhcp/config", s.auth(s.handleGetDHCPConfig))
-	s.mux.HandleFunc("POST /api/v1/dhcp/config", s.auth(s.handleSetDHCPConfig))
+	s.mux.HandleFunc("GET /api/v1/dhcp/leases", s.auth(s.handleGetDHCPLeases))
+	s.mux.HandleFunc("GET /api/v1/clients", s.auth(s.handleGetClients))
+	s.mux.HandleFunc("POST /api/v1/dhcp/config", s.auth(s.auditWrap("dhcp.config.set", s.handleSetDHCPConfig)))
 	s.mux.HandleFunc("GET /api/v1/cloud/devices", s.auth(s.handleGetCloudDevices))
-	s.mux.HandleFunc("POST /api/v1/cloud/devices", s.auth(s.handlePostCloudDevices))
-	s.mux.HandleFunc("POST /api/v1/cloud/devices/{id}/heartbeat", s.auth(s.handlePostCloudHeartbeat))
+	s.mux.HandleFunc("POST /api/v1/cloud/devices", s.auth(s.auditWrap("cloud.device.register", s.handlePostCloudDevices)))
+	s.mux.HandleFunc("POST /api/v1/cloud/devices/{id}/heartbeat", s.auth(s.auditWrap("cloud.device.heartbeat", s.handlePostCloudHeartbeat)))
 	s.mux.HandleFunc("GET /api/v1/wireless/aps", s.auth(s.handleGetWirelessAPs))
-	s.mux.HandleFunc("POST /api/v1/wireless/aps", s.auth(s.handlePostWirelessAPs))
+	s.mux.HandleFunc("POST /api/v1/wireless/aps", s.auth(s.auditWrap("wireless.ap.set", s.handlePostWirelessAPs)))
 	s.mux.HandleFunc("GET /api/v1/wireless/ssids", s.auth(s.handleGetWirelessSSIDs))
-	s.mux.HandleFunc("POST /api/v1/wireless/ssids", s.auth(s.handlePostWirelessSSIDs))
+	s.mux.HandleFunc("POST /api/v1/wireless/ssids", s.auth(s.auditWrap("wireless.ssid.set", s.handlePostWirelessSSIDs)))
 	s.mux.HandleFunc("GET /api/v1/dpi/rules", s.auth(s.handleGetDPIRules))
-	s.mux.HandleFunc("POST /api/v1/dpi/rules", s.auth(s.handleSetDPIRules))
+	s.mux.HandleFunc("POST /api/v1/dpi/rules", s.auth(s.auditWrap("dpi.rules.set", s.handleSetDPIRules)))
 	s.mux.HandleFunc("GET /api/v1/dpi/classify", s.auth(s.handleDPIClassify))
-	s.mux.HandleFunc("POST /api/v1/vpn/wireguard/keypair", s.auth(s.handleWireGuardKeypair))
-	s.mux.HandleFunc("POST /api/v1/vpn/wireguard/config", s.auth(s.handleWireGuardConfig))
+	s.mux.HandleFunc("POST /api/v1/vpn/wireguard/keypair", s.auth(s.auditWrap("vpn.wireguard.keypair", s.handleWireGuardKeypair)))
+	s.mux.HandleFunc("POST /api/v1/vpn/wireguard/config", s.auth(s.auditWrap("vpn.wireguard.config", s.handleWireGuardConfig)))
+	s.mux.HandleFunc("GET /api/v1/interfaces/config", s.auth(s.handleGetInterfacesConfig))
+	s.mux.HandleFunc("POST /api/v1/interfaces/config", s.auth(s.auditWrap("iface.config.set", s.handleSetInterfacesConfig)))
+	s.mux.HandleFunc("GET /api/v1/route/static", s.auth(s.handleGetStaticRoutes))
+	s.mux.HandleFunc("POST /api/v1/route/static", s.auth(s.auditWrap("route.static.set", s.handleSetStaticRoutes)))
+	s.mux.HandleFunc("GET /api/v1/audit/events", s.auth(s.handleGetAuditEvents))
 }
 
 // handleLogin authenticates a fixed dev account and issues a JWT session token.
@@ -111,14 +139,17 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	userOK := subtle.ConstantTimeCompare([]byte(req.Username), []byte(s.cfg.AdminUser)) == 1
 	passOK := subtle.ConstantTimeCompare([]byte(req.Password), []byte(s.cfg.AdminPassword)) == 1
 	if !userOK || !passOK {
+		s.logAudit(r, "auth.login", req.Username, "fail", "invalid credentials")
 		writeJSON(w, 401, errBody(10001, "invalid credentials", ""))
 		return
 	}
 	tok, err := s.tm.Issue(req.Username)
 	if err != nil {
+		s.logAudit(r, "auth.login", req.Username, "fail", "token issue: "+err.Error())
 		writeJSON(w, 500, errBody(10000, "token issue fail", err.Error()))
 		return
 	}
+	s.logAudit(r, "auth.login", req.Username, "ok", "")
 	writeJSON(w, 200, map[string]string{"token": tok})
 }
 
@@ -172,7 +203,14 @@ func (s *Server) handleGetDHCPConfig(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSetDHCPConfig(w http.ResponseWriter, r *http.Request) {
 	var cfg dhcp.DHCPConfig
 	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		s.logAudit(r, "dhcp.config.set", cfg.Interface, "fail", "json decode: "+err.Error())
 		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+		return
+	}
+	// 真实执行：通过 Applier 写入 dnsmasq 配置并重载
+	if applyErr := s.dhcpApplier.Apply(cfg); applyErr != nil {
+		s.logAudit(r, "dhcp.config.set", cfg.Interface, "fail", "apply: "+applyErr.Error())
+		writeJSON(w, 500, errBody(10009, "dhcp apply failed", applyErr.Error()))
 		return
 	}
 	set := func(opt, val string) {
@@ -189,9 +227,11 @@ func (s *Server) handleSetDHCPConfig(w http.ResponseWriter, r *http.Request) {
 	if len(cfg.DNS) > 0 {
 		s.store.Set("dhcp", "dns", strings.Join(cfg.DNS, ","))
 	}
+	s.logAudit(r, "dhcp.config.set", cfg.Interface, "ok", "")
 	writeJSON(w, 200, map[string]interface{}{
-		"config":  cfg,
-		"dnsmasq": dhcp.RenderDnsmasq(cfg),
+		"config":   cfg,
+		"dnsmasq":  dhcp.RenderDnsmasq(cfg),
+		"applied":  true,
 	})
 }
 
@@ -225,16 +265,19 @@ func (s *Server) handleSetFirewallRules(w http.ResponseWriter, r *http.Request) 
 		Rules []firewall.Rule `json:"rules"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.logAudit(r, "firewall.rules.set", "", "fail", "json decode: "+err.Error())
 		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
 		return
 	}
 	// Validate syntax before storing
 	if err := firewall.Validate(req.Rules); err != nil {
+		s.logAudit(r, "firewall.rules.set", "", "fail", "validate: "+err.Error())
 		writeJSON(w, 422, errBody(10010, "firewall validation failed", err.Error()))
 		return
 	}
 	// Apply to live nftables
 	if err := firewall.Apply(req.Rules); err != nil {
+		s.logAudit(r, "firewall.rules.set", "", "fail", "apply: "+err.Error())
 		writeJSON(w, 500, errBody(10011, "firewall apply failed", err.Error()))
 		return
 	}
@@ -248,6 +291,7 @@ func (s *Server) handleSetFirewallRules(w http.ResponseWriter, r *http.Request) 
 		s.store.Set("firewall", key+".dport", rule.DPort)
 		s.store.Set("firewall", key+".action", rule.Action)
 	}
+	s.logAudit(r, "firewall.rules.set", fmt.Sprintf("%d rules", len(req.Rules)), "ok", "")
 	writeJSON(w, 200, map[string]interface{}{
 		"rules": req.Rules,
 		"nft":   firewall.RenderNftables(req.Rules),
@@ -341,6 +385,7 @@ func (s *Server) handleSetWANLinks(w http.ResponseWriter, r *http.Request) {
 		Links []wan.WANLink `json:"links"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.logAudit(r, "wan.links.set", "", "fail", "json decode: "+err.Error())
 		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
 		return
 	}
@@ -353,6 +398,7 @@ func (s *Server) handleSetWANLinks(w http.ResponseWriter, r *http.Request) {
 		s.store.Set("wan", key+".table", itoa(l.Table))
 		s.store.Set("wan", key+".health_target", l.HealthTarget)
 	}
+	s.logAudit(r, "wan.links.set", fmt.Sprintf("%d links", len(req.Links)), "ok", "")
 	writeJSON(w, 200, map[string]interface{}{
 		"links":    req.Links,
 		"commands": wan.RenderPolicyRouting(req.Links),
@@ -383,6 +429,7 @@ func (s *Server) handleWireGuardKeypair(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleWireGuardConfig(w http.ResponseWriter, r *http.Request) {
 	var cfg vpn.WireGuardConfig
 	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		s.logAudit(r, "vpn.wireguard.config.set", cfg.Interface, "fail", "json decode: "+err.Error())
 		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
 		return
 	}
@@ -399,6 +446,7 @@ func (s *Server) handleWireGuardConfig(w http.ResponseWriter, r *http.Request) {
 	if cfg.PrivateKey != "" {
 		s.store.Set("wg", "private_key", cfg.PrivateKey)
 	}
+	s.logAudit(r, "vpn.wireguard.config.set", cfg.Interface, "ok", "")
 	// 返回渲染文本（含 PrivateKey 是 wg0.conf 的正常内容，仅本次响应返回）
 	writeJSON(w, 200, map[string]string{
 		"config":  vpn.RenderConfig(cfg),
@@ -440,11 +488,13 @@ func (s *Server) handleSetQoSLimits(w http.ResponseWriter, r *http.Request) {
 		Limits []qos.RateLimit `json:"limits"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.logAudit(r, "qos.limits.set", "", "fail", "json decode: "+err.Error())
 		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
 		return
 	}
 	for _, lim := range req.Limits {
 		if lim.Interface == "" {
+			s.logAudit(r, "qos.limits.set", "", "fail", "interface required")
 			writeJSON(w, 422, errBody(10020, "invalid qos rule", "interface required"))
 			return
 		}
@@ -454,6 +504,7 @@ func (s *Server) handleSetQoSLimits(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(msg, "permission") || strings.Contains(strings.ToLower(msg), "operation not permitted") {
 			msg = "nft requires root privileges"
 		}
+		s.logAudit(r, "qos.limits.set", "", "fail", "validate: "+msg)
 		writeJSON(w, 422, errBody(10021, "qos validation failed", msg))
 		return
 	}
@@ -462,6 +513,7 @@ func (s *Server) handleSetQoSLimits(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(msg, "permission") || strings.Contains(strings.ToLower(msg), "operation not permitted") {
 			msg = "nft apply requires root privileges"
 		}
+		s.logAudit(r, "qos.limits.set", "", "fail", "apply: "+msg)
 		writeJSON(w, 500, errBody(10022, "qos apply failed", msg))
 		return
 	}
@@ -473,6 +525,7 @@ func (s *Server) handleSetQoSLimits(w http.ResponseWriter, r *http.Request) {
 		s.store.Set("qos", key+".direction", lim.Direction)
 		s.store.Set("qos", key+".priority", fmt.Sprintf("%d", lim.Priority))
 	}
+	s.logAudit(r, "qos.limits.set", fmt.Sprintf("%d limits", len(req.Limits)), "ok", "")
 	writeJSON(w, 200, map[string]interface{}{
 		"limits": req.Limits,
 		"tc":     qos.RenderTcCommands(req.Limits),
@@ -570,13 +623,16 @@ func (s *Server) handlePostCloudDevices(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	if dev.Name == "" {
+		s.logAudit(r, "cloud.device.register", "", "fail", "name required")
 		writeJSON(w, 422, errBody(10030, "cloud register failed", "name required"))
 		return
 	}
 	if err := s.cloudMgr.Register(dev); err != nil {
+		s.logAudit(r, "cloud.device.register", dev.Name, "fail", err.Error())
 		writeJSON(w, 500, errBody(10030, "cloud register failed", err.Error()))
 		return
 	}
+	s.logAudit(r, "cloud.device.register", dev.Name, "ok", dev.ID)
 	writeJSON(w, 200, map[string]interface{}{"device": dev, "devices": s.cloudMgr.List()})
 }
 
@@ -641,6 +697,7 @@ func (s *Server) handlePostWirelessSSIDs(w http.ResponseWriter, r *http.Request)
 	} else {
 		var single wireless.SSID
 		if e2 := json.Unmarshal(body, &single); e2 != nil || single.Name == "" {
+			s.logAudit(r, "wireless.ssids.set", "", "fail", "name required")
 			writeJSON(w, 422, errBody(10032, "ssid invalid", "name required"))
 			return
 		}
@@ -670,6 +727,7 @@ func (s *Server) handlePostWirelessSSIDs(w http.ResponseWriter, r *http.Request)
 	if len(incoming) > 0 {
 		hostapd = wireless.RenderHostapd(incoming[0])
 	}
+	s.logAudit(r, "wireless.ssids.set", fmt.Sprintf("%d ssids", len(incoming)), "ok", "")
 	writeJSON(w, 200, map[string]interface{}{
 		"ssid":    incoming[0],
 		"ssids":   list,
@@ -691,12 +749,85 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 			writeJSON(w, 401, errBody(10003, "unauthorized", "missing token"))
 			return
 		}
-		if _, err := s.tm.Verify(tok); err != nil {
+		sub, err := s.tm.Verify(tok)
+		if err != nil {
 			writeJSON(w, 401, errBody(10003, "unauthorized", "invalid token"))
 			return
 		}
-		next(w, r)
+		// Put the authenticated actor into context for audit logging.
+		ctx := context.WithValue(r.Context(), ctxKeyActor, sub)
+		next(w, r.WithContext(ctx))
 	}
+}
+
+// ctxKeyActor is the context key for the authenticated actor.
+type ctxKeyActorType struct{}
+
+var ctxKeyActor ctxKeyActorType
+
+// statusRecorder wraps a ResponseWriter to capture the status code so the
+// audit middleware can record success/failure without touching each handler.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+// auditWrap records one audit event for every write request, deriving the
+// result from the response status. Must be mounted INSIDE s.auth so that the
+// authenticated actor is present in the request context.
+func (s *Server) auditWrap(action string, h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		rec := &statusRecorder{ResponseWriter: w, status: 200}
+		h(rec, r)
+		result := "ok"
+		if rec.status >= 400 {
+			result = "fail"
+		}
+		s.logAudit(r, action, r.URL.Path, result, fmt.Sprintf("HTTP %d", rec.status))
+	}
+}
+
+// logAudit records an audit event for the current request. Actor is read
+// from the request context (defaulting to "-"), RemoteIP from RemoteAddr.
+func (s *Server) logAudit(r *http.Request, action, target, result, detail string) {
+	if s.audit == nil {
+		return
+	}
+	actor := "-"
+	if v := r.Context().Value(ctxKeyActor); v != nil {
+		if s, ok := v.(string); ok && s != "" {
+			actor = s
+		}
+	}
+	ip := r.RemoteAddr
+	if h, _, err := net.SplitHostPort(ip); err == nil {
+		ip = h
+	}
+	s.audit.Log(audit.Event{
+		Actor:    actor,
+		Action:   action,
+		Target:   target,
+		Result:   result,
+		Detail:   detail,
+		RemoteIP: ip,
+	})
+}
+
+// handleGetAuditEvents returns audit events, optional limit & action filter.
+func (s *Server) handleGetAuditEvents(w http.ResponseWriter, r *http.Request) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	action := r.URL.Query().Get("action")
+	events, err := s.audit.Query(limit, action)
+	if err != nil {
+		writeJSON(w, 500, errBody(10040, "audit query failed", err.Error()))
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{"events": events})
 }
 
 func writeJSON(w http.ResponseWriter, code int, v interface{}) {
@@ -866,5 +997,140 @@ func (s *Server) handleDPIClassify(w http.ResponseWriter, r *http.Request) {
 		"dport":    dport,
 		"protocol": proto,
 		"category": cat,
+	})
+}
+
+// handleGetDHCPLeases 返回真实的 dnsmasq 租约解析结果。
+func (s *Server) handleGetDHCPLeases(w http.ResponseWriter, r *http.Request) {
+	leases, err := s.dhcpApplier.Leases()
+	if err != nil {
+		writeJSON(w, 500, errBody(10010, "dhcp leases read failed", err.Error()))
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"leases": leases,
+		"count":  len(leases),
+	})
+}
+
+// handleGetClients 返回合并的终端列表（ip neigh + dhcp 租约合并主机名）。
+func (s *Server) handleGetClients(w http.ResponseWriter, r *http.Request) {
+	neigh, err := client.List(execx.DefaultRunner{})
+	if err != nil {
+		writeJSON(w, 500, errBody(10011, "client list failed", err.Error()))
+		return
+	}
+	// 获取 DHCP 租约用于合并
+	leases, _ := s.dhcpApplier.Leases()
+	merged := client.Merge(neigh, leases)
+	writeJSON(w, 200, map[string]interface{}{
+		"clients": merged,
+		"count":   len(merged),
+	})
+}
+
+// handleGetInterfacesConfig returns persisted interface configs from the store.
+func (s *Server) handleGetInterfacesConfig(w http.ResponseWriter, r *http.Request) {
+	var configs []iface.Config
+	for i := 0; ; i++ {
+		name, err := s.store.Get("iface", itoa(i)+".name")
+		if err != nil || name == "" {
+			break
+		}
+		addr, _ := s.store.Get("iface", itoa(i)+".address")
+		mask, _ := s.store.Get("iface", itoa(i)+".netmask")
+		gw, _ := s.store.Get("iface", itoa(i)+".gateway")
+		var dns []string
+		for j := 0; ; j++ {
+			d, err := s.store.Get("iface", itoa(i)+".dns."+itoa(j))
+			if err != nil || d == "" {
+				break
+			}
+			dns = append(dns, d)
+		}
+		configs = append(configs, iface.Config{Name: name, Address: addr, Netmask: mask, Gateway: gw, DNS: dns})
+	}
+	writeJSON(w, 200, map[string]interface{}{"configs": configs})
+}
+
+// handleSetInterfacesConfig saves interface configs and applies them via ip.
+func (s *Server) handleSetInterfacesConfig(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Configs []iface.Config `json:"configs"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+		return
+	}
+	if len(req.Configs) == 0 {
+		writeJSON(w, 422, errBody(10040, "interface apply failed", "configs must contain at least one entry (expected {\"configs\":[...]})"))
+		return
+	}
+	applier := &iface.Applier{R: execx.DefaultRunner{}}
+	for i, c := range req.Configs {
+		key := itoa(i)
+		s.store.Set("iface", key+".name", c.Name)
+		s.store.Set("iface", key+".address", c.Address)
+		s.store.Set("iface", key+".netmask", c.Netmask)
+		s.store.Set("iface", key+".gateway", c.Gateway)
+		for j, d := range c.DNS {
+			s.store.Set("iface", key+".dns."+itoa(j), d)
+		}
+		if c.Name != "" {
+			if err := applier.Apply(c); err != nil {
+				writeJSON(w, 500, errBody(10040, "interface apply failed", err.Error()))
+				return
+			}
+		}
+	}
+	writeJSON(w, 200, map[string]interface{}{"configs": req.Configs, "applied": true})
+}
+
+// handleGetStaticRoutes returns persisted static routes.
+func (s *Server) handleGetStaticRoutes(w http.ResponseWriter, r *http.Request) {
+	var routes []route.StaticRoute
+	for i := 0; ; i++ {
+		dest, err := s.store.Get("route", "static."+itoa(i)+".dest")
+		if err != nil || dest == "" {
+			break
+		}
+		gw, _ := s.store.Get("route", "static."+itoa(i)+".gateway")
+		dev, _ := s.store.Get("route", "static."+itoa(i)+".device")
+		metricStr, _ := s.store.Get("route", "static."+itoa(i)+".metric")
+		metric := 0
+		if metricStr != "" {
+			fmt.Sscan(metricStr, &metric)
+		}
+		routes = append(routes, route.StaticRoute{Dest: dest, Gateway: gw, Device: dev, Metric: metric})
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"routes":   routes,
+		"commands": route.RenderStaticCommands(routes),
+	})
+}
+
+// handleSetStaticRoutes saves static routes and applies them via ip.
+func (s *Server) handleSetStaticRoutes(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Routes []route.StaticRoute `json:"routes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+		return
+	}
+	for i, rt := range req.Routes {
+		key := "static." + itoa(i)
+		s.store.Set("route", key+".dest", rt.Dest)
+		s.store.Set("route", key+".gateway", rt.Gateway)
+		s.store.Set("route", key+".device", rt.Device)
+		s.store.Set("route", key+".metric", itoa(rt.Metric))
+	}
+	if err := route.ApplyStatic(execx.DefaultRunner{}, req.Routes); err != nil {
+		writeJSON(w, 500, errBody(10041, "static route apply failed", err.Error()))
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"routes":   req.Routes,
+		"commands": route.RenderStaticCommands(req.Routes),
 	})
 }

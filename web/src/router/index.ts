@@ -6,6 +6,10 @@ import Vpn from '../views/Vpn.vue';
 import Qos from '../views/Qos.vue';
 import Cloud from '../views/Cloud.vue';
 import Wireless from '../views/Wireless.vue';
+import Clients from '../views/Clients.vue';
+import Interface from '../views/Interface.vue';
+import StaticRoute from '../views/StaticRoute.vue';
+import Audit from '../views/Audit.vue';
 
 const routes = [
   { path: '/', component: Dashboard, meta: { requiresAuth: true } },
@@ -14,6 +18,10 @@ const routes = [
   { path: '/qos', component: Qos, meta: { requiresAuth: true } },
   { path: '/cloud', component: Cloud, meta: { requiresAuth: true } },
   { path: '/wireless', component: Wireless, meta: { requiresAuth: true } },
+  { path: '/clients', component: Clients, meta: { requiresAuth: true } },
+  { path: '/interfaces', component: Interface, meta: { requiresAuth: true } },
+  { path: '/static-route', component: StaticRoute, meta: { requiresAuth: true } },
+  { path: '/audit', component: Audit, meta: { requiresAuth: true } },
   { path: '/login', component: Login },
   { path: '/:pathMatch(.*)*', redirect: '/login' },
 ];

@@ -10,6 +10,10 @@
           <router-link to="/qos" style="color:#eee; text-decoration:none;">流量控制</router-link>
           <router-link to="/cloud" style="color:#eee; text-decoration:none;">云管理</router-link>
           <router-link to="/wireless" style="color:#eee; text-decoration:none;">无线AC</router-link>
+          <router-link to="/clients" style="color:#eee; text-decoration:none;">终端</router-link>
+          <router-link to="/interfaces" style="color:#eee; text-decoration:none;">接口配置</router-link>
+          <router-link to="/static-route" style="color:#eee; text-decoration:none;">静态路由</router-link>
+          <router-link to="/audit" style="color:#eee; text-decoration:none;">审计日志</router-link>
         </nav>
       </div>
     </el-header>
