@@ -86,6 +86,12 @@ function loadAPs() {
   }).catch((e: any) => ElMessage.error(e?.response?.data?.message || e.message));
 }
 
+function loadSSIDs() {
+  api.get('/api/v1/wireless/ssids').then((res) => {
+    ssids.value = res.data?.ssids || [];
+  }).catch((e: any) => ElMessage.error(e?.response?.data?.message || e.message));
+}
+
 function addSSID() {
   if (!newSSID.value.name) {
     ElMessage.warning('SSID 名称必填');
@@ -101,6 +107,10 @@ async function submitSSIDs() {
     const res = await api.post('/api/v1/wireless/ssids', { ssids: ssids.value.map(s => ({ name: s.name, security: s.security, password: s.password, vlan: s.vlan, enabled: s.enabled })) });
     hostapdText.value = res.data?.hostapd || res.data?.hostapd_conf || '';
     wpaText.value = res.data?.wpa_supplicant || res.data?.wpa_conf || '';
+    if (Array.isArray(res.data?.ssids)) {
+      ssids.value = res.data.ssids;
+    }
+    await loadSSIDs();
     ElMessage.success('已提交');
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.message || e.message);
@@ -109,7 +119,10 @@ async function submitSSIDs() {
   }
 }
 
-onMounted(loadAPs);
+onMounted(() => {
+  loadAPs();
+  loadSSIDs();
+});
 </script>
 
 <style scoped>

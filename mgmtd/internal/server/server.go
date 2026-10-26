@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,17 +28,29 @@ import (
 type Config struct {
 	Addr      string
 	SecretKey []byte
+	// AdminUser / AdminPassword are the initial credential. They default to
+	// admin/admin123 for development but MUST be overridden in production
+	// (MGM_ADMIN_USER / MGM_ADMIN_PASSWORD).
+	AdminUser     string
+	AdminPassword string
 }
 
 type Server struct {
-	cfg     Config
-	mux     *http.ServeMux
-	store   config.Store
-	tm      *auth.TokenManager
+	cfg      Config
+	mux      *http.ServeMux
+	store    config.Store
+	tm       *auth.TokenManager
 	cloudMgr *cloud.Manager
 }
 
 func New(cfg Config) *Server {
+	if cfg.AdminUser == "" {
+		cfg.AdminUser = "admin"
+	}
+	if cfg.AdminPassword == "" {
+		// Development default. Production must set MGM_ADMIN_PASSWORD.
+		cfg.AdminPassword = "admin123"
+	}
 	s := &Server{
 		cfg:      cfg,
 		mux:      http.NewServeMux(),
@@ -94,8 +107,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
 		return
 	}
-	// Dev default account; production reads from store/DB.
-	if req.Username != "admin" || req.Password != "admin123" {
+	// Compare in constant time to avoid leaking length/prefix information.
+	userOK := subtle.ConstantTimeCompare([]byte(req.Username), []byte(s.cfg.AdminUser)) == 1
+	passOK := subtle.ConstantTimeCompare([]byte(req.Password), []byte(s.cfg.AdminPassword)) == 1
+	if !userOK || !passOK {
 		writeJSON(w, 401, errBody(10001, "invalid credentials", ""))
 		return
 	}
@@ -391,7 +406,6 @@ func (s *Server) handleWireGuardConfig(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-
 // handleGetQoSLimits returns the current QoS limits and their tc/nft commands.
 func (s *Server) handleGetQoSLimits(w http.ResponseWriter, r *http.Request) {
 	var limits []qos.RateLimit
@@ -612,33 +626,54 @@ func (s *Server) handleGetWirelessSSIDs(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handlePostWirelessSSIDs(w http.ResponseWriter, r *http.Request) {
-	var ssid wireless.SSID
-	if err := json.NewDecoder(r.Body).Decode(&ssid); err != nil {
-		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeJSON(w, 400, errBody(10007, "read body fail", err.Error()))
 		return
 	}
-	if ssid.Name == "" {
-		writeJSON(w, 422, errBody(10032, "ssid invalid", "name required"))
-		return
+	// Accept a single SSID object or a {"ssids": [...]} batch.
+	var batch struct {
+		SSIDs []wireless.SSID `json:"ssids"`
 	}
-	list := s.wirelessSSIDs()
-	replaced := false
-	for i := range list {
-		if list[i].Name == ssid.Name {
-			list[i] = ssid
-			replaced = true
-			break
+	var incoming []wireless.SSID
+	if e := json.Unmarshal(body, &batch); e == nil && len(batch.SSIDs) > 0 {
+		incoming = batch.SSIDs
+	} else {
+		var single wireless.SSID
+		if e2 := json.Unmarshal(body, &single); e2 != nil || single.Name == "" {
+			writeJSON(w, 422, errBody(10032, "ssid invalid", "name required"))
+			return
 		}
+		incoming = []wireless.SSID{single}
 	}
-	if !replaced {
-		list = append(list, ssid)
+	// Merge by name (update existing, append new).
+	list := s.wirelessSSIDs()
+	for _, ssid := range incoming {
+		if ssid.Name == "" {
+			continue
+		}
+		replaced := false
+		for i := range list {
+			if list[i].Name == ssid.Name {
+				list[i] = ssid
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			list = append(list, ssid)
+		}
 	}
 	raw, _ := json.Marshal(list)
 	_ = s.store.Set("wireless", "ssids", string(raw))
+	hostapd := ""
+	if len(incoming) > 0 {
+		hostapd = wireless.RenderHostapd(incoming[0])
+	}
 	writeJSON(w, 200, map[string]interface{}{
-		"ssid":    ssid,
+		"ssid":    incoming[0],
 		"ssids":   list,
-		"hostapd": wireless.RenderHostapd(ssid),
+		"hostapd": hostapd,
 		"message": "ssid saved",
 	})
 }
@@ -695,7 +730,6 @@ func itoa(n int) string {
 	}
 	return string(b[i:])
 }
-
 
 // handleGetBGP returns the persisted BGP config and rendered FRR text.
 func (s *Server) handleGetBGP(w http.ResponseWriter, r *http.Request) {

@@ -9,13 +9,13 @@ import (
 
 // Info holds real host system information read from /proc and /etc.
 type Info struct {
-	Hostname    string `json:"hostname"`
-	CPUModel    string `json:"cpu_model"`
-	CPUCores    int    `json:"cpu_cores"`
-	MemTotalKB  int64  `json:"mem_total_kb"`
-	MemAvailKB  int64  `json:"mem_avail_kb"`
-	OSVersion   string `json:"os_version"`
-	GoVersion   string `json:"go_version"`
+	Hostname   string `json:"hostname"`
+	CPUModel   string `json:"cpu_model"`
+	CPUCores   int    `json:"cpu_cores"`
+	MemTotalKB int64  `json:"mem_total_kb"`
+	MemAvailKB int64  `json:"mem_avail_kb"`
+	OSVersion  string `json:"os_version"`
+	GoVersion  string `json:"go_version"`
 }
 
 // GetInfo reads real system data. Failures on optional fields are tolerated

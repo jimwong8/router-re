@@ -11,13 +11,13 @@ import (
 
 // Device represents a cloud-managed router device.
 type Device struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Model        string `json:"model"`
-	Version      string `json:"version"`
-	LastSeen     int64  `json:"last_seen"`
-	Online       bool   `json:"online"`
-	ConfigVersion int   `json:"config_version"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Model         string `json:"model"`
+	Version       string `json:"version"`
+	LastSeen      int64  `json:"last_seen"`
+	Online        bool   `json:"online"`
+	ConfigVersion int    `json:"config_version"`
 }
 
 // Manager is an in-memory cloud device manager (no DB).

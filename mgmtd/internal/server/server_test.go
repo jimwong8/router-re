@@ -201,7 +201,9 @@ func TestDPIEndpoints(t *testing.T) {
 	req0 := httptest.NewRequest("POST", "/api/v1/auth/login", strings.NewReader(login))
 	rr0 := httptest.NewRecorder()
 	s.ServeHTTP(rr0, req0)
-	var resp struct{ Token string `json:"token"` }
+	var resp struct {
+		Token string `json:"token"`
+	}
 	json.NewDecoder(rr0.Body).Decode(&resp)
 
 	// POST 规则

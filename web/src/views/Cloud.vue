@@ -22,15 +22,21 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
+import { ElMessage } from 'element-plus';
 import api from '../api';
 
 const devices = ref<any[]>([]);
+const loadError = ref('');
 
 async function load() {
   try {
     const res = await api.get('/api/v1/cloud/devices');
     devices.value = res.data?.devices || [];
-  } catch {}
+    loadError.value = '';
+  } catch (e: any) {
+    loadError.value = e?.response?.data?.message || e.message || '加载设备失败';
+    ElMessage.error(loadError.value);
+  }
 }
 
 onMounted(load);
