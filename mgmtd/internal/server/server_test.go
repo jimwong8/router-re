@@ -185,3 +185,47 @@ func TestWireGuardEndpoints(t *testing.T) {
 		t.Fatalf("config response missing rendered wg text: %s", rr2.Body.String())
 	}
 }
+
+func TestDPIEndpoints(t *testing.T) {
+	s := New(Config{Addr: ":8080", SecretKey: []byte("0123456789abcdef0123456789abcdef")})
+	// 未带 token → 401
+	req := httptest.NewRequest("GET", "/api/v1/dpi/rules", nil)
+	rr := httptest.NewRecorder()
+	s.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without token, got %d", rr.Code)
+	}
+
+	// 登录
+	login := `{"username":"admin","password":"admin123"}`
+	req0 := httptest.NewRequest("POST", "/api/v1/auth/login", strings.NewReader(login))
+	rr0 := httptest.NewRecorder()
+	s.ServeHTTP(rr0, req0)
+	var resp struct{ Token string `json:"token"` }
+	json.NewDecoder(rr0.Body).Decode(&resp)
+
+	// POST 规则
+	body := `{"rules":[{"name":"bittorrent","category":"p2p","match_type":"dport","match_value":"6881","action":"drop","priority":10},{"name":"netflix","category":"video","match_type":"host","match_value":"10.0.0.9","action":"accept","priority":5}]}`
+	req1 := httptest.NewRequest("POST", "/api/v1/dpi/rules", strings.NewReader(body))
+	req1.Header.Set("Authorization", "Bearer "+resp.Token)
+	rr1 := httptest.NewRecorder()
+	s.ServeHTTP(rr1, req1)
+	if rr1.Code != http.StatusOK {
+		t.Fatalf("POST dpi failed: %d %s", rr1.Code, rr1.Body.String())
+	}
+	if !strings.Contains(rr1.Body.String(), "dport") || !strings.Contains(rr1.Body.String(), "drop") {
+		t.Fatalf("POST response missing dport/drop: %s", rr1.Body.String())
+	}
+
+	// GET 回读
+	req2 := httptest.NewRequest("GET", "/api/v1/dpi/rules", nil)
+	req2.Header.Set("Authorization", "Bearer "+resp.Token)
+	rr2 := httptest.NewRecorder()
+	s.ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("GET dpi failed: %d %s", rr2.Code, rr2.Body.String())
+	}
+	if !strings.Contains(rr2.Body.String(), `"name":"bittorrent"`) {
+		t.Fatalf("GET response missing persisted rule: %s", rr2.Body.String())
+	}
+}

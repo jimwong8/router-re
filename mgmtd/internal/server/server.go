@@ -13,9 +13,11 @@ import (
 	"github.com/jimwong/router-re/mgmtd/internal/firewall"
 	"github.com/jimwong/router-re/mgmtd/internal/nat"
 	"github.com/jimwong/router-re/mgmtd/internal/qos"
+	"github.com/jimwong/router-re/mgmtd/internal/route"
 	"github.com/jimwong/router-re/mgmtd/internal/system"
 	"github.com/jimwong/router-re/mgmtd/internal/wan"
 	"github.com/jimwong/router-re/mgmtd/internal/vpn"
+	"github.com/jimwong/router-re/mgmtd/internal/dpi"
 )
 
 type Config struct {
@@ -56,8 +58,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/nat/rules", s.auth(s.handleSetNATRules))
 	s.mux.HandleFunc("GET /api/v1/wan/links", s.auth(s.handleGetWANLinks))
 	s.mux.HandleFunc("POST /api/v1/wan/links", s.auth(s.handleSetWANLinks))
+	s.mux.HandleFunc("GET /api/v1/route/bgp", s.auth(s.handleGetBGP))
+	s.mux.HandleFunc("POST /api/v1/route/bgp", s.auth(s.handleSetBGP))
+	s.mux.HandleFunc("GET /api/v1/route/ospf", s.auth(s.handleGetOSPF))
+	s.mux.HandleFunc("POST /api/v1/route/ospf", s.auth(s.handleSetOSPF))
 	s.mux.HandleFunc("GET /api/v1/dhcp/config", s.auth(s.handleGetDHCPConfig))
 	s.mux.HandleFunc("POST /api/v1/dhcp/config", s.auth(s.handleSetDHCPConfig))
+	s.mux.HandleFunc("GET /api/v1/dpi/rules", s.auth(s.handleGetDPIRules))
+	s.mux.HandleFunc("POST /api/v1/dpi/rules", s.auth(s.handleSetDPIRules))
 	s.mux.HandleFunc("POST /api/v1/vpn/wireguard/keypair", s.auth(s.handleWireGuardKeypair))
 	s.mux.HandleFunc("POST /api/v1/vpn/wireguard/config", s.auth(s.handleWireGuardConfig))
 }
@@ -444,6 +452,75 @@ func (s *Server) handleSetQoSLimits(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleGetDPIRules returns persisted DPI rules and their rendered nftables text.
+func (s *Server) handleGetDPIRules(w http.ResponseWriter, r *http.Request) {
+	rules := s.dpiRulesFromStore()
+	writeJSON(w, 200, map[string]interface{}{
+		"rules": rules,
+		"nft":   dpi.RenderNftRules(rules),
+	})
+}
+
+// handleSetDPIRules persists submitted DPI rules and returns rendered nftables text.
+func (s *Server) handleSetDPIRules(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Rules []dpi.AppRule `json:"rules"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+		return
+	}
+	// 用递增索引存储（沿用 firewall/nat 风格）
+	for i, rule := range req.Rules {
+		s.store.Set("dpi", itoa(i)+".name", rule.Name)
+		s.store.Set("dpi", itoa(i)+".category", rule.Category)
+		s.store.Set("dpi", itoa(i)+".match_type", rule.MatchType)
+		s.store.Set("dpi", itoa(i)+".match_value", rule.MatchValue)
+		s.store.Set("dpi", itoa(i)+".action", rule.Action)
+		if rule.RateMbps != 0 {
+			s.store.Set("dpi", itoa(i)+".rate_mbps", itoa(rule.RateMbps))
+		}
+		s.store.Set("dpi", itoa(i)+".priority", itoa(rule.Priority))
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"rules": req.Rules,
+		"nft":   dpi.RenderNftRules(req.Rules),
+	})
+}
+
+// dpiRulesFromStore 从 config.Store 读出 DPI 规则列表。
+func (s *Server) dpiRulesFromStore() []dpi.AppRule {
+	var rules []dpi.AppRule
+	for i := 0; i < 200; i++ { // 上限 200 条
+		name, err := s.store.Get("dpi", itoa(i)+".name")
+		if err != nil || name == "" {
+			break
+		}
+		cat, _ := s.store.Get("dpi", itoa(i)+".category")
+		mt, _ := s.store.Get("dpi", itoa(i)+".match_type")
+		mv, _ := s.store.Get("dpi", itoa(i)+".match_value")
+		act, _ := s.store.Get("dpi", itoa(i)+".action")
+		rate, _ := s.store.Get("dpi", itoa(i)+".rate_mbps")
+		prio, _ := s.store.Get("dpi", itoa(i)+".priority")
+		rules = append(rules, dpi.AppRule{
+			Name: name, Category: cat, MatchType: mt, MatchValue: mv,
+			Action: act, RateMbps: atoi(rate), Priority: atoi(prio),
+		})
+	}
+	return rules
+}
+
+func atoi(s string) int {
+	n := 0
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n
+}
+
 func (s *Server) Run() error {
 	return http.ListenAndServe(s.cfg.Addr, s.mux)
 }
@@ -497,3 +574,109 @@ func itoa(n int) string {
 	return string(b[i:])
 }
 
+
+// handleGetBGP returns the persisted BGP config and rendered FRR text.
+func (s *Server) handleGetBGP(w http.ResponseWriter, r *http.Request) {
+	localAS, _ := s.store.Get("route", "bgp.local_as")
+	routerID, _ := s.store.Get("route", "bgp.router_id")
+	cfg := route.BGPConfig{RouterID: routerID}
+	if localAS != "" {
+		fmt.Sscan(localAS, &cfg.LocalAS)
+	}
+	// peers stored as bgp.peer.<i>.*
+	for i := 0; ; i++ {
+		addr, err := s.store.Get("route", fmt.Sprintf("bgp.peer.%d.address", i))
+		if err != nil || addr == "" {
+			break
+		}
+		ra, _ := s.store.Get("route", fmt.Sprintf("bgp.peer.%d.remote_as", i))
+		pw, _ := s.store.Get("route", fmt.Sprintf("bgp.peer.%d.password", i))
+		mh, _ := s.store.Get("route", fmt.Sprintf("bgp.peer.%d.multihop", i))
+		p := route.BGPPeer{Address: addr, Password: pw, MultiHop: mh == "true"}
+		if ra != "" {
+			fmt.Sscan(ra, &p.RemoteAS)
+		}
+		cfg.Peers = append(cfg.Peers, p)
+	}
+	// networks stored as bgp.network.<i>
+	for i := 0; ; i++ {
+		n, err := s.store.Get("route", fmt.Sprintf("bgp.network.%d", i))
+		if err != nil || n == "" {
+			break
+		}
+		cfg.Networks = append(cfg.Networks, n)
+	}
+	bgp := cfg
+	writeJSON(w, 200, map[string]interface{}{
+		"config": cfg,
+		"frr":    route.RenderFrrConf(&bgp, nil),
+	})
+}
+
+// handleSetBGP persists the submitted BGP config and returns rendered FRR text.
+func (s *Server) handleSetBGP(w http.ResponseWriter, r *http.Request) {
+	var cfg route.BGPConfig
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+		return
+	}
+	s.store.Set("route", "bgp.local_as", itoa(cfg.LocalAS))
+	s.store.Set("route", "bgp.router_id", cfg.RouterID)
+	for i, p := range cfg.Peers {
+		key := fmt.Sprintf("bgp.peer.%d", i)
+		s.store.Set("route", key+".address", p.Address)
+		s.store.Set("route", key+".remote_as", itoa(p.RemoteAS))
+		s.store.Set("route", key+".password", p.Password)
+		if p.MultiHop {
+			s.store.Set("route", key+".multihop", "true")
+		} else {
+			s.store.Set("route", key+".multihop", "false")
+		}
+	}
+	for i, n := range cfg.Networks {
+		s.store.Set("route", fmt.Sprintf("bgp.network.%d", i), n)
+	}
+	bgp := cfg
+	writeJSON(w, 200, map[string]interface{}{
+		"config": cfg,
+		"frr":    route.RenderFrrConf(&bgp, nil),
+	})
+}
+
+// handleGetOSPF returns the persisted OSPF config and rendered FRR text.
+func (s *Server) handleGetOSPF(w http.ResponseWriter, r *http.Request) {
+	routerID, _ := s.store.Get("route", "ospf.router_id")
+	area, _ := s.store.Get("route", "ospf.area")
+	cfg := route.OSPFConfig{RouterID: routerID, Area: area}
+	for i := 0; ; i++ {
+		n, err := s.store.Get("route", fmt.Sprintf("ospf.network.%d", i))
+		if err != nil || n == "" {
+			break
+		}
+		cfg.Networks = append(cfg.Networks, n)
+	}
+	ospf := cfg
+	writeJSON(w, 200, map[string]interface{}{
+		"config": cfg,
+		"frr":    route.RenderFrrConf(nil, &ospf),
+	})
+}
+
+// handleSetOSPF persists the submitted OSPF config and returns rendered FRR text.
+func (s *Server) handleSetOSPF(w http.ResponseWriter, r *http.Request) {
+	var cfg route.OSPFConfig
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+		return
+	}
+	s.store.Set("route", "ospf.router_id", cfg.RouterID)
+	s.store.Set("route", "ospf.area", cfg.Area)
+	for i, n := range cfg.Networks {
+		s.store.Set("route", fmt.Sprintf("ospf.network.%d", i), n)
+	}
+	ospf := cfg
+	writeJSON(w, 200, map[string]interface{}{
+		"config": cfg,
+		"frr":    route.RenderFrrConf(nil, &ospf),
+	})
+}
