@@ -8,6 +8,8 @@
           <router-link to="/multi-wan" style="color:#eee; text-decoration:none;">多WAN</router-link>
           <router-link to="/vpn" style="color:#eee; text-decoration:none;">VPN</router-link>
           <router-link to="/qos" style="color:#eee; text-decoration:none;">流量控制</router-link>
+          <router-link to="/cloud" style="color:#eee; text-decoration:none;">云管理</router-link>
+          <router-link to="/wireless" style="color:#eee; text-decoration:none;">无线AC</router-link>
         </nav>
       </div>
     </el-header>

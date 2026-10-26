@@ -3,21 +3,25 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jimwong/router-re/mgmtd/internal/auth"
+	"github.com/jimwong/router-re/mgmtd/internal/cloud"
 	"github.com/jimwong/router-re/mgmtd/internal/config"
 	"github.com/jimwong/router-re/mgmtd/internal/dhcp"
+	"github.com/jimwong/router-re/mgmtd/internal/dpi"
 	"github.com/jimwong/router-re/mgmtd/internal/firewall"
 	"github.com/jimwong/router-re/mgmtd/internal/nat"
 	"github.com/jimwong/router-re/mgmtd/internal/qos"
 	"github.com/jimwong/router-re/mgmtd/internal/route"
 	"github.com/jimwong/router-re/mgmtd/internal/system"
-	"github.com/jimwong/router-re/mgmtd/internal/wan"
 	"github.com/jimwong/router-re/mgmtd/internal/vpn"
-	"github.com/jimwong/router-re/mgmtd/internal/dpi"
+	"github.com/jimwong/router-re/mgmtd/internal/wan"
+	"github.com/jimwong/router-re/mgmtd/internal/wireless"
 )
 
 type Config struct {
@@ -26,18 +30,20 @@ type Config struct {
 }
 
 type Server struct {
-	cfg   Config
-	mux   *http.ServeMux
-	store config.Store
-	tm    *auth.TokenManager
+	cfg     Config
+	mux     *http.ServeMux
+	store   config.Store
+	tm      *auth.TokenManager
+	cloudMgr *cloud.Manager
 }
 
 func New(cfg Config) *Server {
 	s := &Server{
-		cfg:   cfg,
-		mux:   http.NewServeMux(),
-		store: config.NewMockStore(),
-		tm:    auth.NewTokenManager(cfg.SecretKey, 15*time.Minute),
+		cfg:      cfg,
+		mux:      http.NewServeMux(),
+		store:    config.NewMockStore(),
+		tm:       auth.NewTokenManager(cfg.SecretKey, 15*time.Minute),
+		cloudMgr: cloud.NewManager(),
 	}
 	s.routes()
 	return s
@@ -64,8 +70,16 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/route/ospf", s.auth(s.handleSetOSPF))
 	s.mux.HandleFunc("GET /api/v1/dhcp/config", s.auth(s.handleGetDHCPConfig))
 	s.mux.HandleFunc("POST /api/v1/dhcp/config", s.auth(s.handleSetDHCPConfig))
+	s.mux.HandleFunc("GET /api/v1/cloud/devices", s.auth(s.handleGetCloudDevices))
+	s.mux.HandleFunc("POST /api/v1/cloud/devices", s.auth(s.handlePostCloudDevices))
+	s.mux.HandleFunc("POST /api/v1/cloud/devices/{id}/heartbeat", s.auth(s.handlePostCloudHeartbeat))
+	s.mux.HandleFunc("GET /api/v1/wireless/aps", s.auth(s.handleGetWirelessAPs))
+	s.mux.HandleFunc("POST /api/v1/wireless/aps", s.auth(s.handlePostWirelessAPs))
+	s.mux.HandleFunc("GET /api/v1/wireless/ssids", s.auth(s.handleGetWirelessSSIDs))
+	s.mux.HandleFunc("POST /api/v1/wireless/ssids", s.auth(s.handlePostWirelessSSIDs))
 	s.mux.HandleFunc("GET /api/v1/dpi/rules", s.auth(s.handleGetDPIRules))
 	s.mux.HandleFunc("POST /api/v1/dpi/rules", s.auth(s.handleSetDPIRules))
+	s.mux.HandleFunc("GET /api/v1/dpi/classify", s.auth(s.handleDPIClassify))
 	s.mux.HandleFunc("POST /api/v1/vpn/wireguard/keypair", s.auth(s.handleWireGuardKeypair))
 	s.mux.HandleFunc("POST /api/v1/vpn/wireguard/config", s.auth(s.handleWireGuardConfig))
 }
@@ -521,6 +535,114 @@ func atoi(s string) int {
 	return n
 }
 
+func (s *Server) handleGetCloudDevices(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]interface{}{"devices": s.cloudMgr.List()})
+}
+
+func (s *Server) handlePostCloudDevices(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeJSON(w, 400, errBody(10007, "read body fail", err.Error()))
+		return
+	}
+	// Accept either the bare Device object or a {"device": {...}} wrapper.
+	var dev cloud.Device
+	if e := json.Unmarshal(body, &dev); e != nil || dev.Name == "" {
+		var wrapper struct {
+			Device cloud.Device `json:"device"`
+		}
+		if e2 := json.Unmarshal(body, &wrapper); e2 == nil {
+			dev = wrapper.Device
+		}
+	}
+	if dev.Name == "" {
+		writeJSON(w, 422, errBody(10030, "cloud register failed", "name required"))
+		return
+	}
+	if err := s.cloudMgr.Register(dev); err != nil {
+		writeJSON(w, 500, errBody(10030, "cloud register failed", err.Error()))
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{"device": dev, "devices": s.cloudMgr.List()})
+}
+
+func (s *Server) handlePostCloudHeartbeat(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		TS int64 `json:"ts"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		req.TS = time.Now().Unix()
+	}
+	if err := s.cloudMgr.Heartbeat(id, req.TS); err != nil {
+		writeJSON(w, 404, errBody(10031, "heartbeat failed", err.Error()))
+		return
+	}
+	writeJSON(w, 200, map[string]string{"id": id, "status": "ok"})
+}
+
+// wirelessSSIDs loads the persisted SSID list from the config store.
+func (s *Server) wirelessSSIDs() []wireless.SSID {
+	raw, _ := s.store.Get("wireless", "ssids")
+	if raw == "" {
+		return []wireless.SSID{}
+	}
+	var out []wireless.SSID
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return []wireless.SSID{}
+	}
+	return out
+}
+
+func (s *Server) handleGetWirelessAPs(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]interface{}{"aps": []interface{}{}})
+}
+
+func (s *Server) handlePostWirelessAPs(w http.ResponseWriter, r *http.Request) {
+	var ap wireless.AP
+	if err := json.NewDecoder(r.Body).Decode(&ap); err != nil {
+		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{"ap": ap, "message": "ap saved"})
+}
+
+func (s *Server) handleGetWirelessSSIDs(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]interface{}{"ssids": s.wirelessSSIDs()})
+}
+
+func (s *Server) handlePostWirelessSSIDs(w http.ResponseWriter, r *http.Request) {
+	var ssid wireless.SSID
+	if err := json.NewDecoder(r.Body).Decode(&ssid); err != nil {
+		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+		return
+	}
+	if ssid.Name == "" {
+		writeJSON(w, 422, errBody(10032, "ssid invalid", "name required"))
+		return
+	}
+	list := s.wirelessSSIDs()
+	replaced := false
+	for i := range list {
+		if list[i].Name == ssid.Name {
+			list[i] = ssid
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		list = append(list, ssid)
+	}
+	raw, _ := json.Marshal(list)
+	_ = s.store.Set("wireless", "ssids", string(raw))
+	writeJSON(w, 200, map[string]interface{}{
+		"ssid":    ssid,
+		"ssids":   list,
+		"hostapd": wireless.RenderHostapd(ssid),
+		"message": "ssid saved",
+	})
+}
+
 func (s *Server) Run() error {
 	return http.ListenAndServe(s.cfg.Addr, s.mux)
 }
@@ -678,5 +800,37 @@ func (s *Server) handleSetOSPF(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]interface{}{
 		"config": cfg,
 		"frr":    route.RenderFrrConf(nil, &ospf),
+	})
+}
+
+// handleDPIClassify 用 nDPI 对给定端口构造的合成包做真实 DPI 识别。
+// 演示用途：构造一个目的端口 = ?dport= 的 IPv4+TCP SYN 包喂给 nDPI，
+// 返回协议名与类别。非 cgo 构建（stub）时返回 501。
+func (s *Server) handleDPIClassify(w http.ResponseWriter, r *http.Request) {
+	dportStr := r.URL.Query().Get("dport")
+	if dportStr == "" {
+		writeJSON(w, 400, errBody(10007, "missing dport", "query param dport required"))
+		return
+	}
+	dport, err := strconv.Atoi(dportStr)
+	if err != nil || dport <= 0 || dport > 65535 {
+		writeJSON(w, 400, errBody(10007, "bad dport", "dport must be 1-65535"))
+		return
+	}
+
+	pkt := dpi.BuildTCPPacket(uint16(dport))
+	proto, cat, err := dpi.ClassifyPacket(pkt)
+	if err != nil {
+		if err == dpi.ErrUnsupported {
+			writeJSON(w, 501, errBody(10008, "nDPI unsupported", "built without cgo"))
+			return
+		}
+		writeJSON(w, 500, errBody(10000, "dpi classify failed", err.Error()))
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"dport":    dport,
+		"protocol": proto,
+		"category": cat,
 	})
 }

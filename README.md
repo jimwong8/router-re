@@ -7,7 +7,14 @@ Router-RE 是一个**现代化软路由系统**，架构理念模仿 [iKuai](htt
 - **配置管理** (`internal/config`)：UCI 风格的配置抽象接口，支持快照/回滚事务语义
 - **认证** (`internal/auth`)：JWT 会话令牌 + 口令哈希
 - **防火墙** (`internal/firewall`)：策略模型 → nftables 规则渲染
-- **REST API** (`internal/server`)：HTTP 服务端（`/api/v1/health` 等端点）
+- **NAT** (`internal/nat`)：masquerade / 端口映射 → nftables
+- **QoS** (`internal/qos`)：限速 → tc 命令
+- **多 WAN** (`internal/wan`)：加权轮询 + 策略路由
+- **动态路由** (`internal/route`)：FRR (BGP/OSPF) 配置生成
+- **VPN** (`internal/vpn`)：WireGuard 密钥/配置
+- **系统信息** (`internal/system`)：真实 /proc 读取
+- **云管理 / 无线 / DPI** (`internal/cloud`, `internal/wireless`, `internal/dpi`)
+- **REST API** (`internal/server`)：HTTP 服务端（`/api/v1/*` 端点）
 
 ## 架构
 
@@ -49,4 +56,18 @@ make test         # go test ./...
 
 ```bash
 make clean        # rm -rf bin
+```
+
+## OpenWrt 打包
+
+```bash
+cd openwrt && ./build_ipk.sh
+# 产出 openwrt/router-re_0.1.0-r1_x86_64.ipk
+```
+
+## Docker 冒烟
+
+```bash
+cd mgmtd && make build && docker build -t mgmtd:test . && \
+  docker run --rm -p 8080:8080 -e MGM_SESSION_SECRET=0123456789abcdef0123456789abcdef mgmtd:test
 ```

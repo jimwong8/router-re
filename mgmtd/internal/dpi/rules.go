@@ -8,10 +8,16 @@
 package dpi
 
 import (
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 )
+
+// ErrUnsupported 表示当前构建/运行环境不支持 nDPI（无 cgo 或非 linux）。
+// 由 ndpi_stub.go（非 cgo 环境）返回；ndpi.go（cgo 环境）正常返回 nil error。
+var ErrUnsupported = errors.New("nDPI not supported in this build (requires linux && cgo)")
 
 // Flow 描述一个待分类的网络流（供 Classifier 使用）。
 type Flow struct {
@@ -40,6 +46,20 @@ type AppRule struct {
 type Classifier interface {
 	// Classify 对一条流分类，命中则返回规则与 true，否则 false。
 	Classify(flow Flow) (AppRule, bool)
+}
+
+func BuildTCPPacket(dstPort uint16) []byte {
+	pkt := make([]byte, 40)
+	pkt[0] = 0x45
+	binary.BigEndian.PutUint16(pkt[2:4], 40)
+	binary.BigEndian.PutUint16(pkt[6:8], 0x4000)
+	pkt[8] = 64
+	pkt[9] = 6
+	binary.BigEndian.PutUint16(pkt[22:24], dstPort)
+	pkt[32] = 0x50
+	pkt[33] = 0x02
+	binary.BigEndian.PutUint16(pkt[34:36], 65535)
+	return pkt
 }
 
 // RenderNftRules 将应用规则渲染为 nftables 规则文本。
