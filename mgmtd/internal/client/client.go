@@ -57,6 +57,12 @@ func List(r execx.Runner) ([]Client, error) {
 		}
 		ip := beforeFields[0]
 
+		// Skip IPv6 link-local addresses (fe80::/10): they are the same host as
+		// its IPv4/global entry and would triple the list on a dual-stack LAN.
+		if strings.HasPrefix(strings.ToLower(ip), "fe80") {
+			continue
+		}
+
 		// STATE 是最后一个字段（如 REACHABLE、STALE、PERMANENT 等）；若没有则默认 REACHABLE
 		state := "REACHABLE"
 		afterMAC := line[lladdrIdx+len(" lladdr "):]
