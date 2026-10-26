@@ -19,10 +19,11 @@ func RenderNftables(rules []Rule) string {
             match = append(match, fmt.Sprintf("ip daddr %s", r.Dst))
         }
         if r.Proto != "" {
-            match = append(match, r.Proto)
-        }
-        if r.DPort != "" {
-            match = append(match, fmt.Sprintf("%s dport %s", r.Proto, r.DPort))
+        	if r.DPort != "" {
+        		match = append(match, fmt.Sprintf("%s dport %s", r.Proto, r.DPort))
+        	} else {
+        		match = append(match, r.Proto)
+        	}
         }
         cond := ""
         if len(match) > 0 {

@@ -20,4 +20,8 @@ func TestRenderNftables(t *testing.T) {
     if !contains(out, "tcp dport 80") || !contains(out, "accept") {
         t.Fatalf("rule not rendered correctly: %s", out)
     }
+    // 关键：DPort 已带 proto 前缀，不应出现重复 proto
+    if contains(out, "tcp tcp dport") {
+        t.Fatalf("duplicate proto in rule: %s", out)
+    }
 }

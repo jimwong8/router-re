@@ -8,8 +8,12 @@ import (
 )
 
 func main() {
+	addr := os.Getenv("MGM_ADDR")
+	if addr == "" {
+		addr = ":8080"
+	}
 	cfg := server.Config{
-		Addr:      ":8080",
+		Addr:      addr,
 		SecretKey: []byte(os.Getenv("MGM_SESSION_SECRET")),
 	}
 	if len(cfg.SecretKey) == 0 {
