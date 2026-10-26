@@ -8,52 +8,92 @@
       <el-col :span="6">
         <el-card shadow="hover" class="stat-card">
           <div class="stat-title">CPU</div>
-          <div class="stat-value">23%</div>
-          <div class="stat-sub">负载 0.23 / 4 核</div>
+          <div class="stat-value">{{ cpuModel }}</div>
+          <div class="stat-sub">{{ cpuCores }} 核</div>
         </el-card>
       </el-col>
       <el-col :span="6">
         <el-card shadow="hover" class="stat-card">
           <div class="stat-title">内存</div>
-          <div class="stat-value">1.2 GB</div>
-          <div class="stat-sub">已用 / 4 GB 总计</div>
+          <div class="stat-value">{{ memUsed }} MB</div>
+          <div class="stat-sub">可用 {{ memAvail }} MB</div>
         </el-card>
       </el-col>
       <el-col :span="6">
         <el-card shadow="hover" class="stat-card">
           <div class="stat-title">接口</div>
-          <div class="stat-value">2</div>
-          <div class="stat-sub">WAN × 1 · LAN × 1</div>
+          <div class="stat-value">{{ interfaces.length }}</div>
+          <div class="stat-sub">活跃接口</div>
         </el-card>
       </el-col>
       <el-col :span="6">
         <el-card shadow="hover" class="stat-card">
-          <div class="stat-title">连接数</div>
-          <div class="stat-value">1,024</div>
-          <div class="stat-sub">活跃会话</div>
+          <div class="stat-title">系统</div>
+          <div class="stat-value">{{ osVersion }}</div>
+          <div class="stat-sub">{{ hostname }}</div>
         </el-card>
       </el-col>
     </el-row>
 
     <el-card shadow="never" class="placeholder-card">
-      <template #header>接口列表（占位）</template>
-      <el-table :data="fakeInterfaces" border style="width: 100%">
+      <template #header>接口列表</template>
+      <el-table :data="interfaces" border style="width: 100%">
         <el-table-column prop="name" label="接口" width="140" />
-        <el-table-column prop="ip" label="IP 地址" />
-        <el-table-column prop="status" label="状态" width="100" />
-        <el-table-column prop="speed" label="速率" />
+        <el-table-column prop="ipaddr" label="IP 地址" width="180" />
+        <el-table-column prop="rx_bytes" label="接收字节" />
+        <el-table-column prop="tx_bytes" label="发送字节" />
       </el-table>
     </el-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, onMounted } from 'vue';
+import axios from 'axios';
+import { useRouter } from 'vue-router';
 
-const fakeInterfaces = ref([
-  { name: 'eth0', ip: '192.168.1.1/24', status: 'UP', speed: '1000 Mbps' },
-  { name: 'eth1', ip: 'dhcp', status: 'UP', speed: '1000 Mbps' },
-]);
+const router = useRouter();
+const token = localStorage.getItem('router_token') || '';
+const api = axios.create({
+  baseURL: '',
+  headers: { Authorization: `Bearer ${token}` },
+});
+
+const hostname = ref('-');
+const cpuModel = ref('-');
+const cpuCores = ref(0);
+const memUsed = ref(0);
+const memAvail = ref(0);
+const osVersion = ref('-');
+const interfaces = ref<Array<{ name: string; ipaddr: string; rx_bytes: number; tx_bytes: number }>>([]);
+const loadError = ref('');
+
+async function load() {
+  try {
+    const [info, ifs] = await Promise.all([
+      api.get('/api/v1/system/info'),
+      api.get('/api/v1/interfaces'),
+    ]);
+    const d = info.data;
+    hostname.value = d.hostname || '-';
+    cpuModel.value = d.cpu_model || '-';
+    cpuCores.value = d.cpu_cores || 0;
+    memAvail.value = Math.round((d.mem_avail_kb || 0) / 1024);
+    memUsed.value = Math.round(((d.mem_total_kb || 0) - (d.mem_avail_kb || 0)) / 1024);
+    osVersion.value = d.os_version || '-';
+    interfaces.value = ifs.data.interfaces || [];
+    loadError.value = '';
+  } catch (e: any) {
+    if (e?.response?.status === 401) {
+      localStorage.removeItem('router_token');
+      router.push('/login');
+      return;
+    }
+    loadError.value = e?.response?.data?.message || e.message || '加载失败';
+  }
+}
+
+onMounted(load);
 </script>
 
 <style scoped>

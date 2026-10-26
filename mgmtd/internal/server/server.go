@@ -8,7 +8,9 @@ import (
 
 	"github.com/jimwong/router-re/mgmtd/internal/auth"
 	"github.com/jimwong/router-re/mgmtd/internal/config"
+	"github.com/jimwong/router-re/mgmtd/internal/dhcp"
 	"github.com/jimwong/router-re/mgmtd/internal/firewall"
+	"github.com/jimwong/router-re/mgmtd/internal/nat"
 	"github.com/jimwong/router-re/mgmtd/internal/system"
 )
 
@@ -44,6 +46,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/interfaces", s.auth(s.handleInterfaces))
 	s.mux.HandleFunc("GET /api/v1/firewall/rules", s.auth(s.handleGetFirewallRules))
 	s.mux.HandleFunc("POST /api/v1/firewall/rules", s.auth(s.handleSetFirewallRules))
+	s.mux.HandleFunc("GET /api/v1/nat/rules", s.auth(s.handleGetNATRules))
+	s.mux.HandleFunc("POST /api/v1/nat/rules", s.auth(s.handleSetNATRules))
+	s.mux.HandleFunc("GET /api/v1/dhcp/config", s.auth(s.handleGetDHCPConfig))
+	s.mux.HandleFunc("POST /api/v1/dhcp/config", s.auth(s.handleSetDHCPConfig))
 }
 
 // handleLogin authenticates a fixed dev account and issues a JWT session token.
@@ -82,6 +88,63 @@ func (s *Server) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleInterfaces(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]interface{}{
 		"interfaces": system.GetInterfaces(),
+	})
+}
+
+// dhcpConfigFromStore 从 config.Store 读出一个 DHCPConfig。
+func (s *Server) dhcpConfigFromStore() dhcp.DHCPConfig {
+	get := func(opt string) string {
+		v, _ := s.store.Get("dhcp", opt)
+		return v
+	}
+	cfg := dhcp.DHCPConfig{
+		Interface:  get("interface"),
+		RangeStart: get("range_start"),
+		RangeEnd:   get("range_end"),
+		Netmask:    get("netmask"),
+		Gateway:    get("gateway"),
+		LeaseTime:  get("lease_time"),
+	}
+	// DNS 存为逗号分隔（store 只存字符串）
+	if dns, _ := s.store.Get("dhcp", "dns"); dns != "" {
+		cfg.DNS = strings.Split(dns, ",")
+	}
+	return cfg
+}
+
+// handleGetDHCPConfig returns the stored DHCP config plus its rendered dnsmasq text.
+func (s *Server) handleGetDHCPConfig(w http.ResponseWriter, r *http.Request) {
+	cfg := s.dhcpConfigFromStore()
+	writeJSON(w, 200, map[string]interface{}{
+		"config":  cfg,
+		"dnsmasq": dhcp.RenderDnsmasq(cfg),
+	})
+}
+
+// handleSetDHCPConfig stores the submitted DHCP config and returns rendered dnsmasq text.
+func (s *Server) handleSetDHCPConfig(w http.ResponseWriter, r *http.Request) {
+	var cfg dhcp.DHCPConfig
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+		return
+	}
+	set := func(opt, val string) {
+		if val != "" {
+			s.store.Set("dhcp", opt, val)
+		}
+	}
+	set("interface", cfg.Interface)
+	set("range_start", cfg.RangeStart)
+	set("range_end", cfg.RangeEnd)
+	set("netmask", cfg.Netmask)
+	set("gateway", cfg.Gateway)
+	set("lease_time", cfg.LeaseTime)
+	if len(cfg.DNS) > 0 {
+		s.store.Set("dhcp", "dns", strings.Join(cfg.DNS, ","))
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"config":  cfg,
+		"dnsmasq": dhcp.RenderDnsmasq(cfg),
 	})
 }
 
@@ -141,6 +204,57 @@ func (s *Server) handleSetFirewallRules(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, 200, map[string]interface{}{
 		"rules": req.Rules,
 		"nft":   firewall.RenderNftables(req.Rules),
+	})
+}
+
+// handleGetNATRules returns the persisted NAT rules and their rendered nftables.
+func (s *Server) handleGetNATRules(w http.ResponseWriter, r *http.Request) {
+	var rules []nat.NATRule
+	for i := 0; ; i++ {
+		typ, err := s.store.Get("nat", itoa(i)+".type")
+		if err != nil || typ == "" {
+			break
+		}
+		iface, _ := s.store.Get("nat", itoa(i)+".interface")
+		proto, _ := s.store.Get("nat", itoa(i)+".proto")
+		srcport, _ := s.store.Get("nat", itoa(i)+".srcport")
+		dstaddr, _ := s.store.Get("nat", itoa(i)+".dstaddr")
+		dstport, _ := s.store.Get("nat", itoa(i)+".dstport")
+		toport, _ := s.store.Get("nat", itoa(i)+".toport")
+		rules = append(rules, nat.NATRule{
+			Type: typ, Interface: iface, Proto: proto,
+			SrcPort: srcport, DstAddr: dstaddr, DstPort: dstport, ToPort: toport,
+		})
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"rules": rules,
+		"nft":   nat.RenderNftables(rules),
+	})
+}
+
+// handleSetNATRules persists the submitted NAT rules in the store and returns
+// the rendered nftables text.
+func (s *Server) handleSetNATRules(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Rules []nat.NATRule `json:"rules"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+		return
+	}
+	for i, rule := range req.Rules {
+		key := itoa(i)
+		s.store.Set("nat", key+".type", rule.Type)
+		s.store.Set("nat", key+".interface", rule.Interface)
+		s.store.Set("nat", key+".proto", rule.Proto)
+		s.store.Set("nat", key+".srcport", rule.SrcPort)
+		s.store.Set("nat", key+".dstaddr", rule.DstAddr)
+		s.store.Set("nat", key+".dstport", rule.DstPort)
+		s.store.Set("nat", key+".toport", rule.ToPort)
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"rules": req.Rules,
+		"nft":   nat.RenderNftables(req.Rules),
 	})
 }
 
