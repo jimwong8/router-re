@@ -1,6 +1,7 @@
 package qos
 
 import (
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -42,18 +43,29 @@ func TestRenderNftLimit(t *testing.T) {
 }
 
 func TestApplyWithRealNft(t *testing.T) {
-	rules := []RateLimit{
-		{Interface: "lo", RateMbps: 10, BurstKB: 128, Direction: "egress", Priority: 0},
+	// This test mutates the live kernel traffic-control state. It MUST be
+	// opt-in: running it by default once left a 10Mbit tbf on `lo` behind and
+	// throttled the whole host's loopback traffic (local HTTP responses went
+	// from 3ms to 20s).
+	if os.Getenv("MGM_ALLOW_REAL_APPLY") != "1" {
+		t.Skip("destructive: set MGM_ALLOW_REAL_APPLY=1 to run real tc/netlink apply")
 	}
-	// Check if /usr/sbin/nft exists
-	if _, err := exec.LookPath("/usr/sbin/nft"); err != nil {
-		if _, err2 := exec.LookPath("nft"); err2 != nil {
-			t.Skip("nft binary not found; skipping real validation")
-		}
+	// Never touch `lo`. Use a throwaway dummy interface and always clean up.
+	const dev = "mgmtest0"
+	setup := exec.Command("/usr/sbin/ip", "link", "add", dev, "type", "dummy")
+	if err := setup.Run(); err != nil {
+		t.Skipf("cannot create dummy interface %s (need root): %v", dev, err)
+	}
+	defer exec.Command("/usr/sbin/tc", "qdisc", "del", "dev", dev, "root").Run()
+	defer exec.Command("/usr/sbin/ip", "link", "del", dev).Run()
+	if err := exec.Command("/usr/sbin/ip", "link", "set", dev, "up").Run(); err != nil {
+		t.Skipf("cannot bring up %s: %v", dev, err)
+	}
+
+	rules := []RateLimit{
+		{Interface: dev, RateMbps: 10, BurstKB: 128, Direction: "egress", Priority: 0},
 	}
 	err := Apply(rules)
-	// Apply requires root/netlink; without root it returns a permission error.
-	// We only fail on syntax errors; permission errors are acceptable here.
 	if err != nil {
 		msg := err.Error()
 		if !strings.Contains(msg, "permission") &&

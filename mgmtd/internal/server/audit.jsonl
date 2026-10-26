@@ -44,3 +44,15 @@
 {"ts":1793056718,"actor":"admin","action":"vpn.wireguard.config","target":"/api/v1/vpn/wireguard/config","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
 {"ts":1793056718,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
 {"ts":1793056718,"actor":"admin","action":"dpi.rules.set","target":"/api/v1/dpi/rules","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793056871,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793056871,"actor":"-","action":"auth.login","target":"admin","result":"fail","detail":"invalid credentials","remote_ip":"192.0.2.1"}
+{"ts":1793056871,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793056871,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793056871,"actor":"admin","action":"dhcp.config.set","target":"lan","result":"fail","detail":"apply: write dnsmasq config /etc/dnsmasq.d/router-re.conf: open /etc/dnsmasq.d/router-re.conf: no such file or directory","remote_ip":"192.0.2.1"}
+{"ts":1793056871,"actor":"admin","action":"dhcp.config.set","target":"/api/v1/dhcp/config","result":"fail","detail":"HTTP 500","remote_ip":"192.0.2.1"}
+{"ts":1793056871,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793056871,"actor":"admin","action":"vpn.wireguard.keypair","target":"/api/v1/vpn/wireguard/keypair","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793056871,"actor":"admin","action":"vpn.wireguard.config.set","target":"wg0","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793056871,"actor":"admin","action":"vpn.wireguard.config","target":"/api/v1/vpn/wireguard/config","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793056871,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793056871,"actor":"admin","action":"dpi.rules.set","target":"/api/v1/dpi/rules","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
