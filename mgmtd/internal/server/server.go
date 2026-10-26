@@ -9,6 +9,7 @@ import (
 	"github.com/jimwong/router-re/mgmtd/internal/auth"
 	"github.com/jimwong/router-re/mgmtd/internal/config"
 	"github.com/jimwong/router-re/mgmtd/internal/firewall"
+	"github.com/jimwong/router-re/mgmtd/internal/system"
 )
 
 type Config struct {
@@ -68,25 +69,20 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]string{"token": tok})
 }
 
-// handleSystemInfo returns basic router identity.
+// handleSystemInfo returns real host system information.
 func (s *Server) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
-	hostname, _ := s.store.Get("system", "hostname")
-	if hostname == "" {
-		hostname = "router"
+	info := system.GetInfo()
+	if info.Hostname == "" {
+		info.Hostname = "router"
 	}
-	writeJSON(w, 200, map[string]interface{}{
-		"hostname": hostname,
-		"version":  "0.1.0",
-	})
+	writeJSON(w, 200, info)
 }
 
-// handleInterfaces returns a mock list of network interfaces from the store.
+// handleInterfaces returns the real list of network interfaces.
 func (s *Server) handleInterfaces(w http.ResponseWriter, r *http.Request) {
-	ifaces := []map[string]string{
-		{"name": "lan", "ipaddr": "192.168.1.1"},
-		{"name": "wan", "ipaddr": "dynamic"},
-	}
-	writeJSON(w, 200, map[string]interface{}{"interfaces": ifaces})
+	writeJSON(w, 200, map[string]interface{}{
+		"interfaces": system.GetInterfaces(),
+	})
 }
 
 // handleGetFirewallRules returns the current firewall rules as rendered nftables.
@@ -112,7 +108,8 @@ func (s *Server) handleGetFirewallRules(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// handleSetFirewallRules stores the submitted rules in the store.
+// handleSetFirewallRules stores the submitted rules in the store and applies
+// them to the live nftables via Validate + Apply.
 func (s *Server) handleSetFirewallRules(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Rules []firewall.Rule `json:"rules"`
@@ -121,6 +118,17 @@ func (s *Server) handleSetFirewallRules(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
 		return
 	}
+	// Validate syntax before storing
+	if err := firewall.Validate(req.Rules); err != nil {
+		writeJSON(w, 422, errBody(10010, "firewall validation failed", err.Error()))
+		return
+	}
+	// Apply to live nftables
+	if err := firewall.Apply(req.Rules); err != nil {
+		writeJSON(w, 500, errBody(10011, "firewall apply failed", err.Error()))
+		return
+	}
+	// Persist to store
 	for i, rule := range req.Rules {
 		key := itoa(i)
 		s.store.Set("firewall", key+".chain", rule.Chain)
