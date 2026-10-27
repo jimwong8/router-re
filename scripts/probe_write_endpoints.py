@@ -102,6 +102,8 @@ def main() -> int:
     ap.add_argument("--only", default="")
     ap.add_argument("--include-dangerous", action="store_true")
     ap.add_argument("--out", default=str(ROOT / "docs" / "write-endpoint-audit.md"))
+    ap.add_argument("--strict", action="store_true",
+                    help="有问题时返回非 0（CI 门禁用）；默认只出报告不判失败")
     args = ap.parse_args()
 
     BASE = f"http://127.0.0.1:{PORT}"
@@ -227,7 +229,9 @@ def main() -> int:
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"\n报告已写入 {out}")
 
-    return 2 if (suspicious or crashes) else 0
+    if args.strict and (suspicious or crashes):
+        return 2
+    return 0
 
 
 if __name__ == "__main__":

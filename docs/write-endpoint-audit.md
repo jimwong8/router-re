@@ -1,6 +1,6 @@
 # 写端点空输入审计
 
-生成于 2026-10-28 02:29:50｜共测 112 个写端点｜跳过高危 25 个
+生成于 2026-10-28 02:42:17｜共测 112 个写端点｜跳过高危 25 个
 
 方法：对每个 POST/DELETE 发送空 JSON `{}`。空 body 被校验拒绝 = 零副作用；
 同时对空 body 返回 2xx 的端点可疑（空操作当成功，或未解码请求体）。
@@ -41,7 +41,7 @@
 | 200 | POST | `/api/v1/notify/smtp/preview` | `From: 
 To: 
 Subject: 
-Date: Wed, 28 Oct 2026 02:29:46 +08` |
+Date: Wed, 28 Oct 2026 02:42:14 +08` |
 | 200 | POST | `/api/v1/routing/rules` | `{"count":0,"rules":null}
 ` |
 | 200 | POST | `/api/v1/alerts/test` | `{"count":0,"matched":[]}
