@@ -33,6 +33,22 @@ var validActions = map[string]bool{"drop": true, "log": true, "ratelimit": true}
 
 // Validate 校验配置。
 func Validate(c Config) error {
+	// 白名单放在最前：0.0.0.0/0 等于关闭全部防护，这是最严重的一类输入，
+	// 不能被 port_scan_window 之类的次要校验抢先遮住错误信息。
+	for _, w := range c.Whitelist {
+		w = strings.TrimSpace(w)
+		if w == "" {
+			continue
+		}
+		if w == "0.0.0.0/0" {
+			return fmt.Errorf("whitelist must not contain 0.0.0.0/0: that disables the entire protection")
+		}
+		if net.ParseIP(w) == nil {
+			if _, _, err := net.ParseCIDR(w); err != nil {
+				return fmt.Errorf("whitelist entry %q is not a valid IP or CIDR", w)
+			}
+		}
+	}
 	for name, th := range map[string]Threshold{
 		"syn_flood": c.SynFlood, "icmp_flood": c.IcmpFlood,
 		"udp_flood": c.UdpFlood, "ack_flood": c.AckFlood,
@@ -52,20 +68,6 @@ func Validate(c Config) error {
 	}
 	if c.BlockSeconds < 0 || c.BlockSeconds > 86400 {
 		return fmt.Errorf("block_seconds must be 0-86400, got %d", c.BlockSeconds)
-	}
-	for _, w := range c.Whitelist {
-		w = strings.TrimSpace(w)
-		if w == "" {
-			continue
-		}
-		if w == "0.0.0.0/0" {
-			return fmt.Errorf("whitelist must not contain 0.0.0.0/0: that disables the entire protection")
-		}
-		if net.ParseIP(w) == nil {
-			if _, _, err := net.ParseCIDR(w); err != nil {
-				return fmt.Errorf("whitelist entry %q is not a valid IP or CIDR", w)
-			}
-		}
 	}
 	return nil
 }

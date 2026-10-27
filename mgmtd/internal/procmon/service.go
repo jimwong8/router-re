@@ -9,9 +9,9 @@ import (
 // Unit 描述一个 systemd 单元的状态。
 type Unit struct {
 	Name        string `json:"name"`
-	Load        string `json:"load"` // loaded / not-found / masked
+	Load        string `json:"load"`   // loaded / not-found / masked
 	Active      string `json:"active"` // active / inactive / failed
-	Sub         string `json:"sub"`   // running / dead / exited
+	Sub         string `json:"sub"`    // running / dead / exited
 	Description string `json:"description"`
 }
 
@@ -34,8 +34,9 @@ var unitNameRe = regexp.MustCompile(`^[a-zA-Z0-9@._-]+$`)
 // ParseUnits 解析 `systemctl list-units --all --no-pager --plain --no-legend` 输出。
 //
 // 典型行：
-//   ssh.service loaded active running OpenSSH server daemon
-//   nginx.service loaded inactive dead A high performance web server
+//
+//	ssh.service loaded active running OpenSSH server daemon
+//	nginx.service loaded inactive dead A high performance web server
 func ParseUnits(out string) []Unit {
 	var units []Unit
 	for _, line := range strings.Split(out, "\n") {

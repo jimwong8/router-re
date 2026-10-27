@@ -309,6 +309,18 @@ func (s *Server) routes() {
 	// P8-4 应用限速与连接配额（仅本区块）
 	// P13：Web 管理端口、主机标识、多 WAN 健康检查
 	s.mux.HandleFunc("GET /api/v1/webadmin", s.auth(s.handleGetWebAdmin))
+	// ---- P15: 进程与服务 / DDoS / 时间段策略 / 网络工具 ----
+	s.mux.HandleFunc("GET /api/v1/system/services", s.auth(s.handleListServices))
+	s.mux.HandleFunc("POST /api/v1/system/services/action", s.auth(s.handleServiceAction))
+	s.mux.HandleFunc("GET /api/v1/system/processes", s.auth(s.handleListProcesses))
+	s.mux.HandleFunc("POST /api/v1/system/processes/kill", s.auth(s.handleKillProcess))
+	s.mux.HandleFunc("GET /api/v1/security/ddos", s.auth(s.handleGetDDoS))
+	s.mux.HandleFunc("POST /api/v1/security/ddos", s.auth(s.handleSetDDoS))
+	s.mux.HandleFunc("GET /api/v1/policy/timeschedule", s.auth(s.handleGetTimeSchedule))
+	s.mux.HandleFunc("POST /api/v1/policy/timeschedule", s.auth(s.handleSetTimeSchedule))
+	s.mux.HandleFunc("POST /api/v1/diagnostics/ping", s.auth(s.handlePing))
+	s.mux.HandleFunc("POST /api/v1/diagnostics/traceroute", s.auth(s.handleTraceroute))
+	s.mux.HandleFunc("POST /api/v1/diagnostics/portprobe", s.auth(s.handlePortProbe))
 	s.mux.HandleFunc("POST /api/v1/webadmin", s.auth(s.auditWrap("webadmin.set", s.handleSetWebAdmin)))
 	s.mux.HandleFunc("GET /api/v1/identity", s.auth(s.handleGetIdentity))
 	s.mux.HandleFunc("POST /api/v1/identity", s.auth(s.auditWrap("identity.set", s.handleSetIdentity)))
