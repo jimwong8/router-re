@@ -96,6 +96,99 @@ run_case("idle", None, False, True, "idle/None")
 print("\n=== 场景 6: blocked + 70%，重置后仍 blocked -> 不派活（防二次堆积）===")
 run_case("blocked", 70.0, True, False, "blocked/70%/仍blocked", state_after_reset="blocked")
 
+def run_custom(tasks, pane_state_val="idle", ctx=20.0, panes=("w1:pX",)):
+    """跑一轮 main()，返回 (是否派发, 最终 tasks, 日志)。"""
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        d.QUEUE = td / "tasks.jsonl"
+        d.STATE = td / ".state.json"
+        d.LOG = td / "dispatch.log"
+        d.QUEUE.write_text(
+            "\n".join(json.dumps(x, ensure_ascii=False) for x in tasks) + "\n",
+            encoding="utf-8")
+        d.PANES = list(panes)
+        d.MAX_PER_ROUND = 4
+
+        calls = {"dispatch": 0}
+        d.pane_state = lambda p: pane_state_val
+        d.context_pct = lambda p: ctx
+        d.reset_context = lambda p: True
+
+        def fake_dispatch(p, prompt):
+            calls["dispatch"] += 1
+            return True
+        d.dispatch = fake_dispatch
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            d.main()
+        final = [json.loads(l) for l in d.QUEUE.read_text(encoding="utf-8").splitlines() if l.strip()]
+        return calls["dispatch"] > 0, final, buf.getvalue()
+
+
+# ---------- 新增门禁：依赖 / 退避 / 硬预算 ----------
+
+print("\n=== 场景 7: 依赖未完成 -> 不派 ===")
+_, final, log7 = run_custom([
+    {"id": "api", "status": "pending", "prompt": "do api"},
+    {"id": "ui", "status": "pending", "prompt": "do ui", "depends_on": ["api"]},
+])
+hmm = [t for t in final if t["id"] == "ui"][0]
+check("依赖未完成时 ui 仍未派发", hmm["status"] == "pending", f"实际 {hmm['status']}")
+check("api 被派发（无依赖）", [t for t in final if t['id']=='api'][0]["status"] == "dispatched")
+
+print("\n=== 场景 8: 依赖已完成 -> 可派 ===")
+_, final, _ = run_custom([
+    {"id": "api", "status": "done", "prompt": "do api"},
+    {"id": "ui", "status": "pending", "prompt": "do ui", "depends_on": ["api"]},
+])
+ui = [t for t in final if t["id"] == "ui"][0]
+# 一轮只派一条，api 已 done 所以 ui 应该被派到
+check("依赖完成后 ui 被派发", ui["status"] == "dispatched", f"实际 {ui['status']}")
+
+print("\n=== 场景 9: 退避窗口未到 -> 不派 ===")
+import time as _t
+_, final, _ = run_custom([
+    {"id": "r1", "status": "pending", "prompt": "retry me", "retry_after": _t.time() + 300},
+])
+check("退避期内不派发", [t for t in final if t['id']=='r1'][0]["status"] == "pending")
+
+print("\n=== 场景 10: 退避窗口已过 -> 可派 ===")
+_, final, _ = run_custom([
+    {"id": "r2", "status": "pending", "prompt": "retry me", "retry_after": _t.time() - 10},
+])
+check("退避结束后派发", [t for t in final if t['id']=='r2'][0]["status"] == "dispatched")
+
+print("\n=== 场景 11: 超过硬预算 -> 退回 pending + 设 retry_after ===")
+_, final, log11 = run_custom([
+    {"id": "slow", "status": "dispatched", "pane": "w1:pX", "prompt": "slow work",
+     "dispatched_at": _t.time() - 25 * 60, "expect": ["nope_missing_file_xyz"]},
+])
+slow = [t for t in final if t["id"] == "slow"][0]
+check("超预算后状态回到 pending", slow["status"] == "pending", f"实际 {slow['status']}")
+check("设置了 retry_after", "retry_after" in slow, f"{slow.get('retry_after')}")
+check("retried 计数为 1", slow.get("retried") == 1, f"{slow.get('retried')}")
+check("日志有 RETRY", "RETRY" in log11, log11.strip()[-90:] if log11.strip() else "空")
+
+print("\n=== 场景 12: 重试耗尽 -> failed ===")
+_, final, _ = run_custom([
+    {"id": "dead", "status": "dispatched", "pane": "w1:pX", "prompt": "dead work", "retried": 3,
+     "dispatched_at": _t.time() - 25 * 60, "expect": ["nope_missing_file_xyz"]},
+])
+dead = [t for t in final if t["id"] == "dead"][0]
+check("重试耗尽标记 failed", dead["status"] == "failed", f"实际 {dead['status']}")
+
+print("\n=== 场景 13: 任务级 max_wall_minutes 放宽预算 ===")
+# 必须用 busy：pane 空闲 4 分钟会先触发 RELEASE（工人自认做完了），
+# 那是另一条判据，会掩盖这里要验证的 wall_limit。
+_, final, _ = run_custom([
+    {"id": "long", "status": "dispatched", "pane": "w1:pX", "prompt": "long work", "max_wall_minutes": 60,
+     "dispatched_at": _t.time() - 25 * 60, "expect": ["nope_missing_file_xyz"]},
+], pane_state_val="busy")
+longt = [t for t in final if t["id"] == "long"][0]
+check("声明 60 分钟预算的任务不被 20 分钟默认值杀掉",
+      longt["status"] == "dispatched", f"实际 {longt['status']}")
+
 print("\n=== 汇总 ===")
 if FAILED:
     print(f"  {len(FAILED)} 项失败: {FAILED}")

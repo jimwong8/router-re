@@ -137,6 +137,23 @@ CONTEXT_PATTERNS = [
     re.compile(r"·\s*~?(\d+(?:\.\d+)?)%\s*·"),
 ]
 
+# ---------- 硬预算与退避重试 ----------
+#
+# 硬预算：任务必须在声明的时间内结束，不管它自认为做没做完。
+# MAST FM-1.5「不知道终止条件」是 41.8% 系统设计类失败的一项；真实事故里
+# 两个 agent 互相对话 11 天烧掉 $47,000，就是因为没有外部强制的终止条件。
+# 本机实测最长的两个任务跑了 27 和 49 分钟（都靠"迟到产出"才捞回来），
+# 说明长尾任务必须有上限。
+MAX_WALL_MINUTES = float(os.environ.get("MAX_WALL_MINUTES", "20"))
+
+# 退避重试：失败后不能立刻回队列。
+# 实测网关容量：并发 4 -> 83%，并发 8 -> 17%（错误变成 rpm exhausted）。
+# 上游 RPM 是滑动窗口桶，失败后立即重试会继续打满桶、把整个池子拖死。
+# 必须让桶先回血。
+RETRY_BACKOFF_BASE = float(os.environ.get("RETRY_BACKOFF_BASE", "30"))
+RETRY_BACKOFF_MAX = float(os.environ.get("RETRY_BACKOFF_MAX", "240"))
+MAX_RETRIES = int(os.environ.get("MAX_RETRIES", "3"))
+
 
 def now() -> float:
     return time.time()
@@ -275,6 +292,43 @@ def reset_context(pane: str) -> bool:
     return ok
 
 
+def deps_satisfied(task: dict, tasks: list[dict]) -> bool:
+    """依赖未全部 done 的任务不许派发。
+
+    为什么要这个：没有依赖排序时，UI 任务会和它依赖的 API 契约并行启动，
+    UI 只能照着猜的字段写，等契约改了再返工——这比串行更慢（Agentastic
+    七阶段的第一阶段就是「任务图而不是提示列表」）。
+    """
+    ids_done = {t.get("id") for t in tasks if t.get("status") == "done"}
+    for dep in task.get("depends_on") or []:
+        if dep not in ids_done:
+            return False
+    return True
+
+
+def retry_ready(task: dict, t: float) -> bool:
+    """退避窗口未到的任务本轮不派。
+
+    未设置 retry_after 视为就绪 —— 首次派发不该被退避逻辑误挡。
+    """
+    ra = task.get("retry_after")
+    if ra is None:
+        return True
+    return t >= float(ra)
+
+
+def wall_limit_minutes(task: dict) -> float:
+    """任务级硬预算，缺省回落到全局 STALE_MINUTES。
+
+    任务可以自己声明 max_wall_minutes（长任务放宽），但永远有上限。
+    """
+    v = task.get("max_wall_minutes")
+    try:
+        return float(v) if v is not None else STALE_MINUTES
+    except (TypeError, ValueError):
+        return STALE_MINUTES
+
+
 def dispatch(pane: str, prompt: str) -> bool:
     """派活。返回是否成功。命令本身失败必须如实返回，不能假装派了。"""
     try:
@@ -372,32 +426,53 @@ def main() -> int:
             log(f"DONE  {task['id']}  (pane={task.get('pane')}, 耗时 {int((t - task.get('dispatched_at', t)) / 60)} 分钟)")
             state.pop(task.get("pane", ""), None)
 
-    # 1.5) 迟到产出：已判 failed 但文件后来才出现 -> 翻回 done
+    # 1.5) 迟到产出：非 done 状态但文件后来才出现 -> 翻回 done
     #
     # 实测：p20-api-doc 派发 23 分钟无产出被判 failed，但工人在那之后才把
     # docs/api-reference.md 写出来（314 行 / 276 端点）。不翻回来的话，
     # 实际已完成的活会一直挂在失败列表里，人看到 failed 就会重复派同一个
     # 任务，白烧一遍 token。
+    #
+    # 覆盖 pending 也要检查：加了退避重试后，超时任务会先退回 pending，
+    # 若产出在这段窗口里出现，同样不该再派一次。
     for task in tasks:
-        if task.get("status") != "failed":
+        st = task.get("status")
+        if st == "done":
             continue
         if produced(task):
             task["status"] = "done"
             task["done_at"] = t
             task["late"] = True
-            log(f"DONE(LATE) {task['id']}  超时判失败后产出才出现，翻回 done")
+            log(f"DONE(LATE) {task['id']}  原状态 {st}，产出后来才出现，翻回 done")
             state.pop(task.get("pane", ""), None)
 
-    # 2) 超时无产出 -> failed，交回队列让人看
+    # 2) 超时无产出 -> 退避重试；重试耗尽才 failed
+    #
+    # 硬预算来自任务自己的 max_wall_minutes，缺省用 STALE_MINUTES。
+    # 失败后不立刻回队列：上游 RPM 是滑动窗口桶，立即重派会继续打满桶，
+    # 把整个池子拖死（实测并发 8 时成功率从 83% 掉到 17%）。
     for task in tasks:
         if task.get("status") != "dispatched":
             continue
+        limit = wall_limit_minutes(task)
         age_min = (t - task.get("dispatched_at", t)) / 60
-        if age_min > STALE_MINUTES and not produced(task):
-            task["status"] = "failed"
-            task["failed_at"] = t
-            task["fail_reason"] = f"派发 {int(age_min)} 分钟仍无产出文件"
-            log(f"FAIL  {task['id']}  {task['fail_reason']} (pane={task.get('pane')})")
+        if age_min > limit and not produced(task):
+            n = int(task.get("retried") or 0) + 1
+            task["retried"] = n
+            if n <= MAX_RETRIES:
+                delay = min(RETRY_BACKOFF_BASE * (2 ** (n - 1)), RETRY_BACKOFF_MAX)
+                task["status"] = "pending"
+                task["retry_after"] = t + delay
+                task["fail_reason"] = f"派发 {int(age_min)} 分钟无产出（硬预算 {int(limit)} 分钟）"
+                log(f"RETRY {task['id']}  第 {n}/{MAX_RETRIES} 次，{int(delay)}s 后重试"
+                    f"（{task['fail_reason']}）")
+            else:
+                task["status"] = "failed"
+                task["failed_at"] = t
+                task["fail_reason"] = (
+                    f"派发 {int(age_min)} 分钟无产出，重试 {MAX_RETRIES} 次仍失败"
+                )
+                log(f"FAIL  {task['id']}  {task['fail_reason']} (pane={task.get('pane')})")
             state.pop(task.get("pane", ""), None)
 
     # 2.5) 工人已经空闲但产出不达标 -> 释放 pane，任务标 failed
@@ -415,13 +490,22 @@ def main() -> int:
             continue
         if pane_state(pane) != "idle":
             continue
-        task["status"] = "failed"
-        task["failed_at"] = t
+        n = int(task.get("retried") or 0) + 1
+        task["retried"] = n
         task["fail_reason"] = (
             f"工人已空闲但产出不达标（{int(age_min)} 分钟）: "
             f"没通过 {'/'.join(task.get('min_lines') or {}) or '文件存在性'} 检查"
         )
-        log(f"RELEASE {task['id']}  工人 {pane} 已空闲但产出不达标，释放 pane")
+        if n <= MAX_RETRIES:
+            delay = min(RETRY_BACKOFF_BASE * (2 ** (n - 1)), RETRY_BACKOFF_MAX)
+            task["status"] = "pending"
+            task["retry_after"] = t + delay
+            log(f"RELEASE {task['id']}  工人 {pane} 已空闲但产出不达标，释放 pane；"
+                f"{int(delay)}s 后第 {n}/{MAX_RETRIES} 次重试")
+        else:
+            task["status"] = "failed"
+            task["failed_at"] = t
+            log(f"RELEASE {task['id']}  工人 {pane} 已空闲但产出不达标，重试耗尽 -> failed")
         state.pop(pane, None)
 
     # 3) 哪些 pane 手上还有活（dispatched 未结算）
@@ -463,10 +547,15 @@ def main() -> int:
             if pane_state(pane) != "idle":
                 continue
 
-        # 优先取指定了本 pane 的，其次取没指定 prefer 的
+        # 优先取指定了本 pane 的，其次取没指定 prefer 的。
+        # 三道门禁：有 prompt（空 prompt 派出去等于让工人猜）、依赖已完成、退避窗口已过。
         cand = None
         for task in tasks:
             if task.get("status") != "pending":
+                continue
+            if not (task.get("prompt") or "").strip():
+                continue
+            if not retry_ready(task, t) or not deps_satisfied(task, tasks):
                 continue
             prefer = task.get("prefer")
             if prefer == pane:
@@ -474,13 +563,18 @@ def main() -> int:
                 break
         if cand is None:
             for task in tasks:
-                if task.get("status") == "pending" and not task.get("prefer"):
-                    cand = task
-                    break
+                if task.get("status") != "pending" or task.get("prefer"):
+                    continue
+                if not (task.get("prompt") or "").strip():
+                    continue
+                if not retry_ready(task, t) or not deps_satisfied(task, tasks):
+                    continue
+                cand = task
+                break
         if cand is None:
             break  # 队列里没有能派的活了
 
-        if dispatch(pane, cand["prompt"]):
+        if dispatch(pane, cand.get("prompt") or ""):
             cand["status"] = "dispatched"
             cand["pane"] = pane
             cand["dispatched_at"] = t
