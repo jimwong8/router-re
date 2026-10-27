@@ -14,6 +14,7 @@
           <router-link to="/interfaces" style="color:#eee; text-decoration:none;">接口配置</router-link>
           <router-link to="/static-route" style="color:#eee; text-decoration:none;">静态路由</router-link>
           <router-link to="/audit" style="color:#eee; text-decoration:none;">审计日志</router-link>
+          <router-link to="/ips" style="color:#eee; text-decoration:none;">入侵防御</router-link>
           <router-link to="/users" style="color:#eee; text-decoration:none;">用户管理</router-link>
           <router-link to="/radius" style="color:#eee; text-decoration:none;">RADIUS</router-link>
           <router-link to="/pppoe" style="color:#eee; text-decoration:none;">PPPoE服务</router-link>
@@ -26,6 +27,7 @@
           <router-link to="/network" style="color:#eee; text-decoration:none;">端口映射/策略路由</router-link>
           <router-link to="/security" style="color:#eee; text-decoration:none;">安全管控</router-link>
           <router-link to="/dhcp" style="color:#eee; text-decoration:none;">DHCP 服务</router-link>
+          <router-link to="/nac" style="color:#eee; text-decoration:none;">接入控制</router-link>
           <router-link to="/snmp" style="color:#eee; text-decoration:none;">SNMP</router-link>
           <router-link to="/services" style="color:#eee; text-decoration:none;">高级服务</router-link>
           <router-link to="/ipv6" style="color:#eee; text-decoration:none;">IPv6</router-link>
@@ -34,6 +36,8 @@
           <router-link to="/accounts" style="color:#eee; text-decoration:none;">认证计费</router-link>
           <router-link to="/dns" style="color:#eee; text-decoration:none;">DNS 服务</router-link>
           <router-link to="/upnp" style="color:#eee; text-decoration:none;">UPnP/端口自动映射</router-link>
+          <router-link to="/l7" style="color:#eee; text-decoration:none;">应用层过滤</router-link>
+          <router-link to="/threat" style="color:#eee; text-decoration:none;">威胁情报</router-link>
         </nav>
       </div>
     </el-header>

@@ -27,9 +27,13 @@ import Users from '../views/Users.vue';
 import Dns from '../views/Dns.vue';
 import Dhcp from '../views/Dhcp.vue';
 import Diag from '../views/Diag.vue';
+import Nac from '../views/Nac.vue';
 import Remote from '../views/Remote.vue';
 import Snmp from '../views/Snmp.vue';
 import Upnp from '../views/Upnp.vue';
+import L7 from '../views/L7.vue';
+import Threat from '../views/Threat.vue';
+import Ips from '../views/Ips.vue';
 
 const routes = [
   { path: '/', component: Dashboard, meta: { requiresAuth: true } },
@@ -57,11 +61,15 @@ const routes = [
   { path: '/accounts', component: Accounts, meta: { requiresAuth: true } },
   { path: '/users', component: Users, meta: { requiresAuth: true } },
   { path: '/dns', component: Dns, meta: { requiresAuth: true } },
-  { path: '/dhcp', component: Dhcp, meta: { requiresAuth: true } },
+  { path: "/dhcp", component: Dhcp, meta: { requiresAuth: true } },
+  { path: "/nac", component: Nac, meta: { requiresAuth: true } },
   { path: '/diag', component: Diag, meta: { requiresAuth: true } },
   { path: '/remote', component: Remote, meta: { requiresAuth: true } },
   { path: '/snmp', component: Snmp, meta: { requiresAuth: true } },
   { path: '/upnp', component: Upnp, meta: { requiresAuth: true } },
+  { path: '/l7', component: L7, meta: { requiresAuth: true } },
+  { path: '/threat', component: Threat, meta: { requiresAuth: true } },
+  { path: '/ips', component: Ips, meta: { requiresAuth: true } },
   { path: '/login', component: Login },
   { path: '/:pathMatch(.*)*', redirect: '/login' },
 ];

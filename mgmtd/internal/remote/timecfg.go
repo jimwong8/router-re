@@ -155,9 +155,13 @@ func listTimezones() ([]string, error) {
 			return nil // 单点错误不终止整体遍历
 		}
 		if info.IsDir() {
-			name := filepath.Base(path)
-			if name == "posix" || name == "right" || name == "zoneinfo" || name == "." {
-				return filepath.SkipDir
+			// 只跳过 posix/right 两个特殊子目录。注意：不能按 base name == "zoneinfo"
+			// 来判断——根目录本身也叫 zoneinfo，会整棵被跳掉返回空。
+			if path != root {
+				name := filepath.Base(path)
+				if name == "posix" || name == "right" {
+					return filepath.SkipDir
+				}
 			}
 			return nil
 		}

@@ -105,6 +105,33 @@ func TestTimeStatusParse(t *testing.T) {
 	}
 }
 
+func TestListTimezonesRootNotSkipped(t *testing.T) {
+	dir := t.TempDir()
+	// 构建 <area>/<zone> 结构，根目录 base name 与 "../zoneinfo" 不同名。
+	if err := os.MkdirAll(filepath.Join(dir, "Asia"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Asia", "Shanghai"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldRoot := zoneinfoRoot
+	zoneinfoRoot = dir
+	defer func() { zoneinfoRoot = oldRoot }()
+	zones, err := listTimezones()
+	if err != nil {
+		t.Fatalf("listTimezones: %v", err)
+	}
+	found := false
+	for _, z := range zones {
+		if z == "Asia/Shanghai" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("应包含 Asia/Shanghai, got %v", zones)
+	}
+}
+
 func TestListTimezonesTruncation(t *testing.T) {
 	// 模拟一个含 >600 时区文件的目录来验证截断提示。
 	dir := t.TempDir()

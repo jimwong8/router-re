@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,6 +32,7 @@ import (
 	"github.com/jimwong/router-re/mgmtd/internal/execx"
 	"github.com/jimwong/router-re/mgmtd/internal/firewall"
 	"github.com/jimwong/router-re/mgmtd/internal/iface"
+	"github.com/jimwong/router-re/mgmtd/internal/ips"
 	"github.com/jimwong/router-re/mgmtd/internal/l2"
 	"github.com/jimwong/router-re/mgmtd/internal/logcenter"
 	"github.com/jimwong/router-re/mgmtd/internal/nat"
@@ -44,6 +46,7 @@ import (
 	"github.com/jimwong/router-re/mgmtd/internal/snmp"
 	"github.com/jimwong/router-re/mgmtd/internal/stats"
 	"github.com/jimwong/router-re/mgmtd/internal/system"
+	"github.com/jimwong/router-re/mgmtd/internal/threat"
 	"github.com/jimwong/router-re/mgmtd/internal/traffic"
 	"github.com/jimwong/router-re/mgmtd/internal/vpn"
 	"github.com/jimwong/router-re/mgmtd/internal/wan"
@@ -86,6 +89,8 @@ type Server struct {
 	rbacMgr *rbac.Manager
 	// trafficState 保存上一次 /proc/net/dev 采样，用于算实时速率（P4-4 流量统计）。
 	trafficState trafficSampler
+	// threatList 是内存封禁表（P7-4 威胁情报与 IP 封禁）。
+	threatList *threat.List
 }
 
 // trafficSampler 保存上一次接口计数器采样，供 /api/v1/traffic/rates 计算差值。
@@ -139,6 +144,7 @@ func New(cfg Config) *Server {
 		accountMgr:   account.NewManager(),
 		billingPlans: billing.DefaultPlans(),
 		rbacMgr:      rbac.NewManager(cfg.AdminUser, cfg.AdminPassword),
+		threatList:   threat.NewList(),
 	}
 	// Start the background stats collector: sample every 30s, run until
 	// process exit. Sleep inside the goroutine so it never blocks requests.
@@ -182,6 +188,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/upnp/mappings", s.auth(s.auditWrap("upnp.mappings.add", s.handleAddUPNPMapping)))
 	s.mux.HandleFunc("DELETE /api/v1/upnp/mappings", s.auth(s.auditWrap("upnp.mappings.del", s.handleDeleteUPNPMapping)))
 	s.mux.HandleFunc("GET /api/v1/upnp/status", s.auth(s.handleGetUPNPStatus))
+	s.mux.HandleFunc("GET /api/v1/l7/rules", s.auth(s.handleGetL7Rules))
+	s.mux.HandleFunc("POST /api/v1/l7/rules", s.auth(s.auditWrap("l7.rules.set", s.handleSetL7Rules)))
+	s.mux.HandleFunc("POST /api/v1/l7/test", s.auth(s.auditWrap("l7.test", s.handleL7Test)))
+	s.mux.HandleFunc("GET /api/v1/l7/stats", s.auth(s.handleGetL7Stats))
+	s.mux.HandleFunc("POST /api/v1/l7/apply", s.auth(s.auditWrap("l7.apply", s.handleL7Apply)))
 	s.mux.HandleFunc("POST /api/v1/ddns/config", s.auth(s.auditWrap("ddns.config.set", s.handleSetDDNSConfig)))
 	s.mux.HandleFunc("POST /api/v1/ddns/update", s.auth(s.auditWrap("ddns.update", s.handleDDNSUpdate)))
 	s.mux.HandleFunc("GET /api/v1/ddns/ip", s.auth(s.handleGETDDNSIP))
@@ -278,6 +289,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/wol/targets", s.auth(s.handleGetWOLTargets))
 	s.mux.HandleFunc("POST /api/v1/wol/targets", s.auth(s.auditWrap("wol.targets.set", s.handleSetWOLTargets)))
 	s.mux.HandleFunc("POST /api/v1/wol/wake", s.auth(s.auditWrap("wol.wake", s.handleWOLWake)))
+	// P7-4 威胁情报与 IP 封禁（仅本区块）
+	s.mux.HandleFunc("GET /api/v1/threat/list", s.auth(s.handleThreatList))
+	s.mux.HandleFunc("POST /api/v1/threat/block", s.auth(s.auditWrap("threat.block", s.handleThreatBlock)))
+	s.mux.HandleFunc("DELETE /api/v1/threat/block", s.auth(s.auditWrap("threat.unblock", s.handleThreatUnblock)))
+	s.mux.HandleFunc("POST /api/v1/threat/apply", s.auth(s.auditWrap("threat.apply", s.handleThreatApply)))
+	s.mux.HandleFunc("POST /api/v1/threat/import", s.auth(s.auditWrap("threat.import", s.handleThreatImport)))
+	s.mux.HandleFunc("POST /api/v1/threat/fetch", s.auth(s.auditWrap("threat.fetch", s.handleThreatFetch)))
+	s.mux.HandleFunc("GET /api/v1/threat/stats", s.auth(s.handleThreatStats))
 	// P3-1 安全管控（仅本区块）
 	s.mux.HandleFunc("GET /api/v1/acl/rules", s.auth(s.handleGetACLRules))
 	s.mux.HandleFunc("POST /api/v1/acl/rules", s.auth(s.auditWrap("acl.rules.set", s.handleSetACLRules)))
@@ -298,6 +317,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/diag/traceroute", s.auth(s.auditWrap("diag.traceroute", s.handleDiagTraceroute)))
 	s.mux.HandleFunc("POST /api/v1/diag/dns", s.auth(s.auditWrap("diag.dns", s.handleDiagDNS)))
 	s.mux.HandleFunc("GET /api/v1/diag/interfaces", s.auth(s.handleDiagInterfaces))
+	s.mux.HandleFunc("GET /api/v1/nac/config", s.auth(s.handleGetNACConfig))
+	s.mux.HandleFunc("POST /api/v1/nac/config", s.auth(s.auditWrap("nac.config.set", s.handleSetNACConfig)))
+	s.mux.HandleFunc("GET /api/v1/nac/neighbors", s.auth(s.handleGetNACNeighbors))
+	s.mux.HandleFunc("GET /api/v1/nac/connlimits", s.auth(s.handleGetNACConnlimits))
+	s.mux.HandleFunc("POST /api/v1/nac/connlimits", s.auth(s.auditWrap("nac.connlimits.set", s.handleSetNACConnlimits)))
+	s.mux.HandleFunc("POST /api/v1/nac/connlimits/apply", s.auth(s.auditWrap("nac.connlimits.apply", s.handleApplyNACConnlimits)))
+	s.mux.HandleFunc("GET /api/v1/nac/top-connections", s.auth(s.handleGetNACTopConnections))
 	s.mux.HandleFunc("GET /api/v1/ddns/status", s.auth(s.handleGetDDNSStatus))
 	// P4-2 认证计费（账号 + 套餐，仅本区块）
 	s.mux.HandleFunc("GET /api/v1/accounts", s.auth(s.handleGetAccounts))
@@ -314,6 +340,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/users", s.auth(s.auditWrap("user.create", s.handleCreateUser)))
 	s.mux.HandleFunc("DELETE /api/v1/users/{username}", s.auth(s.auditWrap("user.delete", s.handleDeleteUser)))
 	s.mux.HandleFunc("POST /api/v1/users/{username}/password", s.auth(s.auditWrap("user.password", s.handleSetUserPassword)))
+	// P7-1 IPS 入侵防御（仅本区块）
+	s.mux.HandleFunc("GET /api/v1/ips/rules", s.auth(s.handleGetIPSRules))
+	s.mux.HandleFunc("POST /api/v1/ips/rules", s.auth(s.auditWrap("ips.rules.set", s.handleSetIPSRules)))
+	s.mux.HandleFunc("GET /api/v1/ips/stats", s.auth(s.handleGetIPSStats))
+	s.mux.HandleFunc("POST /api/v1/ips/test", s.auth(s.auditWrap("ips.rule.test", s.handleTestIPSRule)))
+	s.mux.HandleFunc("GET /api/v1/ips/blocklist", s.auth(s.handleGetIPSBlocklist))
+	s.mux.HandleFunc("POST /api/v1/ips/blocklist", s.auth(s.auditWrap("ips.blocklist.set", s.handleSetIPSBlocklist)))
 }
 
 // handleLogin authenticates a fixed dev account and issues a JWT session token.
@@ -3238,4 +3271,243 @@ func (s *Server) handlePostSNMPQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, out)
+}
+
+// --- P7-1 IPS 入侵防御 (仅本区块) ---
+
+const (
+	ipsRulesStoreKey     = "ips/rules"
+	ipsBlocklistStoreKey = "ips/blocklist"
+)
+
+// ipsRulesFromStore 读取 store 的 Suricata 文本 → 解析为规则切片。
+func (s *Server) ipsRulesFromStore() ([]ips.Rule, error) {
+	raw, _ := s.store.Get("ips", ipsRulesStoreKey)
+	if raw == "" {
+		return nil, nil
+	}
+	rules, err := ips.ParseRulesFile(raw)
+	return rules, err
+}
+
+// nextIPSSid 返回当前规则集中最大 SID + 1（用于前端表单 sid=0 自动分配）。
+func (s *Server) nextIPSSid() int {
+	rules, _ := s.ipsRulesFromStore()
+	max := 0
+	for _, r := range rules {
+		if r.SID > max {
+			max = r.SID
+		}
+	}
+	return max + 1
+}
+
+// handleGetIPSRules 返回当前已载入的规则。
+func (s *Server) handleGetIPSRules(w http.ResponseWriter, r *http.Request) {
+	rules, err := s.ipsRulesFromStore()
+	if err != nil {
+		writeJSON(w, 500, errBody(10030, "rule parse error", err.Error()))
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{"rules": rules, "count": len(rules)})
+}
+
+// handleSetIPSRules 写入规则。body 可为 {rules:[...]} 或 {text:"suricata text"}。
+func (s *Server) handleSetIPSRules(w http.ResponseWriter, r *http.Request) {
+	var payload struct {
+		Rules []ips.Rule `json:"rules"`
+		Text  string     `json:"text"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeJSON(w, 422, errBody(10031, "invalid body", err.Error()))
+		return
+	}
+	var rules []ips.Rule
+	var parseErrs string
+	if payload.Text != "" {
+		var agg error
+		rules, agg = ips.ParseRulesFile(payload.Text)
+		if agg != nil {
+			parseErrs = agg.Error()
+		}
+		if len(rules) == 0 {
+			writeJSON(w, 422, errBody(10032, "no valid rules parsed", parseErrs))
+			return
+		}
+		// 写回 store 为规则文本。
+		var sb strings.Builder
+		for _, rr := range rules {
+			sb.WriteString(ruleToSuricata(rr))
+			sb.WriteString("\n")
+		}
+		s.store.Set("ips", ipsRulesStoreKey, sb.String())
+	} else if len(payload.Rules) > 0 {
+		var sb strings.Builder
+		for i, rr := range payload.Rules {
+			// 前端表单可能发 sid=0，自动分配下一个 SID（max+1）。
+			if rr.SID == 0 {
+				rr.SID = s.nextIPSSid()
+				payload.Rules[i] = rr
+			}
+			if err := rr.Validate(); err != nil {
+				writeJSON(w, 422, errBody(10033, "invalid rule", fmt.Sprintf("sid=%d: %s", rr.SID, err)))
+				return
+			}
+			sb.WriteString(ruleToSuricata(rr))
+			sb.WriteString("\n")
+		}
+		rules = payload.Rules
+		s.store.Set("ips", ipsRulesStoreKey, sb.String())
+	} else {
+		writeJSON(w, 422, errBody(10034, "invalid body", "rules or text required"))
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"applied":  true,
+		"rules":    rules,
+		"count":    len(rules),
+		"failures": parseErrs,
+	})
+}
+
+// ruleToSuricata 把 Rule 还原为 Suricata 行（用于 store 持久化）。
+func ruleToSuricata(r ips.Rule) string {
+	return fmt.Sprintf(`%s %s any any -> any %s (msg:"%s"; content:"%s"; nocase; sid:%d; priority:%d;)`,
+		r.Action, r.Proto, r.DstPort, r.Msg, payloadForSuricata(r), r.SID, r.Severity)
+}
+
+func payloadForSuricata(r ips.Rule) string {
+	if r.PayloadHex != "" {
+		return formatHexContent(r.PayloadHex)
+	}
+	return r.PayloadAscii
+}
+
+// formatHexContent 把字节串转成 Suricata |xx xx| 形式。
+func formatHexContent(s string) string {
+	var b strings.Builder
+	b.WriteByte('|')
+	for i := 0; i < len(s); i++ {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		fmt.Fprintf(&b, "%02x", s[i])
+	}
+	b.WriteByte('|')
+	return b.String()
+}
+
+// handleGetIPSStats 返回引擎统计。
+func (s *Server) handleGetIPSStats(w http.ResponseWriter, r *http.Request) {
+	rules, err := s.ipsRulesFromStore()
+	if err != nil {
+		writeJSON(w, 500, errBody(10035, "rule parse error", err.Error()))
+		return
+	}
+	e := ips.NewEngine()
+	e.Load(rules)
+	writeJSON(w, 200, map[string]interface{}{"stats": e.Stats(), "total": len(rules)})
+}
+
+// handlePostIPSQuery 测试单条规则是否命中。
+func (s *Server) handleTestIPSRule(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RuleSID int    `json:"rule_sid"`
+		Proto   string `json:"proto"`
+		DstPort int    `json:"dst_port"`
+		Payload string `json:"payload"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10036, "invalid body", err.Error()))
+		return
+	}
+	rules, err := s.ipsRulesFromStore()
+	if err != nil {
+		writeJSON(w, 500, errBody(10037, "rule parse error", err.Error()))
+		return
+	}
+	e := ips.NewEngine()
+	e.Load(rules)
+	hits := e.Match(req.Proto, req.DstPort, []byte(req.Payload))
+	var matched bool
+	var matchedRule *ips.Rule
+	for i := range hits {
+		if hits[i].SID == req.RuleSID {
+			matched = true
+			matchedRule = &hits[i]
+			break
+		}
+	}
+	resp := map[string]interface{}{"matched": matched, "rule": matchedRule, "hits": hits}
+	writeJSON(w, 200, resp)
+}
+
+// handleGetIPSBlocklist 返回封禁 IP 列表。
+func (s *Server) handleGetIPSBlocklist(w http.ResponseWriter, r *http.Request) {
+	raw, _ := s.store.Get("ips", ipsBlocklistStoreKey)
+	var ipsList []string
+	if raw != "" {
+		for _, ip := range strings.Split(raw, ",") {
+			ip = strings.TrimSpace(ip)
+			if ip != "" {
+				ipsList = append(ipsList, ip)
+			}
+		}
+	}
+	writeJSON(w, 200, map[string]interface{}{"ips": ipsList, "count": len(ipsList)})
+}
+
+// handleSetIPSBlocklist 下发封禁列表到 nft set blackhole。
+func (s *Server) handleSetIPSBlocklist(w http.ResponseWriter, r *http.Request) {
+	if s.aclApplier == nil {
+		writeJSON(w, 500, errBody(10038, "exec runner not initialized", ""))
+		return
+	}
+	var req struct {
+		IPs []string `json:"ips"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10039, "invalid body", err.Error()))
+		return
+	}
+	blocked := make(map[string]bool, len(req.IPs))
+	for _, ip := range req.IPs {
+		ip = strings.TrimSpace(ip)
+		if ip == "" {
+			continue
+		}
+		if net.ParseIP(ip) == nil {
+			writeJSON(w, 422, errBody(10040, "invalid ip", ip))
+			return
+		}
+		blocked[ip] = true
+	}
+	// 持久化（逗号分隔）。
+	list := make([]string, 0, len(blocked))
+	for ip := range blocked {
+		list = append(list, ip)
+	}
+	sort.Strings(list)
+	s.store.Set("ips", ipsBlocklistStoreKey, strings.Join(list, ","))
+
+	// 下发到 nft：删表（忽略不存在）→ nft -f -
+	script := ips.RenderNft(blocked)
+	// 参照 internal/acl 模式：先删除旧表（忽略不存在），再 nft -f - 应用。
+	s.aclApplier.Run("nft", "delete", "table", "inet", "router_ips")
+	applyOut, applyErr := s.aclApplier.RunWithInput(script, "nft", "-f", "-")
+	_ = applyOut
+	detail := ""
+	applied := applyErr == nil
+	if applyErr != nil {
+		detail = applyErr.Error()
+	}
+	// 回读确认 blackhole set。
+	listOut, _ := s.aclApplier.Run("nft", []string{"list", "table", "inet", "router_ips"}...)
+	writeJSON(w, 200, map[string]interface{}{
+		"applied":   applied,
+		"blocklist": list,
+		"nft":       script,
+		"detail":    detail,
+		"listing":   listOut,
+	})
 }
