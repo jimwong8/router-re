@@ -39,9 +39,28 @@
 5. **tc 根 qdisc 只有 del+add 幂等**：`tc qdisc replace` 在 root 已是 htb 时报 `Change operation not supported by specified qdisc`；`tc qdisc add` 在已存在时报 `Exclusivity flag on, cannot modify`。必须 `del`（失败忽略）再 `add`。
 6. **裸命令名在守护进程里找不到**：systemd/procd 启动的进程 PATH 常不含 `/usr/sbin`，`exec: "tc": executable file not found in $PATH`。已在 `execx.DefaultRunner` 内统一解析绝对路径（不影响 FakeRunner 测试断言）。
 
+### P2 补齐记录（2026-10-27）
+
+| P2 项 | 状态 | 真实验证证据 |
+|---|---|---|
+| 系统监控历史 | ✅ | `/stats/current` 返回真实数据（CPU 12.3% / 内存 24960-63886MB / load 5.83 / conntrack 405 / RX 137GB / TX 162GB）；环形缓冲 720 点（6 小时 @30s）；前端 5 条 SVG 趋势图 |
+| 日志中心 | ✅ | `/logs` 走 journalctl -o json 返回真实 unit/优先级/消息；`/logs/sources` 返回 30 个真实 unit（加 60s 缓存后 1.01s → 0.0019s） |
+| 连接跟踪 | ✅ | `/conntrack` 返回真实条目（`tcp 2409:8a5c:...:55566 → 2606:b740:...:80 [ESTABLISHED]`，与 `/proc/net/nf_conntrack` 第一组逐字一致） |
+| VLAN 真实下发 | ✅ | `ip -d link show vtest0.100` → `vlan protocol 802.1Q id 100` + `inet 10.123.100.1/24`；回读 vid=100 parent=vtest0 addr=10.123.100.1/24 |
+| 桥接真实下发 | ✅ | `ip -d link show btest0` → `stp_state 1`；成员 `vtest0.100` 的 `master btest0`；回读 members=['vtest0.100'] stp=True addr=10.123.200.1/24 |
+
+### P2 发现的解析 bug（都是"下发对、回读错"）
+
+7. **conntrack 每行有两组 `src/dst`**（请求方向 + 回复方向），map 覆盖式赋值会取到回复方向，连接方向整体反向。必须只取第一组。
+8. **`ip -j link show` 不含 IPv4**：`addr_info` 只出现在 `ip -j addr show`，否则 Address 恒为空。
+9. **VLAN 的 VID 在 `linkinfo.info_data.id`**，不是顶层 `vlan_info.id`（写错静默得 0，界面显示"VID 0"但实际是 100）。
+10. **`ip -j link show type bridge` 必须加 `-d`**，否则 linkinfo 为空、stp_state 取不到；成员不能解析 `bridge link show` 文本（每行开头是序号，会得到 `["6059:"]`），要从各 link 的 `master` 字段反查。
+
 ### 当前闭环模块（8 个）
 
-防火墙、QoS（接口级）、接口配置、静态路由、DHCP、多WAN 策略路由、per-IP 限速、DPI 标记 —— 全部「下发到内核 + 可回读验证」。
+防火墙、QoS（接口级）、接口配置、静态路由、DHCP、多WAN 策略路由、per-IP 限速、DPI 标记、Web Portal、PPPoE、VLAN、桥接 —— 12 个模块全部「下发到内核 + 可回读验证」。
+
+另有三类只读能力：系统监控历史、journal 日志查询、连接跟踪。
 
 ---
 
@@ -49,14 +68,14 @@
 
 | # | iKuai 模块 | iKuai 功能项 | router-re 已覆盖 | 覆盖度 | router-re 实现深度 |
 |---|---|---|---|---|---|
-| 1 | 系统监控 | 18 | 1 | **6%** | 真实 /proc 读取 |
-| 2 | 网络配置 | 58 | 3 | **8%** | 渲染为主（NAT/DHCP） |
+| 1 | 系统监控 | 18 | 11 | **61%** | 真实 /proc 采集 + 6小时环形历史 + 5 条趋势图 + 接口流量明细 |
+| 2 | 网络配置 | 58 | 8 | **14%** | 接口/静态路由/NAT/DHCP 真实生效 + VLAN/桥接真实下发 |
 | 3 | 安全管控 | 39 | 1.5 | **6%** | ACL 真实 nft 下发 ✅ |
-| 4 | 流控分流 | 21 | 2 | **19%** | QoS 真实 tc ✅ / 多WAN 仅渲染 |
-| 5 | 认证计费 | 28 | 0.5 | **3%** | 仅 WireGuard 渲染 |
+| 4 | 流控分流 | 21 | 6 | **29%** | QoS + per-IP 限速真实 tc / DPI 标记入内核 / 多WAN 策略路由真实下发 |
+| 5 | 认证计费 | 28 | 6 | **21%** | Web Portal(nft authorized set) + PPPoE 服务端(真实启动) + RADIUS 客户端(RFC2865)；缺计费账务 |
 | 6 | 无线服务 | 21 | 0.5 | **2%** | **AC 管理已取消**；仅保留本机 AP 的 SSID/hostapd 配置 |
 | 7 | 高级服务 | 32 | 1 | **6%** | 仅配置快照 |
-| 8 | 日志中心 | 11 | 0 | **0%** | 无 |
+| 8 | 日志中心 | 11 | 5 | **45%** | journal 查询(unit/grep/时间) + 连接跟踪表(协议/方向/状态) |
 | 9 | 设备设置 | 20 | 1.5 | **15%** | 单管理员 + 快照 |
 | | **合计** | **248** | **~12** | **~16%** | 2 模块闭环，8 模块渲染 |
 
