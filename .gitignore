@@ -7,3 +7,6 @@ web/dist/
 
 # 监控运行时产物
 logs/
+
+# 运行时审计日志（每次跑 E2E 都会增长，不该进仓库）
+audit.jsonl
