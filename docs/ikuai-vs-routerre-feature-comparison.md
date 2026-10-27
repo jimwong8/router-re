@@ -192,6 +192,33 @@
 33. **bond 的 `lacp_rate` 在非 802.3ad 模式会静默失效** —— 已在校验层拒绝。
 34. **hostname 纯数字会被当成 IP** —— 已拒绝。
 
+
+### P15：进程与服务管理、DDoS 防护、时间段策略、网络工具（4 包 / 11 端点）
+
+| 能力 | 真实验证 |
+|---|---|
+| 服务管理 | 522 个 systemd 单元（真实 `systemctl list-units`），启停后回读 `is-active` |
+| 进程管理 | 827 个进程（真实 `ps -eo`），TopN 按 CPU 降序 |
+| DDoS 防护 | SYN/ICMP/UDP/ACK Flood + 端口扫描检测，nft 渲染干净 |
+| 时间段策略 | 按星期/时段生效，`active_now` 按 Asia/Shanghai 计算 |
+| Ping | `ping -c 3 127.0.0.1` → 3 包往返，2.05s，"可达，0% 丢包" |
+| 端口探测 | 9090=open / 59999=closed_or_filtered（用 `nc -z` 退出码，比解析文本可靠） |
+
+**12 项安全边界全部 422 且给出精确原因**（不是笼统的"参数错误"）：
+
+- `stop sshd` 无 confirm → "carries remote management; stopping it locks you out of this router"
+- 单元名 `sshd; rm -rf /` → "contains invalid characters (only [a-zA-Z0-9@._-] allowed)"
+- `mask` / `disable` / `kill` 动作 → "only start/stop/restart/reload"
+- 杀 PID 1 → "pid 1 is init; killing it shuts down the system"
+- `0.0.0.0/0` 白名单 → "disables the entire protection"
+- 跨零点规则 → "cross-midnight windows must be split into two rules"
+- `ping` 目标 `-c 100` → "不能以 - 开头（可能是参数注入）"
+
+**本轮修的 2 个真 bug**：
+
+37. **网络工具命令名丢失** —— `PingArgs()` 返回的是**参数**（`[-c, 3, 1.1.1.1]`），不含命令名；handler 却把 `argv[0]` 当命令名，于是系统去执行 `-c`，任何目标都返回「-c 未安装（不是网络不通）」。这个错误信息看起来像环境问题，功能却完全不可用。修法：`runNetTool` 显式接收 bin 与 args，并加回归测试断言参数列表里不含命令名。
+38. **DDoS 错误信息被次要字段遮住** —— `whitelist` 校验排在 `port_scan_window` 之后，提交 `0.0.0.0/0` 时先报的是"窗口参数不对"，改完再提交才发现真正的问题是整网白名单（等于关闭防护）。修法：把"关闭全部防护"这类致命配置的校验提到最前。
+
 ### P14 收尾：OpenWrt 真机验证（2026-10-27）
 
 用 `CGO_ENABLED=0` 静态编译的 8.98MB 二进制在 **OpenWrt 24.10.8 (x86/64)** 容器里跑通：
@@ -222,13 +249,13 @@
 
 | # | iKuai 模块 | iKuai 功能项 | router-re 已覆盖 | 覆盖度 | router-re 实现深度 |
 |---|---|---|---|---|---|
-| 1 | 系统监控 | 18 | 14 | **78%** | 真实 /proc 采集 + 6小时环形历史 + 5 趋势图 + 实时速率(计数器回绕归零) + TopN(含进程维度) + **多WAN健康检查状态机**(失败3次下线/恢复2次上线) + **诊断报告(8章节)** |
+| 1 | 系统监控 | 18 | 16 | **89%** | 真实 /proc 采集 + 6小时环形历史 + 5 趋势图 + 实时速率(计数器回绕归零) + TopN(含进程维度) + **多WAN健康检查状态机**(失败3次下线/恢复2次上线) + **诊断报告(8章节)** + **进程管理(ps解析+TopN)** + **服务管理(522单元+命令注入防护+关键服务保护)** |
 | 2 | 网络配置 | 58 | 42 | **72%** | 接口/静态路由/NAT/VLAN/桥接/端口映射/策略路由 + DHCP服务端 + DNS代理 + **IPv6 ND/PD** + **端口镜像** + **PPPoE多拨** |
-| 3 | 安全管控 | 39 | 30 | **77%** | ACL + ARP防护 + URL过滤 + 攻击防护 + **IPS规则引擎(Suricata解析)** + **L7应用过滤(通配符/allow覆盖block)** + **MAC黑白名单** + **连接数限制** + **IP/CIDR威胁情报** |
-| 4 | 流控分流 | 21 | 15 | **71%** | QoS + per-IP 限速 + **DPI流跟踪(TLS SNI/HTTP Host/DNS)** + **HTB带宽保证** + **多线负载均衡(平滑加权轮询)** + **应用限速配额** |
+| 3 | 安全管控 | 39 | 31 | **79%** | ACL + ARP防护 + URL过滤 + 攻击防护 + **IPS规则引擎(Suricata解析)** + **L7应用过滤(通配符/allow覆盖block)** + **MAC黑白名单** + **DDoS防护(SYN/ICMP/UDP/ACK Flood+端口扫描+白名单+0.0.0.0/0硬拒)** + **连接数限制** + **IP/CIDR威胁情报** |
+| 4 | 流控分流 | 21 | 16 | **76%** | QoS + per-IP 限速 + **DPI流跟踪(TLS SNI/HTTP Host/DNS)** + **HTB带宽保证** + **多线负载均衡(平滑加权轮询)** + **应用限速配额** + **时间段策略(按星期/时段+时区正确+跨零点拒绝)** |
 | 5 | 认证计费 | 28 | 20 | **71%** | Portal + PPPoE 服务端 + RADIUS + 账号管理 + 套餐计费 + **按套餐出账(超量费3倍封顶)** + **在线用户(如实标注acct未启用)** + **按IP断开(绝不杀进程)** |
 | 6 | 无线服务 | 21 | 0.5 | **2%** | （AC 管理按要求取消，仅保留本机 SSID/hostapd 渲染） | **AC 管理已取消**；仅保留本机 AP 的 SSID/hostapd 配置 |
-| 7 | 高级服务 | 32 | 22 | **69%** | DDNS + NTP + SNMP(v2c/v3) + UPnP/IGD + 网络诊断 + WOL + **邮件告警/RFC5322头注入防护** + **SNMP Trap** + **端口触发** + **ALG** + **mDNS中继** + **诊断报告导出** + **固件升级** |
+| 7 | 高级服务 | 32 | 23 | **72%** | DDNS + NTP + SNMP(v2c/v3) + UPnP/IGD + 网络诊断 + WOL + **邮件告警/RFC5322头注入防护** + **SNMP Trap** + **端口触发** + **ALG** + **mDNS中继** + **诊断报告导出** + **固件升级** |
 | 8 | 日志中心 | 11 | 10 | **91%** | journal 查询 + 连接跟踪表 + **告警规则(关键字/正则+cooldown抑制)** + **日志轮转(logrotate+语法校验)** + **远程syslog(udp@/tcp@@)** + **导出(JSONL/CSV转义)** |
 | 9 | 设备设置 | 20 | 17 | **85%** | 多管理员 RBAC(pbkdf2+三角色+最后admin防自锁) + 系统时间/时区(回读校验) + 远程访问开关 + **配置导出/差异/恢复(checksum+危险项)** + **固件升级(板型校验+备份提醒)** + **Web端口(自锁保护)** + **证书管理(自签SAN)** + **主机标识** |
 | | **合计** | **248** | **~12** | **~16%** | 2 模块闭环，8 模块渲染 |
