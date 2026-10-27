@@ -126,7 +126,9 @@ def main() -> int:
     LOG.parent.mkdir(parents=True, exist_ok=True)
     state = load_state()
     idle_since: dict[str, float] = {k: float(v) for k, v in state.get("idle_since", {}).items()}
-    last_remind: dict[str, float] = {k: float(v) for k, v in state.get("last_remind", {}).items()}
+    # last_remind 故意不继承：进程重启后宁可重复提醒一次，也不能因为上次
+    # 运行留下的记录而永久漏提醒（提醒是目的，重复只是噪音）。
+    last_remind: dict[str, float] = {}
     blocked_seen: set[str] = set(state.get("blocked_seen", []))
 
     # 启动基线：已在空闲的窗口从现在开始计时，避免刚启动就弹通知
