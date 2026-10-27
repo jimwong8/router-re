@@ -19,17 +19,21 @@ import (
 	"github.com/jimwong/router-re/mgmtd/internal/client"
 	"github.com/jimwong/router-re/mgmtd/internal/cloud"
 	"github.com/jimwong/router-re/mgmtd/internal/config"
+	"github.com/jimwong/router-re/mgmtd/internal/conntrack"
 	"github.com/jimwong/router-re/mgmtd/internal/dhcp"
 	"github.com/jimwong/router-re/mgmtd/internal/dpi"
 	"github.com/jimwong/router-re/mgmtd/internal/execx"
 	"github.com/jimwong/router-re/mgmtd/internal/firewall"
 	"github.com/jimwong/router-re/mgmtd/internal/iface"
+	"github.com/jimwong/router-re/mgmtd/internal/l2"
+	"github.com/jimwong/router-re/mgmtd/internal/logcenter"
 	"github.com/jimwong/router-re/mgmtd/internal/nat"
 	"github.com/jimwong/router-re/mgmtd/internal/portal"
 	"github.com/jimwong/router-re/mgmtd/internal/pppoe"
 	"github.com/jimwong/router-re/mgmtd/internal/qos"
 	"github.com/jimwong/router-re/mgmtd/internal/radius"
 	"github.com/jimwong/router-re/mgmtd/internal/route"
+	"github.com/jimwong/router-re/mgmtd/internal/stats"
 	"github.com/jimwong/router-re/mgmtd/internal/system"
 	"github.com/jimwong/router-re/mgmtd/internal/vpn"
 	"github.com/jimwong/router-re/mgmtd/internal/wan"
@@ -60,6 +64,8 @@ type Server struct {
 	loginLimiter *loginLimiter
 	// portalMgr tracks authorized MAC/IP pairs for the captive portal.
 	portalMgr *portal.Manager
+	// statsRing holds the rolling history of host samples.
+	statsRing *stats.Ring
 }
 
 func New(cfg Config) *Server {
@@ -80,7 +86,11 @@ func New(cfg Config) *Server {
 		dhcpApplier:  dhcp.NewApplier(),
 		loginLimiter: newLoginLimiter(5, time.Minute),
 		portalMgr:    portal.NewManager(),
+		statsRing:    stats.NewRing(720),
 	}
+	// Start the background stats collector: sample every 30s, run until
+	// process exit. Sleep inside the goroutine so it never blocks requests.
+	go s.collectStatsLoop()
 	// Audit logger: MGM_AUDIT_LOG env or default; degrade to ./audit.jsonl
 	// if the default dir cannot be created (never fail startup for logging).
 	auditPath := os.Getenv("MGM_AUDIT_LOG")
@@ -130,6 +140,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/dpi/marks", s.auth(s.handleGetDPIMarks))
 	s.mux.HandleFunc("POST /api/v1/dpi/marks", s.auth(s.auditWrap("dpi.marks.set", s.handleSetDPIMarks)))
 	s.mux.HandleFunc("GET /api/v1/dpi/classify", s.auth(s.handleDPIClassify))
+	s.mux.HandleFunc("GET /api/v1/vlan", s.auth(s.handleGetVLAN))
+	s.mux.HandleFunc("POST /api/v1/vlan", s.auth(s.auditWrap("vlan.apply", s.handleSetVLAN)))
+	s.mux.HandleFunc("DELETE /api/v1/vlan/{name}", s.auth(s.auditWrap("vlan.delete", s.handleDeleteVLAN)))
+	s.mux.HandleFunc("GET /api/v1/bridge", s.auth(s.handleGetBridge))
+	s.mux.HandleFunc("POST /api/v1/bridge", s.auth(s.auditWrap("bridge.apply", s.handleSetBridge)))
+	s.mux.HandleFunc("DELETE /api/v1/bridge/{name}", s.auth(s.auditWrap("bridge.delete", s.handleDeleteBridge)))
 	s.mux.HandleFunc("GET /api/v1/radius/config", s.auth(s.handleGetRadiusConfig))
 	s.mux.HandleFunc("POST /api/v1/radius/config", s.auth(s.auditWrap("radius.config.set", s.handleSetRadiusConfig)))
 	s.mux.HandleFunc("POST /api/v1/radius/test", s.auth(s.handleRadiusTest))
@@ -153,6 +169,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/pppoe/users", s.auth(s.auditWrap("pppoe.users.set", s.handleSetPPPoEUsers)))
 	s.mux.HandleFunc("GET /api/v1/pppoe/sessions", s.auth(s.handleGetPPPoESessions))
 	s.mux.HandleFunc("GET /api/v1/pppoe/status", s.auth(s.handleGetPPPoEStatus))
+	// P2-2 日志中心 + 连接跟踪（仅本区块）
+	s.mux.HandleFunc("GET /api/v1/conntrack", s.auth(s.handleGetConntrack))
+	s.mux.HandleFunc("GET /api/v1/logs", s.auth(s.handleGetLogs))
+	s.mux.HandleFunc("GET /api/v1/logs/sources", s.auth(s.handleGetLogSources))
+	// P2-1 系统监控历史与趋势（仅本区块）
+	s.mux.HandleFunc("GET /api/v1/stats/current", s.auth(s.handleStatsCurrent))
+	s.mux.HandleFunc("GET /api/v1/stats/history", s.auth(s.handleStatsHistory))
+	s.mux.HandleFunc("GET /api/v1/stats/interfaces", s.auth(s.handleStatsInterfaces))
 }
 
 // handleLogin authenticates a fixed dev account and issues a JWT session token.
@@ -1684,4 +1708,273 @@ func (s *Server) handleGetPPPoEStatus(w http.ResponseWriter, r *http.Request) {
 func storeJSON(st config.Store, section, option string, v interface{}) {
 	b, _ := json.Marshal(v)
 	_ = st.Set(section, option, string(b))
+}
+
+// handleGetVLAN returns VLANs present on the system.
+func (s *Server) handleGetVLAN(w http.ResponseWriter, r *http.Request) {
+	vlans, err := l2.ListVLAN(execx.DefaultRunner{})
+	if err != nil {
+		writeJSON(w, 500, errBody(10050, "vlan list failed", err.Error()))
+		return
+	}
+	if vlans == nil {
+		vlans = []l2.VLAN{}
+	}
+	writeJSON(w, 200, map[string]interface{}{"vlans": vlans})
+}
+
+// handleSetVLAN applies one or more VLANs and returns the actual system state.
+func (s *Server) handleSetVLAN(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeJSON(w, 400, errBody(10007, "read body fail", err.Error()))
+		return
+	}
+	var vlans []l2.VLAN
+	// accept single object or {vlans:[...]}
+	var single l2.VLAN
+	var batch struct {
+		VLANs []l2.VLAN `json:"vlans"`
+	}
+	if err := json.Unmarshal(body, &batch); err == nil && len(batch.VLANs) > 0 {
+		vlans = batch.VLANs
+	} else if err := json.Unmarshal(body, &single); err == nil && single.Name != "" {
+		vlans = []l2.VLAN{single}
+	} else {
+		// maybe empty array explicitly
+		var arr []l2.VLAN
+		if err2 := json.Unmarshal(body, &arr); err2 == nil {
+			if len(arr) == 0 {
+				writeJSON(w, 422, errBody(10051, "invalid vlan request", "expected a VLAN object or {\"vlans\":[...]} with at least one entry"))
+				return
+			}
+			vlans = arr
+		} else {
+			writeJSON(w, 422, errBody(10051, "invalid vlan request", "expected a VLAN object or {\"vlans\":[...]}"))
+			return
+		}
+	}
+	if len(vlans) == 0 {
+		writeJSON(w, 422, errBody(10051, "invalid vlan request", "expected a VLAN object or {\"vlans\":[...]} with at least one entry"))
+		return
+	}
+	for _, v := range vlans {
+		if err := l2.ValidateVLAN(v); err != nil {
+			writeJSON(w, 422, errBody(10052, "vlan validation failed", err.Error()))
+			return
+		}
+		if err := l2.ApplyVLAN(execx.DefaultRunner{}, v); err != nil {
+			writeJSON(w, 500, errBody(10053, "vlan apply failed", err.Error()))
+			return
+		}
+	}
+	// read back actual state
+	actual, _ := l2.ListVLAN(execx.DefaultRunner{})
+	if actual == nil {
+		actual = []l2.VLAN{}
+	}
+	writeJSON(w, 200, map[string]interface{}{"vlans": actual, "applied": true})
+}
+
+// handleDeleteVLAN deletes a VLAN by name.
+func (s *Server) handleDeleteVLAN(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		writeJSON(w, 400, errBody(10054, "name required", ""))
+		return
+	}
+	if err := l2.DeleteVLAN(execx.DefaultRunner{}, name); err != nil {
+		writeJSON(w, 500, errBody(10055, "vlan delete failed", err.Error()))
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{"deleted": name})
+}
+
+// handleGetBridge returns bridges present on the system.
+func (s *Server) handleGetBridge(w http.ResponseWriter, r *http.Request) {
+	brs, err := l2.ListBridge(execx.DefaultRunner{})
+	if err != nil {
+		writeJSON(w, 500, errBody(10060, "bridge list failed", err.Error()))
+		return
+	}
+	if brs == nil {
+		brs = []l2.Bridge{}
+	}
+	writeJSON(w, 200, map[string]interface{}{"bridges": brs})
+}
+
+// handleSetBridge applies a bridge and returns actual state.
+func (s *Server) handleSetBridge(w http.ResponseWriter, r *http.Request) {
+	var b l2.Bridge
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+		return
+	}
+	if err := l2.ValidateBridge(b); err != nil {
+		writeJSON(w, 422, errBody(10061, "bridge validation failed", err.Error()))
+		return
+	}
+	if err := l2.ApplyBridge(execx.DefaultRunner{}, b); err != nil {
+		writeJSON(w, 500, errBody(10062, "bridge apply failed", err.Error()))
+		return
+	}
+	actual, _ := l2.ListBridge(execx.DefaultRunner{})
+	if actual == nil {
+		actual = []l2.Bridge{}
+	}
+	writeJSON(w, 200, map[string]interface{}{"bridges": actual, "applied": true})
+}
+
+// handleDeleteBridge deletes a bridge by name.
+func (s *Server) handleDeleteBridge(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		writeJSON(w, 400, errBody(10063, "name required", ""))
+		return
+	}
+	// find members
+	members := []string{}
+	if brs, err := l2.ListBridge(execx.DefaultRunner{}); err == nil {
+		for _, b := range brs {
+			if b.Name == name {
+				members = b.Members
+			}
+		}
+	}
+	if err := l2.DeleteBridge(execx.DefaultRunner{}, name, members); err != nil {
+		writeJSON(w, 500, errBody(10064, "bridge delete failed", err.Error()))
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{"deleted": name})
+}
+
+// ===== P2-2 日志中心 + 连接跟踪（仅本区块）=====
+
+func (s *Server) handleGetConntrack(w http.ResponseWriter, r *http.Request) {
+	limit := 100
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	entries, err := conntrack.List(limit)
+	if err != nil {
+		// conntrack 不可用不等于接口坏了：非 root 读 /proc/net/nf_conntrack 会
+		// permission denied，容器里可能没装 conntrack 二进制。返回 200 +
+		// available:false + 真实原因，让前端能显示"不可用（原因）"而不是白屏；
+		// 原因里保留原始错误，解析 bug 也不会被掩盖。
+		writeJSON(w, 200, map[string]interface{}{
+			"entries":   []interface{}{},
+			"summary":   map[string]int{},
+			"count":     0,
+			"available": false,
+			"reason":    err.Error(),
+		})
+		return
+	}
+	summary := conntrack.Summary(entries)
+	writeJSON(w, 200, map[string]interface{}{
+		"entries":   entries,
+		"summary":   summary,
+		"count":     len(entries),
+		"available": true,
+	})
+}
+
+func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
+	limit := 100
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > 5000 {
+		limit = 5000
+	}
+	opts := logcenter.QueryOpts{
+		Limit: limit,
+		Unit:  r.URL.Query().Get("unit"),
+		Grep:  r.URL.Query().Get("grep"),
+		Since: r.URL.Query().Get("since"),
+	}
+	entries, err := logcenter.Query(opts)
+	if err != nil {
+		writeJSON(w, 500, errBody(10071, "logs query failed", err.Error()))
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"entries": entries,
+		"count":   len(entries),
+	})
+}
+
+func (s *Server) handleGetLogSources(w http.ResponseWriter, r *http.Request) {
+	units, err := logcenter.Sources()
+	if err != nil {
+		writeJSON(w, 500, errBody(10072, "logs sources failed", err.Error()))
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"sources": units,
+		"count":   len(units),
+	})
+}
+
+// collectStatsLoop samples host metrics every 30s and feeds statsRing.
+func (s *Server) collectStatsLoop() {
+	// 先立即采一次，否则服务刚起来的 30 秒内 /stats/current 一直是 503，
+	// 前端打开就是空图表（看起来像坏了）。
+	if sm, err := stats.Collect(); err == nil {
+		s.statsRing.Add(sm)
+	}
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		if sm, err := stats.Collect(); err == nil {
+			s.statsRing.Add(sm)
+		}
+	}
+}
+
+// handleStatsCurrent returns the most recent sample, or 503 before any.
+func (s *Server) handleStatsCurrent(w http.ResponseWriter, r *http.Request) {
+	sm, ok := s.statsRing.Latest()
+	if !ok {
+		writeJSON(w, 503, errBody(10080, "no sample yet", "collector has not produced a sample; try again shortly"))
+		return
+	}
+	writeJSON(w, 200, sm)
+}
+
+// handleStatsHistory returns samples within the last `minutes` (default 60, cap 720).
+func (s *Server) handleStatsHistory(w http.ResponseWriter, r *http.Request) {
+	mins := 60
+	if v := r.URL.Query().Get("minutes"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			mins = n
+		}
+	}
+	if mins > 720 {
+		mins = 720
+	}
+	samples := s.statsRing.Since(mins)
+	writeJSON(w, 200, map[string]interface{}{
+		"samples": samples,
+		"count":   len(samples),
+	})
+}
+
+// handleStatsInterfaces returns per-interface counters (excluding lo).
+func (s *Server) handleStatsInterfaces(w http.ResponseWriter, r *http.Request) {
+	ifaces, err := stats.ReadInterfaces()
+	if err != nil {
+		writeJSON(w, 500, errBody(10081, "interfaces read failed", err.Error()))
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"interfaces": ifaces,
+	})
 }

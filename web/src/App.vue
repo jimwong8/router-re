@@ -16,8 +16,11 @@
           <router-link to="/audit" style="color:#eee; text-decoration:none;">审计日志</router-link>
           <router-link to="/radius" style="color:#eee; text-decoration:none;">RADIUS</router-link>
           <router-link to="/pppoe" style="color:#eee; text-decoration:none;">PPPoE服务</router-link>
+          <router-link to="/l2" style="color:#eee; text-decoration:none;">VLAN/桥接</router-link>
           <router-link to="/dpi" style="color:#eee; text-decoration:none;">应用识别</router-link>
+          <router-link to="/logs" style="color:#eee; text-decoration:none;">日志中心</router-link>
           <router-link to="/portal" style="color:#eee; text-decoration:none;">上网认证</router-link>
+          <router-link to="/stats" style="color:#eee; text-decoration:none;">系统监控</router-link>
         </nav>
       </div>
     </el-header>
