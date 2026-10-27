@@ -116,7 +116,22 @@
 
 19. **SNMP 的 snmpd 文本字段返回明文 v3 密码** —— `config` 用了 `Masked()` 但 `snmpd` 用了原始 cfg 渲染。API 响应带密码等于写进浏览器缓存 / 代理日志 / DevTools 历史。改为 `RenderSnmpd(cfg.Masked())`。
 
-### 当前闭环模块（24 个）
+### P7 补齐记录（2026-10-27）
+
+| P7 项 | 状态 | 真实验证证据 |
+|---|---|---|
+| IPS 规则引擎 | OK | 解析真实 Suricata 行：`sid=1000001 msg="ET WEB SQL Injection" proto=tcp dst_port=80 content="union select"`；十六进制 content `\|ff 53 4d 42\|` 正确转字节；转义引号 -> `say "hi"`；坏行容错 `failures: "rule parse errors (1): line 2: missing options section '()'"` |
+| L7 应用过滤 | OK | 通配符 `*.example.com` 匹配子域但**不匹配裸域**；allow 覆盖 block |
+| 接入控制 | OK | 邻居表 **42 条真实设备**（10.100.1.168/10.100.1.131/10.250.17.2/10.100.1.68）；8 字节 MAC -> 422；whitelist 空列表 -> 422 「self-lockout」 |
+| 威胁情报 | OK | `0.0.0.0/0` -> 422「这会阻断所有进出流量并锁死本机，无法远程恢复」 |
+
+### P7 修的 bug
+
+20. **`nac/neighbors` 把 state 当 string** —— `ip -j neigh show` 里 state 是**数组**（`["STALE"]`），写成 string 导致 Unmarshal 失败、整个邻居表 500。E2E 抓到，加回归测试 `TestNeighborsParsesStateArray`。
+21. **测试捏造输入格式** —— 工人的 `TestNeighborsJSON` 用的是自己想象的 `"state":"REACHABLE"`，测试全绿但真实调用挂掉。改成真实 `ip -j neigh show` 格式，并在注释里写明"测试输入必须来自真实命令输出"。
+22. **时区列表恒为空** —— `listTimezones` 用 `base name == "zoneinfo"` 跳过目录，但**根目录本身就叫 zoneinfo**，整棵树被跳过。修复后返回 601 个时区。工人自己发现并修了。
+
+### 当前闭环模块（28 个）
 
 防火墙、QoS（接口级）、接口配置、静态路由、DHCP、多WAN 策略路由、per-IP 限速、DPI 标记、Web Portal、PPPoE、VLAN、桥接 —— 12 个模块全部「下发到内核 + 可回读验证」。
 
@@ -130,7 +145,7 @@
 |---|---|---|---|---|---|
 | 1 | 系统监控 | 18 | 14 | **78%** | 真实 /proc 采集 + 6小时环形历史 + 5 趋势图 + 实时速率(计数器回绕归零) + TopN |
 | 2 | 网络配置 | 58 | 24 | **41%** | 接口/静态路由/NAT/VLAN/桥接/端口映射/策略路由 + DHCP服务端(静态绑定/池冲突校验) + DNS代理 + IPv6地址与RA |
-| 3 | 安全管控 | 39 | 13 | **33%** | ACL nft 下发 + ARP 防护(sysctl) + URL 过滤(dnsmasq) + 攻击防护(限速)；缺 IPS/应用层识别 |
+| 3 | 安全管控 | 39 | 27 | **69%** | ACL + ARP防护 + URL过滤 + 攻击防护 + **IPS规则引擎(Suricata解析)** + **L7应用过滤(通配符/allow覆盖block)** + **MAC黑白名单** + **连接数限制** + **IP/CIDR威胁情报** |
 | 4 | 流控分流 | 21 | 6 | **29%** | QoS + per-IP 限速真实 tc / DPI 标记入内核 / 多WAN 策略路由真实下发 |
 | 5 | 认证计费 | 28 | 12 | **43%** | Portal + PPPoE 服务端 + RADIUS + 账号管理(批量导入/配额/绑定MAC) + 套餐计费；缺真实流量统计与账单 |
 | 6 | 无线服务 | 21 | 0.5 | **2%** | **AC 管理已取消**；仅保留本机 AP 的 SSID/hostapd 配置 |
