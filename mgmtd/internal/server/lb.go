@@ -81,9 +81,19 @@ func (s *Server) handleLBCheck(w http.ResponseWriter, r *http.Request) {
 			ch.Check(execx.DefaultRunner{}, m)
 		}
 	}
+	// Snapshot() 在没有任何成员时返回空切片（make([]Status, 0, ...)），
+	// 直接取 [0] 会 panic: index out of range [0] with length 0，
+	// 而 panic 会让 HTTP 连接直接断开（客户端看到 RemoteDisconnected），
+	// 表现为"接口莫名其妙超时"而不是任何可读的错误。
+	// 实测由空输入探针抓到：POST /api/v1/lb/check 带 {} 就断连。
+	snap := ch.Snapshot()
+	var checkedAt interface{}
+	if len(snap) > 0 {
+		checkedAt = snap[0].LastCheck
+	}
 	writeJSON(w, 200, map[string]interface{}{
-		"checked_at": ch.Snapshot()[0].LastCheck,
-		"status":     ch.Snapshot(),
+		"checked_at": checkedAt,
+		"status":     snap,
 	})
 }
 

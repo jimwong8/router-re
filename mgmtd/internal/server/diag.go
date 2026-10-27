@@ -65,6 +65,13 @@ func (s *Server) handleDiagDNS(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, errBody(10140, "invalid body", err.Error()))
 		return
 	}
+	// 缺 name 是客户端错误，必须在调用外部命令前拦下来。
+	// 原实现直接拿空字符串去查询，查失败后返回 500「dns lookup failed」，
+	// 把参数校验问题伪装成服务端故障（实测由空输入探针抓到）。
+	if req.Name == "" {
+		writeJSON(w, 422, errBody(10142, "name required", "请求体需包含 name 字段"))
+		return
+	}
 	if req.Server != "" {
 		if err := diag.ValidateHost(req.Server); err != nil {
 			writeJSON(w, 422, errBody(10141, "invalid server", err.Error()))
