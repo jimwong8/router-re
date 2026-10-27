@@ -201,16 +201,19 @@ func Sources() ([]string, error) {
 	}
 
 	// 加 10s 上限：journalctl 首次要建索引，慢机器上能拖到 19s+，
-	// 无超时的 cmd.Output() 会让 HTTP 请求一起挂死。超时返回已有缓存或空列表。
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// 无超时的 cmd.Output() 会让 HTTP 请求一起挂死。
+	// ⚠ 超时/失败时返回空列表而不是 error：取不到 unit 列表只说明
+	// journal 不可读，不等于接口坏了。返回 500 会让前端整块白屏
+	// （实测：超时被杀后 detail 是 "signal: killed"）。
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "journalctl", "--field=_SYSTEMD_UNIT", "--no-pager", "-n", "20000")
+	cmd := exec.CommandContext(ctx, "journalctl", "--field=_SYSTEMD_UNIT", "--no-pager")
 	out, err := cmd.Output()
 	if err != nil {
 		if sourcesCache != nil {
-			return sourcesCache, nil // 有旧缓存就先用旧缓存，别让前端空转
+			return sourcesCache, nil // 有旧缓存先用旧缓存
 		}
-		return nil, err
+		return []string{}, nil // 降级为空列表，不下发 500
 	}
 	seen := make(map[string]bool)
 	var units []string

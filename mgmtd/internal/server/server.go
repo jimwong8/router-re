@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jimwong/router-re/mgmtd/internal/account"
@@ -42,6 +43,7 @@ import (
 	"github.com/jimwong/router-re/mgmtd/internal/route"
 	"github.com/jimwong/router-re/mgmtd/internal/stats"
 	"github.com/jimwong/router-re/mgmtd/internal/system"
+	"github.com/jimwong/router-re/mgmtd/internal/traffic"
 	"github.com/jimwong/router-re/mgmtd/internal/vpn"
 	"github.com/jimwong/router-re/mgmtd/internal/wan"
 	"github.com/jimwong/router-re/mgmtd/internal/wireless"
@@ -81,6 +83,18 @@ type Server struct {
 	billingPlans []billing.Plan
 	// rbacMgr is the multi-admin user/role store for /api/v1/users.
 	rbacMgr *rbac.Manager
+	// trafficState 保存上一次 /proc/net/dev 采样，用于算实时速率（P4-4 流量统计）。
+	trafficState trafficSampler
+}
+
+// trafficSampler 保存上一次接口计数器采样，供 /api/v1/traffic/rates 计算差值。
+// 内嵌互斥锁：并发请求只会有一个拿到"上一帧"，避免把两次请求的间隔算错。
+type trafficSampler struct {
+	mu      sync.Mutex
+	prev    []traffic.Sample
+	at      time.Time
+	rates   []traffic.Rate
+	elapsed float64
 }
 
 // newConfigStore returns the configuration store for this process.
@@ -157,6 +171,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/qos/limits", s.auth(s.auditWrap("qos.limits.set", s.handleSetQoSLimits)))
 	s.mux.HandleFunc("GET /api/v1/interfaces", s.auth(s.handleInterfaces))
 	s.mux.HandleFunc("GET /api/v1/ddns/config", s.auth(s.handleGetDDNSConfig))
+	s.mux.HandleFunc("GET /api/v1/dns/config", s.auth(s.handleGetDNSConfig))
+	s.mux.HandleFunc("POST /api/v1/dns/config", s.auth(s.auditWrap("dns.config.set", s.handleSetDNSConfig)))
+	s.mux.HandleFunc("POST /api/v1/dns/resolve", s.auth(s.auditWrap("dns.resolve", s.handleDNSResolve)))
+	s.mux.HandleFunc("GET /api/v1/dns/status", s.auth(s.handleGetDNSStatus))
 	s.mux.HandleFunc("POST /api/v1/ddns/config", s.auth(s.auditWrap("ddns.config.set", s.handleSetDDNSConfig)))
 	s.mux.HandleFunc("POST /api/v1/ddns/update", s.auth(s.auditWrap("ddns.update", s.handleDDNSUpdate)))
 	s.mux.HandleFunc("GET /api/v1/ddns/ip", s.auth(s.handleGETDDNSIP))
@@ -177,6 +195,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/dhcp/leases", s.auth(s.handleGetDHCPLeases))
 	s.mux.HandleFunc("GET /api/v1/clients", s.auth(s.handleGetClients))
 	s.mux.HandleFunc("POST /api/v1/dhcp/config", s.auth(s.auditWrap("dhcp.config.set", s.handleSetDHCPConfig)))
+	// P5-1 DHCP 服务端补强：整段 ServerConfig 存取 + 应用/状态
+	s.mux.HandleFunc("GET /api/v1/dhcp/server", s.auth(s.handleGetDHCPServer))
+	s.mux.HandleFunc("POST /api/v1/dhcp/server", s.auth(s.auditWrap("dhcp.server.set", s.handleSetDHCPServer)))
+	s.mux.HandleFunc("GET /api/v1/dhcp/status", s.auth(s.handleGetDHCPStatus))
 	s.mux.HandleFunc("GET /api/v1/cloud/devices", s.auth(s.handleGetCloudDevices))
 	s.mux.HandleFunc("POST /api/v1/cloud/devices", s.auth(s.auditWrap("cloud.device.register", s.handlePostCloudDevices)))
 	s.mux.HandleFunc("POST /api/v1/cloud/devices/{id}/heartbeat", s.auth(s.auditWrap("cloud.device.heartbeat", s.handlePostCloudHeartbeat)))
@@ -231,6 +253,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/stats/current", s.auth(s.handleStatsCurrent))
 	s.mux.HandleFunc("GET /api/v1/stats/history", s.auth(s.handleStatsHistory))
 	s.mux.HandleFunc("GET /api/v1/stats/interfaces", s.auth(s.handleStatsInterfaces))
+	// P4-4 接口流量实时速率与 TopN（仅本区块）
+	s.mux.HandleFunc("GET /api/v1/traffic/rates", s.auth(s.handleTrafficRates))
+	s.mux.HandleFunc("GET /api/v1/traffic/top", s.auth(s.handleTrafficTop))
 	// P3-1 安全管控（仅本区块）
 	s.mux.HandleFunc("GET /api/v1/acl/rules", s.auth(s.handleGetACLRules))
 	s.mux.HandleFunc("POST /api/v1/acl/rules", s.auth(s.auditWrap("acl.rules.set", s.handleSetACLRules)))
@@ -241,6 +266,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/webfilter/rules", s.auth(s.auditWrap("webfilter.rules.set", s.handleSetWebfilterRules)))
 	s.mux.HandleFunc("GET /api/v1/security/attack-guard", s.auth(s.handleGetAttackGuard))
 	s.mux.HandleFunc("POST /api/v1/security/attack-guard", s.auth(s.auditWrap("security.attackguard.set", s.handleSetAttackGuard)))
+	s.mux.HandleFunc("GET /api/v1/ipv6/addresses", s.auth(s.handleGetIPv6Addresses))
+	s.mux.HandleFunc("POST /api/v1/ipv6/addresses", s.auth(s.auditWrap("ipv6.addresses.set", s.handleSetIPv6Addresses)))
+	s.mux.HandleFunc("DELETE /api/v1/ipv6/addresses", s.auth(s.auditWrap("ipv6.addresses.delete", s.handleDeleteIPv6Address)))
+	s.mux.HandleFunc("GET /api/v1/ipv6/ra", s.auth(s.handleGetIPv6RA))
+	s.mux.HandleFunc("POST /api/v1/ipv6/ra", s.auth(s.auditWrap("ipv6.ra.set", s.handleSetIPv6RA)))
+	s.mux.HandleFunc("GET /api/v1/ipv6/status", s.auth(s.handleGetIPv6Status))
 	s.mux.HandleFunc("GET /api/v1/ddns/status", s.auth(s.handleGetDDNSStatus))
 	// P4-2 认证计费（账号 + 套餐，仅本区块）
 	s.mux.HandleFunc("GET /api/v1/accounts", s.auth(s.handleGetAccounts))
@@ -2069,6 +2100,88 @@ func (s *Server) handleStatsInterfaces(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleTrafficRates 用上一次采样算各接口实时 RX/TX 速率（字节/秒）。
+// 首次调用没有历史采样，elapsed_sec=0、速率全 0，前端 3 秒后自动刷新即可拿到真值。
+func (s *Server) handleTrafficRates(w http.ResponseWriter, r *http.Request) {
+	rates, elapsed, err := s.sampleTrafficRates()
+	if err != nil {
+		writeJSON(w, 500, errBody(10130, "traffic counters read failed", err.Error()))
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"rates":       rateViews(rates),
+		"elapsed_sec": elapsed,
+		"ts":          time.Now().Unix(),
+	})
+}
+
+// handleTrafficTop 返回按总速率排名的前 n 个接口（n<=0 或超上限时取默认/上限）。
+func (s *Server) handleTrafficTop(w http.ResponseWriter, r *http.Request) {
+	n := 10
+	if v := r.URL.Query().Get("n"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			n = parsed
+		}
+	}
+	if n <= 0 {
+		n = 10
+	}
+	if n > 100 {
+		n = 100
+	}
+	rates, _, err := s.sampleTrafficRates()
+	if err != nil {
+		writeJSON(w, 500, errBody(10131, "traffic counters read failed", err.Error()))
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"rates": rateViews(traffic.TopN(rates, n)),
+	})
+}
+
+// sampleTrafficRates 采一次计数器并与上一帧求差；trafficState 由互斥锁保护。
+//
+// 1 秒内的连续调用复用上一帧结果：/api/v1/traffic/rates 和 /api/v1/traffic/top
+// 若各自推进采样，会把时间窗口切成几百毫秒，导致排行榜里全是 0 —— 共用一帧才一致。
+func (s *Server) sampleTrafficRates() ([]traffic.Rate, float64, error) {
+	s.trafficState.mu.Lock()
+	defer s.trafficState.mu.Unlock()
+
+	now := time.Now()
+	if s.trafficState.rates != nil && !s.trafficState.at.IsZero() &&
+		now.Sub(s.trafficState.at) < time.Second {
+		return s.trafficState.rates, s.trafficState.elapsed, nil
+	}
+
+	cur, err := traffic.ReadCounters(execx.DefaultRunner{})
+	if err != nil {
+		return nil, 0, err
+	}
+	var elapsed float64
+	if !s.trafficState.at.IsZero() {
+		elapsed = now.Sub(s.trafficState.at).Seconds()
+	}
+	rates := traffic.ComputeRates(s.trafficState.prev, cur, elapsed)
+	s.trafficState.prev, s.trafficState.at = cur, now
+	s.trafficState.rates, s.trafficState.elapsed = rates, elapsed
+	return rates, elapsed, nil
+}
+
+// trafficRateView 是速率条目的对外 JSON 形态（本服务 API 统一 snake_case）。
+type trafficRateView struct {
+	Iface string  `json:"iface"`
+	RXBps float64 `json:"rx_bps"`
+	TXBps float64 `json:"tx_bps"`
+}
+
+func rateViews(rates []traffic.Rate) []trafficRateView {
+	out := make([]trafficRateView, 0, len(rates))
+	for _, rt := range rates {
+		out = append(out, trafficRateView{Iface: rt.Iface, RXBps: rt.RXBps, TXBps: rt.TXBps})
+	}
+	return out
+}
+
 // handleGetACLRules returns the current ACL rules from store.
 func (s *Server) handleGetACLRules(w http.ResponseWriter, r *http.Request) {
 	raw, _ := s.store.Get("acl", "rules")
@@ -2912,4 +3025,82 @@ func (s *Server) handleSetUserPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]interface{}{"changed": name})
+}
+
+// --- P5-1 DHCP 服务端补强 (仅本区块) ---
+
+// dhcpServerStoreKey 是 ServerConfig 在 store 里的键。
+const dhcpServerStoreKey = "dhcp/server"
+
+// handleGetDHCPServer 返回当前持久化的 DHCP 服务端 ServerConfig。
+func (s *Server) handleGetDHCPServer(w http.ResponseWriter, r *http.Request) {
+	raw, _ := s.store.Get("dhcp", dhcpServerStoreKey)
+	if raw == "" {
+		writeJSON(w, 200, map[string]interface{}{
+			"config":  dhcp.ServerConfig{DHCPConfig: dhcp.DHCPConfig{}, Enabled: false},
+			"applied": false,
+		})
+		return
+	}
+	var cfg dhcp.ServerConfig
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		writeJSON(w, 500, errBody(10010, "config unmarshal error", err.Error()))
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{"config": cfg, "applied": true})
+}
+
+// handleSetDHCPServer 校验 + 应用 DHCP 服务端配置。
+// POST 空对象或 range 无效 → 422；下发后返回 {applied, config, dnsmasq, detail}。
+func (s *Server) handleSetDHCPServer(w http.ResponseWriter, r *http.Request) {
+	if s.dhcpApplier == nil || s.dhcpApplier.R == nil {
+		writeJSON(w, 500, errBody(10011, "dhcp runner not initialized", ""))
+		return
+	}
+	var cfg dhcp.ServerConfig
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		writeJSON(w, 422, errBody(10012, "invalid body", err.Error()))
+		return
+	}
+	// 空对象判断：Interface 为空视为无效。
+	if cfg.Interface == "" {
+		writeJSON(w, 422, errBody(10013, "invalid dhcp server config", "interface/range is empty or invalid"))
+		return
+	}
+	if err := dhcp.ValidateConfig(cfg); err != nil {
+		writeJSON(w, 422, errBody(10014, "invalid dhcp server config", err.Error()))
+		return
+	}
+
+	confPath := dhcp.DefaultConfPath
+	// store 先持久化 JSON 原文。
+	b, _ := json.Marshal(cfg)
+	s.store.Set("dhcp", dhcpServerStoreKey, string(b))
+
+	detail := ""
+	applyErr := dhcp.Apply(s.dhcpApplier.R, cfg, confPath)
+	if applyErr != nil {
+		detail = applyErr.Error()
+	}
+	dnsmasq := cfg.RenderDnsmasq()
+	writeJSON(w, 200, map[string]interface{}{
+		"applied": applyErr == nil,
+		"config":  cfg,
+		"dnsmasq": dnsmasq,
+		"detail":  detail,
+	})
+}
+
+// handleGetDHCPStatus 查询 dnsmasq 运行状态。
+func (s *Server) handleGetDHCPStatus(w http.ResponseWriter, r *http.Request) {
+	if s.dhcpApplier == nil || s.dhcpApplier.R == nil {
+		writeJSON(w, 500, errBody(10015, "dhcp runner not initialized", ""))
+		return
+	}
+	st, err := dhcp.Status(s.dhcpApplier.R)
+	if err != nil {
+		writeJSON(w, 500, errBody(10016, "dhcp status error", err.Error()))
+		return
+	}
+	writeJSON(w, 200, st)
 }

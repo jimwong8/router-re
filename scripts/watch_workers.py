@@ -16,7 +16,7 @@
 
 环境变量：
   IDLE_MINUTES      空闲多少分钟提醒（默认 5）
-  PANES             监控哪些窗口（默认 "w1:pN w1:pQ w1:pP"）
+  PANES             监控哪些窗口（默认 "w1:pN w1:pQ w1:pP w1:pM"）
   WATCH_INTERVAL    采样间隔秒（默认 30）
   REMIND_REPEAT_MIN 同一空闲周期内隔多久再提醒一次（默认 0 = 只提醒一次）
   NO_NOTIFY=1       只写日志不弹桌面通知（用于测试）
@@ -37,7 +37,7 @@ ALERT = ROOT / "logs" / "worker-alerts.log"
 STATE = ROOT / "logs" / ".worker_state.json"
 
 IDLE_MINUTES = float(os.environ.get("IDLE_MINUTES", "5"))
-PANES = os.environ.get("PANES", "w1:pN w1:pQ w1:pP").split()
+PANES = os.environ.get("PANES", "w1:pN w1:pQ w1:pP w1:pM").split()
 INTERVAL = float(os.environ.get("WATCH_INTERVAL", "30"))
 REPEAT_MIN = float(os.environ.get("REMIND_REPEAT_MIN", "0"))
 NO_NOTIFY = os.environ.get("NO_NOTIFY") == "1"
@@ -102,7 +102,10 @@ BUSY_MARKERS = (
     "ruminating", "analyzing", "designing", "writing", "mulling",
     "deliberating", "cogitating", "waiting on",
     "💻", "✍️", "📝", "⏳",
-    "type to redirect this turn",  # 忙碌时才出现的提示语
+    "type to redirect this turn",
+    # OpenCode TUI（Build · ... / OpenCode）：干活时状态栏出现 "esc interrupt"。
+    # 注意它旁边永远有 "ctrl+p commands" 提示，所以 busy 必须先于 idle 判定。
+    "esc interrupt",  # 忙碌时才出现的提示语
 )
 
 # 空闲标记：只有这些输入框占位符才代表真的在等输入。
@@ -111,6 +114,8 @@ IDLE_MARKERS = (
     "❯ Explain this error",
     "❯ Draft a reply",
     "❯ Type / to browse commands",
+    # OpenCode TUI 空闲态状态栏（忙碌时也存在，靠上面 busy 优先命中兜住）
+    "ctrl+p commands",
 )
 
 

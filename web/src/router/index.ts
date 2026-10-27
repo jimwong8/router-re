@@ -17,11 +17,15 @@ import Dpi from '../views/Dpi.vue';
 import LogCenter from '../views/LogCenter.vue';
 import Portal from '../views/Portal.vue';
 import Stats from '../views/Stats.vue';
+import Traffic from '../views/Traffic.vue';
 import Network from '../views/Network.vue';
 import Security from '../views/Security.vue';
 import Services from '../views/Services.vue';
+import Ipv6 from '../views/Ipv6.vue';
 import Accounts from '../views/Accounts.vue';
 import Users from '../views/Users.vue';
+import Dns from '../views/Dns.vue';
+import Dhcp from '../views/Dhcp.vue';
 
 const routes = [
   { path: '/', component: Dashboard, meta: { requiresAuth: true } },
@@ -41,11 +45,15 @@ const routes = [
   { path: '/logs', component: LogCenter, meta: { requiresAuth: true } },
   { path: '/portal', component: Portal, meta: { requiresAuth: true } },
   { path: '/services', component: Services, meta: { requiresAuth: true } },
+  { path: '/ipv6', component: Ipv6, meta: { requiresAuth: true } },
   { path: '/stats', component: Stats, meta: { requiresAuth: true } },
+  { path: '/traffic', component: Traffic, meta: { requiresAuth: true } },
   { path: '/network', component: Network, meta: { requiresAuth: true } },
   { path: '/security', component: Security, meta: { requiresAuth: true } },
   { path: '/accounts', component: Accounts, meta: { requiresAuth: true } },
   { path: '/users', component: Users, meta: { requiresAuth: true } },
+  { path: '/dns', component: Dns, meta: { requiresAuth: true } },
+  { path: '/dhcp', component: Dhcp, meta: { requiresAuth: true } },
   { path: '/login', component: Login },
   { path: '/:pathMatch(.*)*', redirect: '/login' },
 ];

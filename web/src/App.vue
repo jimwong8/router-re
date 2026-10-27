@@ -22,10 +22,14 @@
           <router-link to="/logs" style="color:#eee; text-decoration:none;">日志中心</router-link>
           <router-link to="/portal" style="color:#eee; text-decoration:none;">上网认证</router-link>
           <router-link to="/stats" style="color:#eee; text-decoration:none;">系统监控</router-link>
+          <router-link to="/traffic" style="color:#eee; text-decoration:none;">流量统计</router-link>
           <router-link to="/network" style="color:#eee; text-decoration:none;">端口映射/策略路由</router-link>
           <router-link to="/security" style="color:#eee; text-decoration:none;">安全管控</router-link>
+          <router-link to="/dhcp" style="color:#eee; text-decoration:none;">DHCP 服务</router-link>
           <router-link to="/services" style="color:#eee; text-decoration:none;">高级服务</router-link>
+          <router-link to="/ipv6" style="color:#eee; text-decoration:none;">IPv6</router-link>
           <router-link to="/accounts" style="color:#eee; text-decoration:none;">认证计费</router-link>
+          <router-link to="/dns" style="color:#eee; text-decoration:none;">DNS 服务</router-link>
         </nav>
       </div>
     </el-header>

@@ -1268,3 +1268,195 @@
 {"ts":1793093416,"actor":"admin","action":"vpn.wireguard.config","target":"/api/v1/vpn/wireguard/config","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
 {"ts":1793093417,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
 {"ts":1793093417,"actor":"admin","action":"dpi.rules.set","target":"/api/v1/dpi/rules","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793093681,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793093681,"actor":"-","action":"auth.login","target":"admin","result":"fail","detail":"invalid credentials","remote_ip":"192.0.2.1"}
+{"ts":1793093682,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793093683,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793093683,"actor":"admin","action":"dhcp.config.set","target":"lan","result":"fail","detail":"apply: write dnsmasq config /etc/dnsmasq.d/router-re.conf: open /etc/dnsmasq.d/router-re.conf: no such file or directory","remote_ip":"192.0.2.1"}
+{"ts":1793093683,"actor":"admin","action":"dhcp.config.set","target":"/api/v1/dhcp/config","result":"fail","detail":"HTTP 500","remote_ip":"192.0.2.1"}
+{"ts":1793093684,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793093684,"actor":"admin","action":"vpn.wireguard.keypair","target":"/api/v1/vpn/wireguard/keypair","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793093684,"actor":"admin","action":"vpn.wireguard.config.set","target":"wg0","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793093684,"actor":"admin","action":"vpn.wireguard.config","target":"/api/v1/vpn/wireguard/config","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793093684,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793093684,"actor":"admin","action":"dpi.rules.set","target":"/api/v1/dpi/rules","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793093771,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793093772,"actor":"-","action":"auth.login","target":"admin","result":"fail","detail":"invalid credentials","remote_ip":"192.0.2.1"}
+{"ts":1793093773,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793093774,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793093774,"actor":"admin","action":"dhcp.config.set","target":"lan","result":"fail","detail":"apply: write dnsmasq config /etc/dnsmasq.d/router-re.conf: open /etc/dnsmasq.d/router-re.conf: no such file or directory","remote_ip":"192.0.2.1"}
+{"ts":1793093774,"actor":"admin","action":"dhcp.config.set","target":"/api/v1/dhcp/config","result":"fail","detail":"HTTP 500","remote_ip":"192.0.2.1"}
+{"ts":1793093775,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793093775,"actor":"admin","action":"vpn.wireguard.keypair","target":"/api/v1/vpn/wireguard/keypair","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793093775,"actor":"admin","action":"vpn.wireguard.config.set","target":"wg0","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793093775,"actor":"admin","action":"vpn.wireguard.config","target":"/api/v1/vpn/wireguard/config","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793093776,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793093776,"actor":"admin","action":"dpi.rules.set","target":"/api/v1/dpi/rules","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094044,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094045,"actor":"-","action":"auth.login","target":"admin","result":"fail","detail":"invalid credentials","remote_ip":"192.0.2.1"}
+{"ts":1793094046,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094047,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094047,"actor":"admin","action":"dhcp.config.set","target":"lan","result":"fail","detail":"apply: write dnsmasq config /etc/dnsmasq.d/router-re.conf: open /etc/dnsmasq.d/router-re.conf: no such file or directory","remote_ip":"192.0.2.1"}
+{"ts":1793094047,"actor":"admin","action":"dhcp.config.set","target":"/api/v1/dhcp/config","result":"fail","detail":"HTTP 500","remote_ip":"192.0.2.1"}
+{"ts":1793094048,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094048,"actor":"admin","action":"vpn.wireguard.keypair","target":"/api/v1/vpn/wireguard/keypair","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094048,"actor":"admin","action":"vpn.wireguard.config.set","target":"wg0","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094048,"actor":"admin","action":"vpn.wireguard.config","target":"/api/v1/vpn/wireguard/config","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094049,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094049,"actor":"admin","action":"dpi.rules.set","target":"/api/v1/dpi/rules","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094106,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094106,"actor":"-","action":"auth.login","target":"admin","result":"fail","detail":"invalid credentials","remote_ip":"192.0.2.1"}
+{"ts":1793094107,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094108,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094108,"actor":"admin","action":"dhcp.config.set","target":"lan","result":"fail","detail":"apply: write dnsmasq config /etc/dnsmasq.d/router-re.conf: open /etc/dnsmasq.d/router-re.conf: no such file or directory","remote_ip":"192.0.2.1"}
+{"ts":1793094108,"actor":"admin","action":"dhcp.config.set","target":"/api/v1/dhcp/config","result":"fail","detail":"HTTP 500","remote_ip":"192.0.2.1"}
+{"ts":1793094109,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094109,"actor":"admin","action":"vpn.wireguard.keypair","target":"/api/v1/vpn/wireguard/keypair","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094109,"actor":"admin","action":"vpn.wireguard.config.set","target":"wg0","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094109,"actor":"admin","action":"vpn.wireguard.config","target":"/api/v1/vpn/wireguard/config","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094110,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094110,"actor":"admin","action":"dpi.rules.set","target":"/api/v1/dpi/rules","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094151,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094152,"actor":"-","action":"auth.login","target":"admin","result":"fail","detail":"invalid credentials","remote_ip":"192.0.2.1"}
+{"ts":1793094153,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094154,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094154,"actor":"admin","action":"dhcp.config.set","target":"lan","result":"fail","detail":"apply: write dnsmasq config /etc/dnsmasq.d/router-re.conf: open /etc/dnsmasq.d/router-re.conf: no such file or directory","remote_ip":"192.0.2.1"}
+{"ts":1793094154,"actor":"admin","action":"dhcp.config.set","target":"/api/v1/dhcp/config","result":"fail","detail":"HTTP 500","remote_ip":"192.0.2.1"}
+{"ts":1793094155,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094155,"actor":"admin","action":"vpn.wireguard.keypair","target":"/api/v1/vpn/wireguard/keypair","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094155,"actor":"admin","action":"vpn.wireguard.config.set","target":"wg0","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094155,"actor":"admin","action":"vpn.wireguard.config","target":"/api/v1/vpn/wireguard/config","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094156,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094156,"actor":"admin","action":"dpi.rules.set","target":"/api/v1/dpi/rules","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094202,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094203,"actor":"-","action":"auth.login","target":"admin","result":"fail","detail":"invalid credentials","remote_ip":"192.0.2.1"}
+{"ts":1793094204,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094205,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094205,"actor":"admin","action":"dhcp.config.set","target":"lan","result":"fail","detail":"apply: write dnsmasq config /etc/dnsmasq.d/router-re.conf: open /etc/dnsmasq.d/router-re.conf: no such file or directory","remote_ip":"192.0.2.1"}
+{"ts":1793094205,"actor":"admin","action":"dhcp.config.set","target":"/api/v1/dhcp/config","result":"fail","detail":"HTTP 500","remote_ip":"192.0.2.1"}
+{"ts":1793094206,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094206,"actor":"admin","action":"vpn.wireguard.keypair","target":"/api/v1/vpn/wireguard/keypair","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094206,"actor":"admin","action":"vpn.wireguard.config.set","target":"wg0","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094206,"actor":"admin","action":"vpn.wireguard.config","target":"/api/v1/vpn/wireguard/config","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094207,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094207,"actor":"admin","action":"dpi.rules.set","target":"/api/v1/dpi/rules","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094286,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094287,"actor":"-","action":"auth.login","target":"admin","result":"fail","detail":"invalid credentials","remote_ip":"192.0.2.1"}
+{"ts":1793094288,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094289,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094289,"actor":"admin","action":"dhcp.config.set","target":"lan","result":"fail","detail":"apply: write dnsmasq config /etc/dnsmasq.d/router-re.conf: open /etc/dnsmasq.d/router-re.conf: no such file or directory","remote_ip":"192.0.2.1"}
+{"ts":1793094289,"actor":"admin","action":"dhcp.config.set","target":"/api/v1/dhcp/config","result":"fail","detail":"HTTP 500","remote_ip":"192.0.2.1"}
+{"ts":1793094290,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094290,"actor":"admin","action":"vpn.wireguard.keypair","target":"/api/v1/vpn/wireguard/keypair","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094290,"actor":"admin","action":"vpn.wireguard.config.set","target":"wg0","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094290,"actor":"admin","action":"vpn.wireguard.config","target":"/api/v1/vpn/wireguard/config","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094291,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094291,"actor":"admin","action":"dpi.rules.set","target":"/api/v1/dpi/rules","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094324,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094326,"actor":"-","action":"auth.login","target":"admin","result":"fail","detail":"invalid credentials","remote_ip":"192.0.2.1"}
+{"ts":1793094327,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094328,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094328,"actor":"admin","action":"dhcp.config.set","target":"lan","result":"fail","detail":"apply: write dnsmasq config /etc/dnsmasq.d/router-re.conf: open /etc/dnsmasq.d/router-re.conf: no such file or directory","remote_ip":"192.0.2.1"}
+{"ts":1793094328,"actor":"admin","action":"dhcp.config.set","target":"/api/v1/dhcp/config","result":"fail","detail":"HTTP 500","remote_ip":"192.0.2.1"}
+{"ts":1793094329,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094329,"actor":"admin","action":"vpn.wireguard.keypair","target":"/api/v1/vpn/wireguard/keypair","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094329,"actor":"admin","action":"vpn.wireguard.config.set","target":"wg0","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094329,"actor":"admin","action":"vpn.wireguard.config","target":"/api/v1/vpn/wireguard/config","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094330,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094330,"actor":"admin","action":"dpi.rules.set","target":"/api/v1/dpi/rules","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094352,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094353,"actor":"-","action":"auth.login","target":"admin","result":"fail","detail":"invalid credentials","remote_ip":"192.0.2.1"}
+{"ts":1793094354,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094355,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094355,"actor":"admin","action":"dhcp.config.set","target":"lan","result":"fail","detail":"apply: write dnsmasq config /etc/dnsmasq.d/router-re.conf: open /etc/dnsmasq.d/router-re.conf: no such file or directory","remote_ip":"192.0.2.1"}
+{"ts":1793094355,"actor":"admin","action":"dhcp.config.set","target":"/api/v1/dhcp/config","result":"fail","detail":"HTTP 500","remote_ip":"192.0.2.1"}
+{"ts":1793094356,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094356,"actor":"admin","action":"vpn.wireguard.keypair","target":"/api/v1/vpn/wireguard/keypair","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094356,"actor":"admin","action":"vpn.wireguard.config.set","target":"wg0","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094356,"actor":"admin","action":"vpn.wireguard.config","target":"/api/v1/vpn/wireguard/config","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094357,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094357,"actor":"admin","action":"dpi.rules.set","target":"/api/v1/dpi/rules","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094447,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094448,"actor":"-","action":"auth.login","target":"admin","result":"fail","detail":"invalid credentials","remote_ip":"192.0.2.1"}
+{"ts":1793094449,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094450,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094450,"actor":"admin","action":"dhcp.config.set","target":"lan","result":"fail","detail":"apply: write dnsmasq config /etc/dnsmasq.d/router-re.conf: open /etc/dnsmasq.d/router-re.conf: no such file or directory","remote_ip":"192.0.2.1"}
+{"ts":1793094450,"actor":"admin","action":"dhcp.config.set","target":"/api/v1/dhcp/config","result":"fail","detail":"HTTP 500","remote_ip":"192.0.2.1"}
+{"ts":1793094451,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094451,"actor":"admin","action":"vpn.wireguard.keypair","target":"/api/v1/vpn/wireguard/keypair","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094451,"actor":"admin","action":"vpn.wireguard.config.set","target":"wg0","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094451,"actor":"admin","action":"vpn.wireguard.config","target":"/api/v1/vpn/wireguard/config","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094452,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094452,"actor":"admin","action":"dpi.rules.set","target":"/api/v1/dpi/rules","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094551,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094552,"actor":"-","action":"auth.login","target":"admin","result":"fail","detail":"invalid credentials","remote_ip":"192.0.2.1"}
+{"ts":1793094552,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094553,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094553,"actor":"admin","action":"dhcp.config.set","target":"lan","result":"fail","detail":"apply: write dnsmasq config /etc/dnsmasq.d/router-re.conf: open /etc/dnsmasq.d/router-re.conf: no such file or directory","remote_ip":"192.0.2.1"}
+{"ts":1793094553,"actor":"admin","action":"dhcp.config.set","target":"/api/v1/dhcp/config","result":"fail","detail":"HTTP 500","remote_ip":"192.0.2.1"}
+{"ts":1793094554,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094554,"actor":"admin","action":"vpn.wireguard.keypair","target":"/api/v1/vpn/wireguard/keypair","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094554,"actor":"admin","action":"vpn.wireguard.config.set","target":"wg0","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094554,"actor":"admin","action":"vpn.wireguard.config","target":"/api/v1/vpn/wireguard/config","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094555,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094555,"actor":"admin","action":"dpi.rules.set","target":"/api/v1/dpi/rules","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094582,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094582,"actor":"-","action":"auth.login","target":"admin","result":"fail","detail":"invalid credentials","remote_ip":"192.0.2.1"}
+{"ts":1793094583,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094584,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094584,"actor":"admin","action":"dhcp.config.set","target":"lan","result":"fail","detail":"apply: write dnsmasq config /etc/dnsmasq.d/router-re.conf: open /etc/dnsmasq.d/router-re.conf: no such file or directory","remote_ip":"192.0.2.1"}
+{"ts":1793094584,"actor":"admin","action":"dhcp.config.set","target":"/api/v1/dhcp/config","result":"fail","detail":"HTTP 500","remote_ip":"192.0.2.1"}
+{"ts":1793094584,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094584,"actor":"admin","action":"vpn.wireguard.keypair","target":"/api/v1/vpn/wireguard/keypair","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094584,"actor":"admin","action":"vpn.wireguard.config.set","target":"wg0","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094584,"actor":"admin","action":"vpn.wireguard.config","target":"/api/v1/vpn/wireguard/config","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094585,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094585,"actor":"admin","action":"dpi.rules.set","target":"/api/v1/dpi/rules","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094639,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094639,"actor":"-","action":"auth.login","target":"admin","result":"fail","detail":"invalid credentials","remote_ip":"192.0.2.1"}
+{"ts":1793094640,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094641,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094641,"actor":"admin","action":"dhcp.config.set","target":"lan","result":"fail","detail":"apply: write dnsmasq config /etc/dnsmasq.d/router-re.conf: open /etc/dnsmasq.d/router-re.conf: no such file or directory","remote_ip":"192.0.2.1"}
+{"ts":1793094641,"actor":"admin","action":"dhcp.config.set","target":"/api/v1/dhcp/config","result":"fail","detail":"HTTP 500","remote_ip":"192.0.2.1"}
+{"ts":1793094642,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094642,"actor":"admin","action":"vpn.wireguard.keypair","target":"/api/v1/vpn/wireguard/keypair","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094642,"actor":"admin","action":"vpn.wireguard.config.set","target":"wg0","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094642,"actor":"admin","action":"vpn.wireguard.config","target":"/api/v1/vpn/wireguard/config","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094642,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094642,"actor":"admin","action":"dpi.rules.set","target":"/api/v1/dpi/rules","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094669,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094670,"actor":"-","action":"auth.login","target":"admin","result":"fail","detail":"invalid credentials","remote_ip":"192.0.2.1"}
+{"ts":1793094671,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094671,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094671,"actor":"admin","action":"dhcp.config.set","target":"lan","result":"fail","detail":"apply: write dnsmasq config /etc/dnsmasq.d/router-re.conf: open /etc/dnsmasq.d/router-re.conf: no such file or directory","remote_ip":"192.0.2.1"}
+{"ts":1793094671,"actor":"admin","action":"dhcp.config.set","target":"/api/v1/dhcp/config","result":"fail","detail":"HTTP 500","remote_ip":"192.0.2.1"}
+{"ts":1793094672,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094672,"actor":"admin","action":"vpn.wireguard.keypair","target":"/api/v1/vpn/wireguard/keypair","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094672,"actor":"admin","action":"vpn.wireguard.config.set","target":"wg0","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094672,"actor":"admin","action":"vpn.wireguard.config","target":"/api/v1/vpn/wireguard/config","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094673,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094673,"actor":"admin","action":"dpi.rules.set","target":"/api/v1/dpi/rules","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094692,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094693,"actor":"-","action":"auth.login","target":"admin","result":"fail","detail":"invalid credentials","remote_ip":"192.0.2.1"}
+{"ts":1793094694,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094695,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094695,"actor":"admin","action":"dhcp.config.set","target":"lan","result":"fail","detail":"apply: write dnsmasq config /etc/dnsmasq.d/router-re.conf: open /etc/dnsmasq.d/router-re.conf: no such file or directory","remote_ip":"192.0.2.1"}
+{"ts":1793094695,"actor":"admin","action":"dhcp.config.set","target":"/api/v1/dhcp/config","result":"fail","detail":"HTTP 500","remote_ip":"192.0.2.1"}
+{"ts":1793094695,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094695,"actor":"admin","action":"vpn.wireguard.keypair","target":"/api/v1/vpn/wireguard/keypair","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094695,"actor":"admin","action":"vpn.wireguard.config.set","target":"wg0","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094695,"actor":"admin","action":"vpn.wireguard.config","target":"/api/v1/vpn/wireguard/config","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094696,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094696,"actor":"admin","action":"dpi.rules.set","target":"/api/v1/dpi/rules","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094861,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094861,"actor":"-","action":"auth.login","target":"admin","result":"fail","detail":"invalid credentials","remote_ip":"192.0.2.1"}
+{"ts":1793094862,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094863,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094863,"actor":"admin","action":"dhcp.config.set","target":"lan","result":"fail","detail":"apply: write dnsmasq config /etc/dnsmasq.d/router-re.conf: open /etc/dnsmasq.d/router-re.conf: permission denied","remote_ip":"192.0.2.1"}
+{"ts":1793094863,"actor":"admin","action":"dhcp.config.set","target":"/api/v1/dhcp/config","result":"fail","detail":"HTTP 500","remote_ip":"192.0.2.1"}
+{"ts":1793094864,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094864,"actor":"admin","action":"vpn.wireguard.keypair","target":"/api/v1/vpn/wireguard/keypair","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094864,"actor":"admin","action":"vpn.wireguard.config.set","target":"wg0","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094864,"actor":"admin","action":"vpn.wireguard.config","target":"/api/v1/vpn/wireguard/config","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
+{"ts":1793094864,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"192.0.2.1"}
+{"ts":1793094864,"actor":"admin","action":"dpi.rules.set","target":"/api/v1/dpi/rules","result":"ok","detail":"HTTP 200","remote_ip":"192.0.2.1"}
