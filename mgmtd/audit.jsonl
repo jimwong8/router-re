@@ -1,3 +1,5 @@
 {"ts":1793074387,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"127.0.0.1"}
 {"ts":1793074387,"actor":"admin","action":"qos.client_limits.set","target":"","result":"fail","detail":"apply: apply requires root privileges","remote_ip":"127.0.0.1"}
 {"ts":1793074387,"actor":"admin","action":"qos.client_limits.set","target":"/api/v1/qos/client-limits","result":"fail","detail":"HTTP 500","remote_ip":"127.0.0.1"}
+{"ts":1793077138,"actor":"-","action":"auth.login","target":"admin","result":"ok","detail":"","remote_ip":"127.0.0.1"}
+{"ts":1793077138,"actor":"admin","action":"pppoe.config.set","target":"/api/v1/pppoe/config","result":"ok","detail":"HTTP 200","remote_ip":"127.0.0.1"}

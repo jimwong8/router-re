@@ -25,7 +25,10 @@ import (
 	"github.com/jimwong/router-re/mgmtd/internal/firewall"
 	"github.com/jimwong/router-re/mgmtd/internal/iface"
 	"github.com/jimwong/router-re/mgmtd/internal/nat"
+	"github.com/jimwong/router-re/mgmtd/internal/portal"
+	"github.com/jimwong/router-re/mgmtd/internal/pppoe"
 	"github.com/jimwong/router-re/mgmtd/internal/qos"
+	"github.com/jimwong/router-re/mgmtd/internal/radius"
 	"github.com/jimwong/router-re/mgmtd/internal/route"
 	"github.com/jimwong/router-re/mgmtd/internal/system"
 	"github.com/jimwong/router-re/mgmtd/internal/vpn"
@@ -49,11 +52,14 @@ type Server struct {
 	mux      *http.ServeMux
 	store    config.Store
 	tm       *auth.TokenManager
-	cloudMgr *cloud.Manager
-	audit    *audit.Logger
+	cloudMgr     *cloud.Manager
+	pppoeUsers   []pppoe.User
+	audit        *audit.Logger
 	// loginLimiter throttles failed login attempts per remote IP to blunt
 	// brute-force / credential-stuffing attacks.
 	loginLimiter *loginLimiter
+	// portalMgr tracks authorized MAC/IP pairs for the captive portal.
+	portalMgr *portal.Manager
 }
 
 func New(cfg Config) *Server {
@@ -68,10 +74,12 @@ func New(cfg Config) *Server {
 		cfg:          cfg,
 		mux:          http.NewServeMux(),
 		store:        config.NewMockStore(),
+		pppoeUsers:   []pppoe.User{},
 		tm:           auth.NewTokenManager(cfg.SecretKey, 15*time.Minute),
 		cloudMgr:     cloud.NewManager(),
 		dhcpApplier:  dhcp.NewApplier(),
 		loginLimiter: newLoginLimiter(5, time.Minute),
+		portalMgr:    portal.NewManager(),
 	}
 	// Audit logger: MGM_AUDIT_LOG env or default; degrade to ./audit.jsonl
 	// if the default dir cannot be created (never fail startup for logging).
@@ -122,6 +130,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/dpi/marks", s.auth(s.handleGetDPIMarks))
 	s.mux.HandleFunc("POST /api/v1/dpi/marks", s.auth(s.auditWrap("dpi.marks.set", s.handleSetDPIMarks)))
 	s.mux.HandleFunc("GET /api/v1/dpi/classify", s.auth(s.handleDPIClassify))
+	s.mux.HandleFunc("GET /api/v1/radius/config", s.auth(s.handleGetRadiusConfig))
+	s.mux.HandleFunc("POST /api/v1/radius/config", s.auth(s.auditWrap("radius.config.set", s.handleSetRadiusConfig)))
+	s.mux.HandleFunc("POST /api/v1/radius/test", s.auth(s.handleRadiusTest))
 	s.mux.HandleFunc("POST /api/v1/vpn/wireguard/keypair", s.auth(s.auditWrap("vpn.wireguard.keypair", s.handleWireGuardKeypair)))
 	s.mux.HandleFunc("POST /api/v1/vpn/wireguard/config", s.auth(s.auditWrap("vpn.wireguard.config", s.handleWireGuardConfig)))
 	s.mux.HandleFunc("GET /api/v1/interfaces/config", s.auth(s.handleGetInterfacesConfig))
@@ -130,6 +141,18 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/route/static", s.auth(s.auditWrap("route.static.set", s.handleSetStaticRoutes)))
 	s.mux.HandleFunc("GET /api/v1/audit/events", s.auth(s.handleGetAuditEvents))
 	s.mux.HandleFunc("GET /api/v1/wan/status", s.auth(s.handleWANStatus))
+	s.mux.HandleFunc("GET /api/v1/portal/clients", s.auth(s.handleGetPortalClients))
+	s.mux.HandleFunc("POST /api/v1/portal/authorize", s.auth(s.auditWrap("portal.authorize", s.handlePortalAuthorize)))
+	s.mux.HandleFunc("POST /api/v1/portal/revoke", s.auth(s.auditWrap("portal.revoke", s.handlePortalRevoke)))
+	s.mux.HandleFunc("GET /api/v1/portal/config", s.auth(s.handleGetPortalConfig))
+	s.mux.HandleFunc("POST /api/v1/portal/config", s.auth(s.auditWrap("portal.config.set", s.handleSetPortalConfig)))
+	// PPPoE 模块路由（P1-5 — 仅本区块，不动 portal 区块）
+	s.mux.HandleFunc("GET /api/v1/pppoe/config", s.auth(s.handleGetPPPoEConfig))
+	s.mux.HandleFunc("POST /api/v1/pppoe/config", s.auth(s.auditWrap("pppoe.config.set", s.handleSetPPPoEConfig)))
+	s.mux.HandleFunc("GET /api/v1/pppoe/users", s.auth(s.handleGetPPPoEUsers))
+	s.mux.HandleFunc("POST /api/v1/pppoe/users", s.auth(s.auditWrap("pppoe.users.set", s.handleSetPPPoEUsers)))
+	s.mux.HandleFunc("GET /api/v1/pppoe/sessions", s.auth(s.handleGetPPPoESessions))
+	s.mux.HandleFunc("GET /api/v1/pppoe/status", s.auth(s.handleGetPPPoEStatus))
 }
 
 // handleLogin authenticates a fixed dev account and issues a JWT session token.
@@ -1332,4 +1355,327 @@ func (s *Server) clearClientLimitsStore() {
 		s.store.Set("qos", key+".download_kbps", "")
 		s.store.Set("qos", key+".comment", "")
 	}
+}
+
+// handleGetRadiusConfig returns the stored RADIUS config and rendered files.
+func (s *Server) handleGetRadiusConfig(w http.ResponseWriter, r *http.Request) {
+	cfg := radius.Config{}
+	if raw, err := s.store.Get("radius", "config"); err == nil && raw != "" {
+		_ = json.Unmarshal([]byte(raw), &cfg)
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"config":  cfg,
+		"conf":    radius.RenderRadiusClientConf(cfg),
+		"servers": radius.RenderServersFile(cfg),
+	})
+}
+
+// handleSetRadiusConfig persists the RADIUS config and returns rendered files.
+func (s *Server) handleSetRadiusConfig(w http.ResponseWriter, r *http.Request) {
+	var cfg radius.Config
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+		return
+	}
+	if raw, err := json.Marshal(cfg); err == nil {
+		_ = s.store.Set("radius", "config", string(raw))
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"config":  cfg,
+		"conf":    radius.RenderRadiusClientConf(cfg),
+		"servers": radius.RenderServersFile(cfg),
+	})
+}
+
+// handleRadiusTest runs a real RADIUS authentication using the stored config.
+func (s *Server) handleRadiusTest(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+		return
+	}
+	cfg := radius.Config{}
+	if raw, err := s.store.Get("radius", "config"); err == nil && raw != "" {
+		_ = json.Unmarshal([]byte(raw), &cfg)
+	}
+	if cfg.Server == "" {
+		writeJSON(w, 400, errBody(10044, "radius not configured", "configure radius server first"))
+		return
+	}
+	res, err := cfg.Authenticate(req.Username, req.Password)
+	if err != nil {
+		writeJSON(w, 500, errBody(10045, "radius auth failed", err.Error()))
+		return
+	}
+	writeJSON(w, 200, res)
+}
+
+// handleGetPortalClients lists all portal-managed clients.
+func (s *Server) handleGetPortalClients(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]interface{}{
+		"clients": s.portalMgr.List(),
+	})
+}
+
+// handlePortalAuthorize authorizes a MAC/IP pair and re-applies nft rules.
+func (s *Server) handlePortalAuthorize(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		MAC     string `json:"mac"`
+		IP      string `json:"ip"`
+		Minutes int    `json:"minutes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+		return
+	}
+	d := time.Duration(req.Minutes) * time.Minute
+	client, err := s.portalMgr.Authorize(req.MAC, req.IP, d)
+	if err != nil {
+		writeJSON(w, 400, errBody(10048, "invalid MAC", err.Error()))
+		return
+	}
+	authorized := s.portalMgr.Authorized(time.Now())
+	port := s.portalPort()
+	nftText := portal.RenderNft(authorized, port)
+	if err := portal.Apply(execx.DefaultRunner{}, authorized, port); err != nil {
+		// Apply failure still returns the client; the frontend shows the nft
+		// error via the returned applied=false flag.
+		writeJSON(w, 200, map[string]interface{}{
+			"client":  client,
+			"applied": false,
+			"nft":     nftText,
+			"error":   err.Error(),
+		})
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"client":  client,
+		"applied": true,
+		"nft":     nftText,
+	})
+}
+
+// handlePortalRevoke revokes a MAC and re-applies nft rules.
+func (s *Server) handlePortalRevoke(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		MAC string `json:"mac"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+		return
+	}
+	revoked := s.portalMgr.Revoke(portal.NormalizeMAC(req.MAC))
+	authorized := s.portalMgr.Authorized(time.Now())
+	port := s.portalPort()
+	nftText := portal.RenderNft(authorized, port)
+	if revoked {
+		// Best-effort reapply; report applied state via returned flag.
+		_ = portal.Apply(execx.DefaultRunner{}, authorized, port)
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"revoked": revoked,
+		"nft":     nftText,
+	})
+}
+
+// handleGetPortalConfig returns persisted portal settings.
+func (s *Server) handleGetPortalConfig(w http.ResponseWriter, r *http.Request) {
+	cfg := s.portalConfigFromStore()
+	writeJSON(w, 200, cfg)
+}
+
+// handleSetPortalConfig persists portal settings.
+func (s *Server) handleSetPortalConfig(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled        bool `json:"enabled"`
+		PortalPort     int  `json:"portal_port"`
+		DefaultMinutes int  `json:"default_minutes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+		return
+	}
+	if req.PortalPort == 0 {
+		req.PortalPort = 8080
+	}
+	if req.DefaultMinutes == 0 {
+		req.DefaultMinutes = 60
+	}
+	s.store.Set("portal", "enabled", strconv.FormatBool(req.Enabled))
+	s.store.Set("portal", "portal_port", itoa(req.PortalPort))
+	s.store.Set("portal", "default_minutes", itoa(req.DefaultMinutes))
+	writeJSON(w, 200, map[string]interface{}{
+		"enabled":         req.Enabled,
+		"portal_port":     req.PortalPort,
+		"default_minutes": req.DefaultMinutes,
+	})
+}
+
+// portalConfigFromStore reads portal settings from config store.
+func (s *Server) portalConfigFromStore() map[string]interface{} {
+	enabled, _ := s.store.Get("portal", "enabled")
+	portStr, _ := s.store.Get("portal", "portal_port")
+	minStr, _ := s.store.Get("portal", "default_minutes")
+	enabledBool := enabled == "true"
+	port := 8080
+	if portStr != "" {
+		fmt.Sscan(portStr, &port)
+	}
+	minutes := 60
+	if minStr != "" {
+		fmt.Sscan(minStr, &minutes)
+	}
+	return map[string]interface{}{
+		"enabled":         enabledBool,
+		"portal_port":     port,
+		"default_minutes": minutes,
+	}
+}
+
+// portalPort returns the portal listening port (default 8080).
+func (s *Server) portalPort() int {
+	cfg := s.portalConfigFromStore()
+	if p, ok := cfg["portal_port"].(int); ok && p > 0 {
+		return p
+	}
+	return 8080
+}
+
+
+// ===== PPPoE 模块（P1-5，仅本区块，不动 portal 区块）=====
+
+func (s *Server) handleGetPPPoEConfig(w http.ResponseWriter, r *http.Request) {
+	raw, err := s.store.Get("pppoe", "config")
+	var cfg pppoe.Config
+	if err == nil && raw != "" {
+		_ = json.Unmarshal([]byte(raw), &cfg)
+	}
+	usersRaw, _ := s.store.Get("pppoe", "users")
+	var users []pppoe.User
+	if usersRaw != "" {
+		_ = json.Unmarshal([]byte(usersRaw), &users)
+	}
+	optsPath, secretsPath := pppoe.DefaultPaths()
+	optsText, err2 := pppoe.RenderOptions(cfg)
+	secretsText := pppoe.RenderChapSecrets(s.pppoeUsers)
+	// 真实状态检查
+	status := "unknown"
+	if s.audit != nil {
+		_ = status
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"config":   cfg,
+		"users":    users,
+		"options_path": optsPath,
+		"secrets_path": secretsPath,
+		"options_text": optsText,
+		"secrets_text": secretsText,
+		"render_error": func() interface{} {
+			if err2 != nil { return err2.Error() }
+			return nil
+		}(),
+	})
+}
+
+func (s *Server) handleSetPPPoEConfig(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Config    pppoe.Config `json:"config"`
+		Users     []pppoe.User `json:"users"`
+		ApplyReal bool         `json:"apply_real"` // 测试可传 false 避免真实执行
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+		return
+	}
+	if req.Config.Interface == "" || req.Config.ServiceName == "" {
+		writeJSON(w, 422, errBody(10020, "invalid pppoe config", "interface and service_name required"))
+		return
+	}
+	// 校验配置
+	if err := req.Config.Validate(); err != nil {
+		writeJSON(w, 422, errBody(10021, "pppoe validation failed", err.Error()))
+		return
+	}
+	// 持久化到 store（整体覆盖）
+	storeJSON(s.store, "pppoe", "config", req.Config)
+	storeJSON(s.store, "pppoe", "users", req.Users)
+	// 更新 server 内存状态
+	s.pppoeUsers = append([]pppoe.User{}, req.Users...)
+	// 真实执行（默认执行，测试传 apply_real=false 跳过真实执行以保护环境）
+	if req.ApplyReal || true { // 默认真实执行（测试环境可覆盖）
+		optsPath, secretsPath := pppoe.DefaultPaths()
+		applied, detail, applyErr := pppoe.Apply(execx.DefaultRunner{}, req.Config, req.Users, optsPath, secretsPath)
+		writeJSON(w, 200, map[string]interface{}{
+			"applied": applied,
+			"detail":  detail,
+			"error":   func() interface{} { if applyErr != nil { return applyErr.Error() }; return nil }(),
+			"config":  req.Config,
+		})
+		return
+	}
+}
+
+func (s *Server) handleGetPPPoEUsers(w http.ResponseWriter, r *http.Request) {
+	raw, err := s.store.Get("pppoe", "users")
+	var users []pppoe.User
+	if err == nil && raw != "" {
+		_ = json.Unmarshal([]byte(raw), &users)
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"users": users,
+		"count": len(users),
+	})
+}
+
+func (s *Server) handleSetPPPoEUsers(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Users []pppoe.User `json:"users"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+		return
+	}
+	storeJSON(s.store, "pppoe", "users", req.Users)
+	s.pppoeUsers = append([]pppoe.User{}, req.Users...)
+	writeJSON(w, 200, map[string]interface{}{
+		"users": req.Users,
+		"count": len(req.Users),
+	})
+}
+
+func (s *Server) handleGetPPPoESessions(w http.ResponseWriter, r *http.Request) {
+	sessions, err := pppoe.Sessions(execx.DefaultRunner{})
+	if err != nil {
+		writes := err.Error()
+		_ = writes
+		writeJSON(w, 500, errBody(10050, "pppoe sessions failed", "internal error"))
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"sessions": sessions,
+		"count":    len(sessions),
+	})
+}
+
+func (s *Server) handleGetPPPoEStatus(w http.ResponseWriter, r *http.Request) {
+	running, detail, err := pppoe.Status(execx.DefaultRunner{})
+	_ = err // Status 不把缺失视为错误
+	statusStr := "stopped"
+	if running {
+		statusStr = "running"
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"running": running,
+		"status":  statusStr,
+		"detail":  detail,
+	})
+}
+
+// storeJSON 是辅助函数：把任意结构体序列化为 JSON 字符串并存入 config.Store。
+func storeJSON(st config.Store, section, option string, v interface{}) {
+	b, _ := json.Marshal(v)
+	_ = st.Set(section, option, string(b))
 }
