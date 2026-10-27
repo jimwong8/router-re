@@ -51,6 +51,17 @@ else
     echo "ok ($(grep -c '^ok' /tmp/quality_gate_test.log) packages)"
 fi
 
+# 前端调用的路径必须真在后端注册过。之前 /vpn/tunnels 就是前端调用了未注册路径，
+# 页面永远空白但所有后端测试都是绿的 —— 这类问题只有跨层对比才能发现。
+echo "== api contract =="
+if ! python3 "$ROOT/scripts/api_contract_check.py" >/tmp/quality_gate_api.log 2>&1 ; then
+    echo "FAIL: 前端调用了未注册的后端路径"
+    grep -A2 '❌' /tmp/quality_gate_api.log | head -20
+    FAIL=1
+else
+    grep '✅' /tmp/quality_gate_api.log | head -1
+fi
+
 echo ""
 if [ "$FAIL" -eq 0 ]; then
     echo "QUALITY GATE: PASS"
