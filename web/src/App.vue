@@ -34,6 +34,7 @@
           <router-link to="/routing-policy" style="color:#eee; text-decoration:none;">策略路由</router-link>
           <router-link to="/config-sync" style="color:#eee; text-decoration:none;">配置备份</router-link>
           <router-link to="/diagnostics" style="color:#eee; text-decoration:none;">系统诊断</router-link>
+          <router-link to="/alerts" style="color:#eee; text-decoration:none;">告警规则</router-link>
           <router-link to="/snmp" style="color:#eee; text-decoration:none;">SNMP</router-link>
           <router-link to="/services" style="color:#eee; text-decoration:none;">高级服务</router-link>
           <router-link to="/ipv6" style="color:#eee; text-decoration:none;">IPv6</router-link>
