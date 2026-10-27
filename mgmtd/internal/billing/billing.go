@@ -4,22 +4,41 @@ import "fmt"
 
 // Plan is a sellable package: price, validity days and traffic quota.
 type Plan struct {
-	Name      string  `json:"name"`
-	PriceYuan float64 `json:"price_yuan"`
-	Days      int     `json:"days"`
-	QuotaMB   int     `json:"quota_mb"`
+	ID         string  `json:"id"`
+	Name       string  `json:"name"`
+	PriceYuan  float64 `json:"price_yuan"`
+	Days       int     `json:"days"`
+	PeriodDays int     `json:"period_days"`
+	QuotaMB    int     `json:"quota_mb"`
 }
 
-// ValidatePlan checks that a plan has a name and at least one of days/quota.
+// ValidatePlan checks that a plan is well-formed (unified for both the
+// legacy Days-based and the new PeriodDays-based billing flows).
 func ValidatePlan(p Plan) error {
 	if p.Name == "" {
 		return fmt.Errorf("plan name must not be empty")
 	}
-	if p.PriceYuan < 0 {
-		return fmt.Errorf("plan price must be >= 0")
+	if p.PriceYuan < 0 || p.PriceYuan > 1000000 {
+		return fmt.Errorf("plan price must be in [0, 1000000]")
 	}
-	if p.Days <= 0 && p.QuotaMB <= 0 {
-		return fmt.Errorf("plan must define days > 0 or quota_mb > 0")
+	if p.PeriodDays < 0 || p.PeriodDays > 365 {
+		return fmt.Errorf("plan period_days must be in [0, 365]")
+	}
+	if p.PeriodDays > 0 && (p.PeriodDays < 1) {
+		return fmt.Errorf("plan period_days must be >= 1")
+	}
+	// PeriodDays is the new authoritative field; Days is the legacy alias.
+	// At least one day-counter (or a quota) must be present, otherwise the
+	// plan has no defined validity window.
+	if p.PeriodDays == 0 && p.Days == 0 && p.QuotaMB == 0 {
+		return fmt.Errorf("plan must define period_days/days > 0 or quota_mb > 0")
+	}
+	// When PeriodDays is explicitly given it must be in 1..365.
+	if p.PeriodDays != 0 && (p.PeriodDays < 1 || p.PeriodDays > 365) {
+		return fmt.Errorf("plan period_days must be 1-365, got %d", p.PeriodDays)
+	}
+	if p.QuotaMB < 0 {
+		return fmt.Errorf("plan quota_mb must be >= 0")
 	}
 	return nil
 }

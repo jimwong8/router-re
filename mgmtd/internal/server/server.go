@@ -307,6 +307,37 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/threat/fetch", s.auth(s.auditWrap("threat.fetch", s.handleThreatFetch)))
 	s.mux.HandleFunc("GET /api/v1/threat/stats", s.auth(s.handleThreatStats))
 	// P8-4 应用限速与连接配额（仅本区块）
+	// P11：固件升级、诊断报告、邮件/Trap 通知、策略路由
+	s.mux.HandleFunc("GET /api/v1/firmware/inspect", s.auth(s.handleFirmwareInspect))
+	s.mux.HandleFunc("POST /api/v1/firmware/plan", s.auth(s.handleFirmwarePlan))
+	s.mux.HandleFunc("POST /api/v1/firmware/apply", s.auth(s.auditWrap("firmware.apply", s.handleFirmwareApply)))
+	s.mux.HandleFunc("GET /api/v1/diagnostics/report", s.auth(s.handleDiagReportJSON))
+	s.mux.HandleFunc("GET /api/v1/diagnostics/report/text", s.auth(s.handleDiagReportText))
+	s.mux.HandleFunc("GET /api/v1/notify/smtp", s.auth(s.handleGetSMTP))
+	s.mux.HandleFunc("POST /api/v1/notify/smtp", s.auth(s.auditWrap("notify.smtp.set", s.handleSetSMTP)))
+	s.mux.HandleFunc("POST /api/v1/notify/smtp/preview", s.auth(s.handleSMTPPreview))
+	s.mux.HandleFunc("GET /api/v1/notify/trap", s.auth(s.handleGetTrap))
+	s.mux.HandleFunc("POST /api/v1/notify/trap", s.auth(s.auditWrap("notify.trap.set", s.handleSetTrap)))
+	s.mux.HandleFunc("GET /api/v1/routing/tables", s.auth(s.handleGetPolicyTables))
+	s.mux.HandleFunc("POST /api/v1/routing/tables", s.auth(s.auditWrap("routing.tables.set", s.handleSetPolicyTables)))
+	s.mux.HandleFunc("GET /api/v1/routing/rules", s.auth(s.handleGetPolicyRules))
+	s.mux.HandleFunc("POST /api/v1/routing/rules", s.auth(s.auditWrap("routing.rules.set", s.handleSetPolicyRules)))
+
+	// P10：告警规则、日志轮转/syslog、账单、配置导出/差异/恢复
+	s.mux.HandleFunc("GET /api/v1/alerts/rules", s.auth(s.handleGetAlertRules))
+	s.mux.HandleFunc("POST /api/v1/alerts/rules", s.auth(s.auditWrap("alerts.rules.set", s.handleSetAlertRules)))
+	s.mux.HandleFunc("POST /api/v1/alerts/test", s.auth(s.handleTestAlerts))
+	s.mux.HandleFunc("GET /api/v1/logs/rotate", s.auth(s.handleGetRotate))
+	s.mux.HandleFunc("POST /api/v1/logs/rotate", s.auth(s.auditWrap("logs.rotate.set", s.handleSetRotate)))
+	s.mux.HandleFunc("GET /api/v1/logs/syslog", s.auth(s.handleGetSyslog))
+	s.mux.HandleFunc("POST /api/v1/logs/syslog", s.auth(s.auditWrap("logs.syslog.set", s.handleSetSyslog)))
+	s.mux.HandleFunc("POST /api/v1/logs/syslog/test", s.auth(s.auditWrap("logs.syslog.test", s.handleTestSyslog)))
+	s.mux.HandleFunc("GET /api/v1/billing/bills", s.auth(s.handleGetBills))
+	s.mux.HandleFunc("POST /api/v1/billing/bills/generate", s.auth(s.auditWrap("billing.bills.generate", s.handleGenerateBills)))
+	s.mux.HandleFunc("GET /api/v1/config/export", s.auth(s.handleExportConfig))
+	s.mux.HandleFunc("POST /api/v1/config/preview", s.auth(s.handlePreviewRestore))
+	s.mux.HandleFunc("POST /api/v1/config/restore", s.auth(s.auditWrap("config.restore", s.handleRestoreConfig)))
+
 	// P9：IPv6 ND/PD、端口镜像、PPPoE 多拨、流量计费
 	s.mux.HandleFunc("GET /api/v1/ipv6/nd", s.auth(s.handleGetIPv6ND))
 	s.mux.HandleFunc("POST /api/v1/ipv6/nd", s.auth(s.auditWrap("ipv6.nd.set", s.handleSetIPv6ND)))

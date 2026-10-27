@@ -23,6 +23,21 @@ func NewMockStore() *MockStore {
 	}
 }
 
+// Export 返回全部配置项的只读副本（key 是 "section.option"）。
+// 与 FileStore.Export 同义：配置导出/迁移需要真实内容，
+// 而 Snapshot() 返回的是快照 ID。两个实现都必须有，
+// 否则服务在没配 MGM_CONFIG_FILE 时会跑 MockStore，
+// 导出端点会因为类型断言失败而永远返回空配置（已踩到）。
+func (m *MockStore) Export() map[string]string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make(map[string]string, len(m.data))
+	for k, v := range m.data {
+		out[k] = v
+	}
+	return out
+}
+
 // key 将 (section, option) 拼成内部存储键。
 func key(section, option string) string { return section + "." + option }
 

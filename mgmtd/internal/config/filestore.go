@@ -98,6 +98,20 @@ func (f *FileStore) Snapshot() (string, error) {
 	return id, nil
 }
 
+// Export 返回全部配置项的只读副本（key 是 "section.option"）。
+//
+// 为什么需要它：Snapshot() 返回的是快照 ID 而不是内容，配置导出/迁移
+// 需要真正的内容。这个方法是纯读的，不影响任何现有行为。
+func (f *FileStore) Export() map[string]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make(map[string]string, len(f.data))
+	for k, v := range f.data {
+		out[k] = v
+	}
+	return out
+}
+
 // Rollback restores the state captured by Snapshot. Unknown ids are ignored.
 func (f *FileStore) Rollback(snap string) error {
 	f.mu.Lock()

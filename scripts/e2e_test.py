@@ -35,6 +35,13 @@ SKIP_PATHS = {"/api/v1/auth/login"}  # POST-only; GET 会 405，单独测
 # 这些端点在没有配置/前置数据时返回 422 是**正确**的语义（不是接口坏了）：
 # 没有成员就选不出出口，没有规则就测不出命中。E2E 必须区分
 # 「正确拒绝」和「接口故障」，否则每次都要人工判断这条失败是不是真的。
+# 纯文本端点：这些接口本来就返回 text/plain，不是 JSON。
+# 用 JSON 解析它们会误判成失败（诊断报告导出就是给人看/存档的纯文本）。
+TEXT_ENDPOINTS = {
+    "/api/v1/diagnostics/report/text",
+    "/api/v1/notify/smtp/preview",
+}
+
 EXPECTED_422 = {
     "/api/v1/lb/preview",       # 没有 enabled 成员时无法选路
 }
@@ -45,6 +52,9 @@ DEFAULT_QUERY = {
     "/api/v1/conntrack": "?limit=50",
     "/api/v1/logs": "?limit=50",
     "/api/v1/htb/show": "?iface=ens18",
+    # firmware/inspect 必须带 path；/bin/true 是真实存在的小文件，
+    # 能被 inspect 识别出 magic=elf（不是固件），用来验证"读取+识别"这条路径
+    "/api/v1/firmware/inspect": "?path=/bin/true",
 }
 
 
@@ -122,6 +132,16 @@ def main() -> int:
         try:
             data = json.loads(body)
         except json.JSONDecodeError:
+            # 纯文本端点本来就返回 text/plain（诊断报告导出、邮件预览）。
+            # 用 JSON 解析它们是误判 —— 只要 200 且有内容就算通过。
+            if path in TEXT_ENDPOINTS:
+                if body.strip():
+                    print(f"{'OK':<6} {status:<6} {elapsed:>6.2f}s {path}  (text/plain {len(body)}B)")
+                else:
+                    bad += 1
+                    failures.append(f"{path} → 纯文本端点返回空响应")
+                    print(f"{'FAIL':<6} {status:<6} {elapsed:>6.2f}s {path}  (空响应)")
+                continue
             bad += 1
             failures.append(f"{path} → 非 JSON 响应: {body[:120]}")
             print(f"{'FAIL':<6} {status:<6} {elapsed:>6.2f}s {path}  (非 JSON)")
