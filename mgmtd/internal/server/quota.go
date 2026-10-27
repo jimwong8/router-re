@@ -40,9 +40,15 @@ func (s *Server) handleGetQuotaPolicies(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleSetQuotaPolicies(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Policies []quota.Policy `json:"policies"`
+		Confirm bool `json:"confirm"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, 400, errBody(10170, "json decode fail", err.Error()))
+		return
+	}
+	if len(req.Policies) == 0 && !req.Confirm {
+		writeJSON(w, 422, errBody(10173, "policies must not be empty",
+			"to clear all quota policies, send {policies:[],confirm:true}"))
 		return
 	}
 	for _, p := range req.Policies {

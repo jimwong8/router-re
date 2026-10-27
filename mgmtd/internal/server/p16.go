@@ -171,9 +171,17 @@ func (s *Server) handleListDDNS(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSetDDNS(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Records []ddnsup.Record `json:"records"`
+		Confirm bool            `json:"confirm"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, 400, errBody(10422, "invalid JSON body", err.Error()))
+		return
+	}
+	// 空数组是全量替换语义：会清空所有 DDNS 记录并返回 200。
+	// 必须显式 confirm:true 才允许清空。
+	if len(body.Records) == 0 && !body.Confirm {
+		writeJSON(w, 422, errBody(10425, "records must not be empty",
+			"to clear all ddns records, send {records:[],confirm:true}"))
 		return
 	}
 	// 打码值原样提交回来时不能覆盖真 token

@@ -247,10 +247,18 @@ func (s *Server) handleGetPortTrigger(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSetPortTrigger(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Rules []porttrigger.Trigger `json:"rules"`
+		Rules   []porttrigger.Trigger `json:"rules"`
+		Confirm bool                  `json:"confirm"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, 422, errBody(10344, "invalid body", err.Error()))
+		return
+	}
+	// 空数组是全量替换语义：会清空所有端口触发规则并返回 200。
+	// 必须显式 confirm:true 才允许清空。
+	if len(body.Rules) == 0 && !body.Confirm {
+		writeJSON(w, 422, errBody(10347, "rules must not be empty",
+			"to clear all port triggers, send {rules:[],confirm:true}"))
 		return
 	}
 	for i, t := range body.Rules {

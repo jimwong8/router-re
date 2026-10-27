@@ -193,6 +193,11 @@ func (s *Server) handleThreatImport(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, errBody(10165, "json decode fail", err.Error()))
 		return
 	}
+	if strings.TrimSpace(req.Text) == "" {
+		writeJSON(w, 422, errBody(10166, "text must not be empty",
+			"导入内容为空；空文本无法产生任何情报条目"))
+		return
+	}
 	entries, parseSkipped, parseErr := threat.ParseFeedCount(req.Text)
 	now := time.Now().Unix()
 	// 补齐时间字段。

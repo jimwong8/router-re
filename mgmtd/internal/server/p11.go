@@ -296,10 +296,18 @@ func (s *Server) handleGetPolicyRules(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSetPolicyRules(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Rules []policyroute.Rule `json:"rules"`
+		Rules   []policyroute.Rule `json:"rules"`
+		Confirm bool               `json:"confirm"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, 422, errBody(10318, "invalid body", err.Error()))
+		return
+	}
+	// 空数组是全量替换语义：会清空所有策略路由规则并返回 200。
+	// 必须显式 confirm:true 才允许清空（10318 已被 invalid body 占用，这里用 10320）。
+	if len(body.Rules) == 0 && !body.Confirm {
+		writeJSON(w, 422, errBody(10320, "rules must not be empty",
+			"to clear all policy rules, send {rules:[],confirm:true}"))
 		return
 	}
 	for i, rl := range body.Rules {

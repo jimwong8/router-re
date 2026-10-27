@@ -1989,10 +1989,18 @@ func (s *Server) handleGetPPPoEUsers(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSetPPPoEUsers(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Users []pppoe.User `json:"users"`
+		Users   []pppoe.User `json:"users"`
+		Confirm bool         `json:"confirm"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+		return
+	}
+	// 空数组是全量替换语义：会清空所有 PPPoE 账号并返回 200。
+	// 必须显式 confirm:true 才允许清空。
+	if len(req.Users) == 0 && !req.Confirm {
+		writeJSON(w, 422, errBody(10052, "users must not be empty",
+			"to clear all pppoe users, send {users:[],confirm:true}"))
 		return
 	}
 	storeJSON(s.store, "pppoe", "users", req.Users)
