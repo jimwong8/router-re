@@ -55,6 +55,7 @@ DEFAULT_QUERY = {
     # firmware/inspect 必须带 path；/bin/true 是真实存在的小文件，
     # 能被 inspect 识别出 magic=elf（不是固件），用来验证"读取+识别"这条路径
     "/api/v1/firmware/inspect": "?path=/bin/true",
+    "/api/v1/iface/tune": "?iface=ens18",
 }
 
 

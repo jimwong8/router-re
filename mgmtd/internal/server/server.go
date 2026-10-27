@@ -307,6 +307,22 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/threat/fetch", s.auth(s.auditWrap("threat.fetch", s.handleThreatFetch)))
 	s.mux.HandleFunc("GET /api/v1/threat/stats", s.auth(s.handleThreatStats))
 	// P8-4 应用限速与连接配额（仅本区块）
+	// P12：链路聚合、接口调优、证书、在线用户、端口触发/ALG/mDNS
+	s.mux.HandleFunc("GET /api/v1/bond", s.auth(s.handleGetBond))
+	s.mux.HandleFunc("POST /api/v1/bond", s.auth(s.auditWrap("bond.set", s.handleSetBond)))
+	s.mux.HandleFunc("GET /api/v1/iface/tune", s.auth(s.handleGetIfaceTune))
+	s.mux.HandleFunc("POST /api/v1/iface/tune", s.auth(s.auditWrap("iface.tune", s.handleSetIfaceTune)))
+	s.mux.HandleFunc("GET /api/v1/cert", s.auth(s.handleGetCert))
+	s.mux.HandleFunc("POST /api/v1/cert/self-signed", s.auth(s.auditWrap("cert.selfsigned", s.handleSelfSignedCert)))
+	s.mux.HandleFunc("GET /api/v1/online", s.auth(s.handleGetOnline))
+	s.mux.HandleFunc("POST /api/v1/online/kick", s.auth(s.auditWrap("online.kick", s.handleKickOnline)))
+	s.mux.HandleFunc("GET /api/v1/porttrigger", s.auth(s.handleGetPortTrigger))
+	s.mux.HandleFunc("POST /api/v1/porttrigger", s.auth(s.auditWrap("porttrigger.set", s.handleSetPortTrigger)))
+	s.mux.HandleFunc("GET /api/v1/alg", s.auth(s.handleGetALG))
+	s.mux.HandleFunc("POST /api/v1/alg", s.auth(s.auditWrap("alg.set", s.handleSetALG)))
+	s.mux.HandleFunc("GET /api/v1/mdns", s.auth(s.handleGetMDNS))
+	s.mux.HandleFunc("POST /api/v1/mdns", s.auth(s.auditWrap("mdns.set", s.handleSetMDNS)))
+
 	// P11：固件升级、诊断报告、邮件/Trap 通知、策略路由
 	s.mux.HandleFunc("GET /api/v1/firmware/inspect", s.auth(s.handleFirmwareInspect))
 	s.mux.HandleFunc("POST /api/v1/firmware/plan", s.auth(s.handleFirmwarePlan))
