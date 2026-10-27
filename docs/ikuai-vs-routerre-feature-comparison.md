@@ -103,7 +103,20 @@
 
 按「必须执行命令才能答对」的标准验收：8 个测试全过（含计数器回绕返回 0 而非负数、真实读 /proc/net/dev、TopN 排序截断），150 行实现 + 196 行测试，注释写清设计取舍（不用 ifconfig/ip 外部命令，避免 PATH 与解析差异）。API 实测返回真实速率而非编造值。
 
-### 当前闭环模块（20 个）
+### P6 补齐记录（2026-10-27）
+
+| P6 项 | 状态 | 真实验证证据 |
+|---|---|---|
+| SNMP | OK | v2c community + v3 用户(auth/priv) + trap；**API 响应无明文密码**（`createUser monitor sha *** aes ***`）；真实 `/etc/snmp/snmpd.conf` 权限 `-rw-------` 保留真密码；snmpd 未装 -> applied:false + 真实错误 |
+| UPnP/IGD | OK | `allow_cidr=0.0.0.0/0` -> **422 拒绝**，原文："permits every address: refusing to expose internal mappings to the whole internet" |
+| 网络诊断 | OK | 注入逐项拒绝：`a;id`/`a\|id`/`a$(id)`/`a b` -> 422，反引号 -> 400；真实 ping 127.0.0.1 2 包全收 min 0.094ms avg 0.197ms max 0.3ms |
+| 远程与系统 | OK | 时区/远程访问/WOL；改 sshd_config 与 web 端口只返回"需要人工处理"清单，不自动改（改错会锁死自己） |
+
+### P6 修的 bug
+
+19. **SNMP 的 snmpd 文本字段返回明文 v3 密码** —— `config` 用了 `Masked()` 但 `snmpd` 用了原始 cfg 渲染。API 响应带密码等于写进浏览器缓存 / 代理日志 / DevTools 历史。改为 `RenderSnmpd(cfg.Masked())`。
+
+### 当前闭环模块（24 个）
 
 防火墙、QoS（接口级）、接口配置、静态路由、DHCP、多WAN 策略路由、per-IP 限速、DPI 标记、Web Portal、PPPoE、VLAN、桥接 —— 12 个模块全部「下发到内核 + 可回读验证」。
 
@@ -121,7 +134,7 @@
 | 4 | 流控分流 | 21 | 6 | **29%** | QoS + per-IP 限速真实 tc / DPI 标记入内核 / 多WAN 策略路由真实下发 |
 | 5 | 认证计费 | 28 | 12 | **43%** | Portal + PPPoE 服务端 + RADIUS + 账号管理(批量导入/配额/绑定MAC) + 套餐计费；缺真实流量统计与账单 |
 | 6 | 无线服务 | 21 | 0.5 | **2%** | **AC 管理已取消**；仅保留本机 AP 的 SSID/hostapd 配置 |
-| 7 | 高级服务 | 32 | 6 | **19%** | DDNS(Cloudflare/阿里云双 provider) + NTP 配置真实生效 |
+| 7 | 高级服务 | 32 | 16 | **50%** | DDNS + NTP + SNMP(v2c/v3) + UPnP/IGD + 网络诊断(ping/traceroute/dns) + WOL；缺邮件告警/远程升级 |
 | 8 | 日志中心 | 11 | 5 | **45%** | journal 查询(unit/grep/时间) + 连接跟踪表(协议/方向/状态) |
 | 9 | 设备设置 | 20 | 1.5 | **15%** | 单管理员 + 快照 |
 | | **合计** | **248** | **~12** | **~16%** | 2 模块闭环，8 模块渲染 |
