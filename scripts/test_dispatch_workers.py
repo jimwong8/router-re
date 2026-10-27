@@ -189,6 +189,61 @@ longt = [t for t in final if t["id"] == "long"][0]
 check("声明 60 分钟预算的任务不被 20 分钟默认值杀掉",
       longt["status"] == "dispatched", f"实际 {longt['status']}")
 
+# ---------- tier 路由：判断类任务只给强模型 pane ----------
+
+print("\n=== 场景 14: tier=verify 只派给 strong pane（pM）===")
+with tempfile.TemporaryDirectory() as td:
+    td = Path(td)
+    d.QUEUE, d.STATE, d.LOG = td/"tasks.jsonl", td/".state.json", td/"dispatch.log"
+    d.QUEUE.write_text(json.dumps({"id":"v1","status":"pending","prompt":"审这个","tier":"verify"})+"\n", encoding="utf-8")
+    d.PANES = ["w1:pN", "w1:pM"]          # pN=free, pM=strong
+    d.MAX_PER_ROUND = 1
+    d.pane_state = lambda p: "idle"
+    d.context_pct = lambda p: 10.0
+    d.reset_context = lambda p: True
+    served = []
+    d.dispatch = lambda p, prompt: (served.append(p) or True)
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        d.main()
+check("verify 任务被派给 pM（strong）", served == ["w1:pM"], f"实际 {served}")
+
+print("\n=== 场景 15: 只有 free pane 时 tier=verify 不派（宁可不做也不给弱模型）===")
+with tempfile.TemporaryDirectory() as td:
+    td = Path(td)
+    d.QUEUE, d.STATE, d.LOG = td/"tasks.jsonl", td/".state.json", td/"dispatch.log"
+    d.QUEUE.write_text(json.dumps({"id":"v2","status":"pending","prompt":"审这个","tier":"verify"})+"\n", encoding="utf-8")
+    d.PANES = ["w1:pN", "w1:pQ"]
+    d.MAX_PER_ROUND = 1
+    d.pane_state = lambda p: "idle"
+    d.context_pct = lambda p: 10.0
+    d.reset_context = lambda p: True
+    served = []
+    d.dispatch = lambda p, prompt: (served.append(p) or True)
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        d.main()
+    final = [json.loads(l) for l in d.QUEUE.read_text().splitlines() if l.strip()]
+check("free pane 不领 verify 任务", served == [], f"实际 {served}")
+check("任务保持 pending 等 strong pane", final[0]["status"] == "pending", f"实际 {final[0]['status']}")
+
+print("\n=== 场景 16: tier=exec（默认）任何 pane 都能领 ===")
+with tempfile.TemporaryDirectory() as td:
+    td = Path(td)
+    d.QUEUE, d.STATE, d.LOG = td/"tasks.jsonl", td/".state.json", td/"dispatch.log"
+    d.QUEUE.write_text(json.dumps({"id":"e1","status":"pending","prompt":"改个文件"})+"\n", encoding="utf-8")
+    d.PANES = ["w1:pN"]
+    d.MAX_PER_ROUND = 1
+    d.pane_state = lambda p: "idle"
+    d.context_pct = lambda p: 10.0
+    d.reset_context = lambda p: True
+    served = []
+    d.dispatch = lambda p, prompt: (served.append(p) or True)
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        d.main()
+check("exec 任务派给 free pane", served == ["w1:pN"], f"实际 {served}")
+
 print("\n=== 汇总 ===")
 if FAILED:
     print(f"  {len(FAILED)} 项失败: {FAILED}")

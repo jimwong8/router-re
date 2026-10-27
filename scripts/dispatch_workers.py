@@ -63,6 +63,20 @@ STATE = ROOT / ".dispatch-state.json"
 
 PANES = os.environ.get("PANES", "w1:pN w1:pQ w1:pP w1:pM").split()
 MAX_PER_ROUND = int(os.environ.get("MAX_PER_ROUND", "4"))
+
+# pane 的模型档位。任务可以用 tier 声明自己需要哪一档：
+#   plan / verify —— 需要判断，只给强模型（免费模型会给你自信的废话）
+#   exec（默认）  —— 机械执行，任何 pane 都行
+# 实测依据：弱模型能过"文件在/能编译"，但"这个设计对不对"这类判断给它是浪费；
+# 而 12 个开发任务里 11 个由免费模型完成且全部通过验收，说明 exec 类完全可以下放。
+# 注意：改 pane 的模型后必须同步这里，否则 tier 路由会失效。
+PANE_TIER = {
+    "w1:pM": "strong",      # OpenCode + deepseek-v4-flash
+    "w1:pN": "free",        # Hermes + beam-free
+    "w1:pQ": "free",
+    "w1:pP": "free",
+}
+JUDGEMENT_TIERS = {"plan", "verify"}
 STALE_MINUTES = float(os.environ.get("STALE_MINUTES", "20"))  # 派发后多久没产出算失败
 # 工人已经 idle（它认为做完了）但产出不达标，多久之后释放它。
 # 没有这个，会出现"任务卡在 WAIT 占着 pane，pane 又领不到新活"的死局：
@@ -548,31 +562,35 @@ def main() -> int:
                 continue
 
         # 优先取指定了本 pane 的，其次取没指定 prefer 的。
-        # 三道门禁：有 prompt（空 prompt 派出去等于让工人猜）、依赖已完成、退避窗口已过。
+        # 四道门禁：有 prompt、依赖已完成、退避窗口已过、tier 匹配 pane 档位。
+        def eligible(task: dict) -> bool:
+            if task.get("status") != "pending":
+                return False
+            if not (task.get("prompt") or "").strip():
+                return False
+            if not retry_ready(task, t) or not deps_satisfied(task, tasks):
+                return False
+            # 判断类任务不给免费模型：给它也做不对，还占着 pane 烧 token
+            if task.get("tier") in JUDGEMENT_TIERS and PANE_TIER.get(pane) != "strong":
+                return False
+            return True
+
         cand = None
         for task in tasks:
-            if task.get("status") != "pending":
-                continue
-            if not (task.get("prompt") or "").strip():
-                continue
-            if not retry_ready(task, t) or not deps_satisfied(task, tasks):
-                continue
-            prefer = task.get("prefer")
-            if prefer == pane:
+            if eligible(task) and task.get("prefer") == pane:
                 cand = task
                 break
         if cand is None:
             for task in tasks:
-                if task.get("status") != "pending" or task.get("prefer"):
-                    continue
-                if not (task.get("prompt") or "").strip():
-                    continue
-                if not retry_ready(task, t) or not deps_satisfied(task, tasks):
-                    continue
-                cand = task
-                break
+                if eligible(task) and not task.get("prefer"):
+                    cand = task
+                    break
         if cand is None:
-            break  # 队列里没有能派的活了
+            # 这个 pane 没有能领的活 —— 但不能 break 跳出整个循环。
+            # 加了 tier 过滤后，"本 pane 领不了"不代表"别的 pane 也领不了"：
+            # free pane 遇到 tier=verify 会没候选，若在此 break，
+            # 后面的 strong pane 永远轮不到，判断类任务会永远卡在 pending。
+            continue
 
         if dispatch(pane, cand.get("prompt") or ""):
             cand["status"] = "dispatched"
