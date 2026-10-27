@@ -96,9 +96,12 @@
       </el-table>
 
       <el-table :data="neighbors" style="width:100%; margin-top:16px">
-        <el-table-column prop="ip" label="IP 地址" />
-        <el-table-column prop="mac" label="MAC 地址" />
-        <el-table-column prop="state" label="状态" />
+        <!-- 后端 /security/arp/neighbors 返回 {dev,dst,lladdr,state}；
+             早先写成 prop="ip"/"mac" 导致 IP/MAC 两列全空（视觉验证时发现）。 -->
+        <el-table-column prop="dev" label="接口" width="110" />
+        <el-table-column prop="dst" label="IP 地址" />
+        <el-table-column prop="lladdr" label="MAC 地址" />
+        <el-table-column prop="state" label="状态" width="120" />
       </el-table>
     </el-card>
   </div>

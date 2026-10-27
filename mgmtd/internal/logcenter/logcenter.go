@@ -107,9 +107,14 @@ func queryJournalctl(o QueryOpts) ([]LogEntry, error) {
 			continue
 		}
 		entry := LogEntry{}
-		// __REALTIME_TIMESTAMP 是微秒字符串，转 RFC3339
+		// __REALTIME_TIMESTAMP 是字符串形式的微秒时间戳（如 1793084380346468）。
+		// 直接透传会让前端显示成一串裸数字，人看不懂 —— 这里转成可读时间。
 		if ts, ok := raw["__REALTIME_TIMESTAMP"].(string); ok {
-			entry.TS = ts
+			if us, err := strconv.ParseInt(ts, 10, 64); err == nil && us > 0 {
+				entry.TS = time.Unix(0, us*1000).Local().Format("2006-01-02 15:04:05")
+			} else {
+				entry.TS = ts
+			}
 		}
 		// _SYSTEMD_UNIT
 		if u, ok := raw["_SYSTEMD_UNIT"].(string); ok {
