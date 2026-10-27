@@ -10,3 +10,4 @@ logs/
 
 # 运行时审计日志（每次跑 E2E 都会增长，不该进仓库）
 audit.jsonl
+ops/tasks.jsonl.bak-*

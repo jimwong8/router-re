@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -100,6 +101,42 @@ IDLE_MARKERS = [
     "❯ type a message",
 ]
 
+# 阻塞态：上游限流/重试。这不是 busy，也不是 idle —— 是"卡住了"。
+#
+# 为什么必须单独判：实测 pM（OpenCode）撞上游 TPM 后，屏幕上是
+#     ⚠ Retry due · attempt 5 · channel rate gate: no available channel
+# 而底部状态栏同时有 "ctrl+p commands"，命中了 IDLE_MARKERS。
+# 原逻辑先判 busy 再判 idle，这两行都不在 BUSY_MARKERS 里，于是 pM 被判成
+# **idle**，调度器继续往里派活 —— 新任务和卡住的旧任务一起堆在同一个死锁里。
+# 所以 blocked 必须单独成一态，且优先级高于 idle。
+BLOCKED_MARKERS = [
+    "retry due",
+    "retrying in",
+    "channel rate gate",
+    "no available channel",
+    "provider circuit open",
+    "inference exceeds tpm/rpm",
+]
+
+# 上下文水位线。超过就先重置会话再派活，理由：
+#
+# 网关侧 deepseek-v4-flash 的 safe_context_window 只有 5333，而上游真实
+# TPM 限制更硬 —— 实测 140K tokens 的请求被上游 429（inference exceeds
+# tpm/rpm limit），66K 以下可以通过。OpenCode 会话涨到 139.4K 之后，
+# 每次请求都超限 → 所有 channel 进 rate gate → no available channel → 无限重试。
+# 更糟的是想 /compact 也发不出去（压缩本身要一次大请求），形成死锁。
+# 所以在水位线以下就重置，不要等它卡死。
+MAX_CONTEXT_PCT = float(os.environ.get("MAX_CONTEXT_PCT", "60"))
+
+# 两种状态栏格式，实测各客户端的写法不同：
+#   OpenCode : "139.4K (70%) · $0.07  ctrl+p commands"
+#   Hermes   : "☤ beam-free · 15% · ◎ 90% · 17h 48m · ~"
+# Hermes 那条正则要求百分号两侧都是 ·，这样就不会误抓到 "◎ 90%"（那是别的指标）。
+CONTEXT_PATTERNS = [
+    re.compile(r"(\d+(?:\.\d+)?)K\s*\((\d+)%\)"),
+    re.compile(r"·\s*~?(\d+(?:\.\d+)?)%\s*·"),
+]
+
 
 def now() -> float:
     return time.time()
@@ -128,9 +165,15 @@ def load_queue() -> list[dict]:
         if not line or line.startswith("#"):
             continue
         try:
-            tasks.append(json.loads(line))
+            task = json.loads(line)
         except json.JSONDecodeError as exc:
             log(f"WARN 队列第 {i} 行不是合法 JSON，已跳过: {exc}")
+            continue
+        # 补默认 status。不补会出事：派发分支用 `get("status") != "pending"`，
+        # 缺失时得到 None 从而被跳过；但汇总统计用 `get("status", "pending")`
+        # 又把它算成 pending —— 任务计数里有、却永远不会被派发。
+        task.setdefault("status", "pending")
+        tasks.append(task)
     return tasks
 
 
@@ -158,26 +201,78 @@ def save_state(st: dict) -> None:
 
 # ---------- 工人状态 ----------
 
-def pane_state(pane: str) -> str:
-    """读 pane 尾部判忙闲。与 watch_workers.py 同一套标记。"""
+def read_tail(pane: str, lines: int = 8) -> str:
+    """读 pane 尾部文本。所有状态判定都基于同一份快照，避免多次读不一致。"""
     try:
-        out = subprocess.run(
-            [HERDR, "agent", "read", pane, "--lines", "8"],
+        return subprocess.run(
+            [HERDR, "agent", "read", pane, "--lines", str(lines)],
             capture_output=True, text=True, timeout=15,
         ).stdout
     except Exception as exc:  # noqa: BLE001
         log(f"WARN herdr read {pane} 失败: {exc}")
-        return "unknown"
+        return ""
+
+
+def pane_state(pane: str) -> str:
+    """读 pane 尾部判状态：busy / idle / blocked / unknown。
+
+    判定顺序：blocked > busy > idle。blocked 必须排在 idle 前面，
+    因为卡在重试时状态栏同时带着 idle 标记（见 BLOCKED_MARKERS 注释）。
+    """
+    out = read_tail(pane, 8)
     if not out.strip():
         return "unknown"
     # 大小写不敏感：同一个 TUI 在不同场景下会写 "Ctrl+P" / "ctrl+p"，
     # 区分大小写会让工人被误判成 unknown 从而永远领不到活。
     low = out.lower()
+    if any(m.lower() in low for m in BLOCKED_MARKERS):
+        return "blocked"
     if any(m.lower() in low for m in BUSY_MARKERS):
         return "busy"
     if any(m.lower() in low for m in IDLE_MARKERS):
         return "idle"
     return "unknown"
+
+
+def context_pct(pane: str) -> float | None:
+    """读状态栏里的上下文水位，如 "139.4K (70%)" 或 "· 15% ·" -> 70.0 / 15.0。
+
+    读不到时返回 None 而不是 0：把"不知道"当成"很健康"会让水位保护失效。
+    """
+    out = read_tail(pane, 14)
+    hits: list[tuple[int, float]] = []
+    for pat in CONTEXT_PATTERNS:
+        for m in pat.finditer(out):
+            # 取最后一个非 None 捕获组：OpenCode 是第 2 组（百分比），
+            # Hermes 是第 1 组。用 groups() 过滤而不是 lastindex ——
+            # lastindex 在没有任何组匹配时是 None，直接 group() 会抛异常。
+            groups = [g for g in m.groups() if g is not None]
+            if not groups:
+                continue
+            hits.append((m.end(), float(groups[-1])))
+    if not hits:
+        return None
+    hits.sort()          # 按出现位置排序，取状态栏里最靠后的那个（最新渲染）
+    return hits[-1][1]
+
+
+def reset_context(pane: str) -> bool:
+    """把上下文超标的会话重置掉。返回是否成功。
+
+    先 esc 停掉正在进行的重试，再 /new —— 顺序不能反：重试中的 TUI 会把
+    /new 当成新的 turn 输入，而 esc 之后它才回到可接受命令的状态。
+    """
+    log(f"RESET {pane} 上下文水位过高，先 esc 再 /new")
+    try:
+        subprocess.run([HERDR, "agent", "send-keys", pane, "esc"],
+                       capture_output=True, text=True, timeout=15)
+    except Exception as exc:  # noqa: BLE001
+        log(f"WARN {pane} esc 失败: {exc}")
+    time.sleep(2)
+    ok = dispatch(pane, "/new")
+    time.sleep(3)
+    log(f"RESET {pane} {'完成' if ok else '失败'}")
+    return ok
 
 
 def dispatch(pane: str, prompt: str) -> bool:
@@ -277,6 +372,22 @@ def main() -> int:
             log(f"DONE  {task['id']}  (pane={task.get('pane')}, 耗时 {int((t - task.get('dispatched_at', t)) / 60)} 分钟)")
             state.pop(task.get("pane", ""), None)
 
+    # 1.5) 迟到产出：已判 failed 但文件后来才出现 -> 翻回 done
+    #
+    # 实测：p20-api-doc 派发 23 分钟无产出被判 failed，但工人在那之后才把
+    # docs/api-reference.md 写出来（314 行 / 276 端点）。不翻回来的话，
+    # 实际已完成的活会一直挂在失败列表里，人看到 failed 就会重复派同一个
+    # 任务，白烧一遍 token。
+    for task in tasks:
+        if task.get("status") != "failed":
+            continue
+        if produced(task):
+            task["status"] = "done"
+            task["done_at"] = t
+            task["late"] = True
+            log(f"DONE(LATE) {task['id']}  超时判失败后产出才出现，翻回 done")
+            state.pop(task.get("pane", ""), None)
+
     # 2) 超时无产出 -> failed，交回队列让人看
     for task in tasks:
         if task.get("status") != "dispatched":
@@ -323,8 +434,34 @@ def main() -> int:
             break
         if pane in busy_panes:
             continue
-        if pane_state(pane) != "idle":
+
+        st = pane_state(pane)
+
+        # 上游限流重试中的 pane：先判断是不是上下文打爆造成的死锁。
+        # 是 -> 重置会话（否则永远出不来，因为压缩本身也要一次超限请求）；
+        # 不是 -> 本轮跳过，让重试自己恢复，绝不往里再压任务。
+        if st == "blocked":
+            pct = context_pct(pane)
+            if pct is not None and pct >= MAX_CONTEXT_PCT:
+                log(f"BLOCKED {pane} 上下文 {pct:.0f}% >= {MAX_CONTEXT_PCT:.0f}%，判定 TPM 死锁，重置会话")
+                if not reset_context(pane):
+                    continue
+                st = pane_state(pane)
+            else:
+                log(f"BLOCKED {pane} 上游限流重试中（上下文 {pct if pct is not None else '?'}%），本轮跳过")
+                continue
+
+        if st != "idle":
             continue
+
+        # 空闲但水位已高：先重置再派，避免新任务一进去就撞 TPM 上限。
+        pct = context_pct(pane)
+        if pct is not None and pct >= MAX_CONTEXT_PCT:
+            log(f"RESET {pane} 上下文 {pct:.0f}% >= {MAX_CONTEXT_PCT:.0f}%，重置后再派")
+            if not reset_context(pane):
+                continue
+            if pane_state(pane) != "idle":
+                continue
 
         # 优先取指定了本 pane 的，其次取没指定 prefer 的
         cand = None
