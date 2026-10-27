@@ -26,6 +26,15 @@ PAGES = [
     ("/routing-policy",  "/api/v1/routing/rules",     0,   "策略路由规则(可为空)"),
     ("/cert",            "/api/v1/cert",              0,   "证书(可能未配置)"),
     ("/alerts",          "/api/v1/alerts/rules",      0,   "告警规则(可为空)"),
+    # --- 本轮新增 ---
+    ("/voucher",         "/api/v1/voucher/list",      0,   "卡密列表(可能为空)"),
+    ("/ddns",            "/api/v1/ddns/records",      0,   "DDNS 记录(可为空)"),
+    ("/vpn-client",      "/api/v1/vpn/client",        0,   "VPN 客户端 peers(可为空)"),
+    ("/security-plus",   "/api/v1/policy/timeschedule", 0, "时间段策略 rules(可为空)"),
+    # network-tools: 无 GET 列表接口（全是 POST 探测）-> 无法比对口数，运行时 SKIP
+    ("/network-tools",   "",                           0,   "网络工具: 无 GET 列表接口(POST 探测)"),
+    # network-advanced: GET iface/tune 需 iface 参数且返回 live map(非列表) -> SKIP
+    ("/network-advanced","",                           0,   "网络高级: 表单/单接口调优，无列表渲染"),
 ]
 
 
@@ -42,6 +51,8 @@ def login():
 
 def api_count(token, path):
     """返回接口里"列表类"字段的长度，取不到返回 None。"""
+    if not path:
+        return None, "无取数接口"
     req = urllib.request.Request(API + path, headers={"Authorization": "Bearer " + token})
     try:
         with urllib.request.urlopen(req, timeout=25) as r:
@@ -51,7 +62,7 @@ def api_count(token, path):
     if not isinstance(data, dict):
         return None, "非对象响应"
     for key in ("units", "top", "sessions", "rules", "peers", "records",
-                "interfaces", "vlans", "bridges", "neighbors", "count"):
+                "interfaces", "vlans", "bridges", "neighbors", "vouchers", "count"):
         v = data.get(key)
         if isinstance(v, list):
             return len(v), ""

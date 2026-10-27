@@ -109,7 +109,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import api from '../api';
 
@@ -127,13 +127,8 @@ const targets = ref<Target[]>([]);
 const states = ref<Record<string, State>>({});
 const dialog = ref(false);
 
-const upCount = computed(() => {
-  // 从 status 接口拿更准确；这里按 states 计
-  return Object.values(states.value).filter(s => s.up).length;
-});
-const downCount = computed(() => {
-  return Object.values(states.value).filter(s => !s.up).length;
-});
+const upCount = ref(0);
+const downCount = ref(0);
 
 const form = ref<Target>({
   id: '', name: '', iface: 'eth0', kind: 'icmp', host: '', url: '',
@@ -158,6 +153,8 @@ async function load() {
     // 同时拉 status 拿 up/down（states 已含 up 信息，够用）
     const st = await api.get('/api/v1/linkcheck/status');
     if (st.data?.states) states.value = st.data.states;
+    upCount.value = st.data?.up ?? 0;
+    downCount.value = st.data?.down ?? 0;
   } catch (e: any) {
     showError(e, '加载失败');
   } finally {
