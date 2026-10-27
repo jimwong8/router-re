@@ -131,7 +131,22 @@
 21. **测试捏造输入格式** —— 工人的 `TestNeighborsJSON` 用的是自己想象的 `"state":"REACHABLE"`，测试全绿但真实调用挂掉。改成真实 `ip -j neigh show` 格式，并在注释里写明"测试输入必须来自真实命令输出"。
 22. **时区列表恒为空** —— `listTimezones` 用 `base name == "zoneinfo"` 跳过目录，但**根目录本身就叫 zoneinfo**，整棵树被跳过。修复后返回 601 个时区。工人自己发现并修了。
 
-### 当前闭环模块（28 个）
+### P8 补齐记录（2026-10-27）
+
+| P8 项 | 状态 | 真实验证证据 |
+|---|---|---|
+| DPI 流跟踪 | OK | 双向归一（正反方向归一条流）、TLS SNI / HTTP Host / DNS 名解析；截断 TLS 头 `16` / `160301` / 空 payload **全部 200 不 panic** |
+| HTB 带宽保证 | OK | `iface=lo` -> 422「tc on lo throttles local traffic and locks out ssh/curl」；未带 confirm -> dry-run 不下发（`lo` 仍 `noqueue`、`ens18` 仍 `fq_codel`）；脚本首行 `tc qdisc del`（幂等） |
+| 多线负载均衡 | OK | 权重 1:2:3 的 6 次选择实测分布 **a=1 b=2 c=3**（平滑加权轮询算法正确性硬证明）；`timeout >= interval` 被拒；flapping 抑制测试通过 |
+| 应用限速配额 | OK | `0.0.0.0/0` -> 422「对整网段限速会把路由器自身也限住，导致远程管理失联」；空策略（速率/连接/新建全 0）-> 422 |
+
+### P8 修的 bug
+
+23. **HTB 端点完全没注册** —— 工人只写了 `internal/htb` 包（我明确要求它别碰 server.go），`/api/v1/htb/apply` 返回 404。Curl 实测抓到，自己补了 6 个 handler（含 dry-run 默认 + confirm 保护）。
+24. **E2E 把「正确拒绝」当失败** —— `/lb/preview` 没配置成员时返回 422 是正确语义，但 E2E 记成 FAIL。加 `EXPECTED_422` 白名单，区分「接口坏了」和「缺前置条件」。
+25. **pQ 交了乱码** —— 它回的是 `I willlinkybCc\nApApApAkA1,`，一个文件都没写。重派时把任务拆成"只做后端 + 两个文件 + 明确函数签名"，一次就落地了。
+
+### 当前闭环模块（32 个）
 
 防火墙、QoS（接口级）、接口配置、静态路由、DHCP、多WAN 策略路由、per-IP 限速、DPI 标记、Web Portal、PPPoE、VLAN、桥接 —— 12 个模块全部「下发到内核 + 可回读验证」。
 
@@ -146,7 +161,7 @@
 | 1 | 系统监控 | 18 | 14 | **78%** | 真实 /proc 采集 + 6小时环形历史 + 5 趋势图 + 实时速率(计数器回绕归零) + TopN |
 | 2 | 网络配置 | 58 | 24 | **41%** | 接口/静态路由/NAT/VLAN/桥接/端口映射/策略路由 + DHCP服务端(静态绑定/池冲突校验) + DNS代理 + IPv6地址与RA |
 | 3 | 安全管控 | 39 | 27 | **69%** | ACL + ARP防护 + URL过滤 + 攻击防护 + **IPS规则引擎(Suricata解析)** + **L7应用过滤(通配符/allow覆盖block)** + **MAC黑白名单** + **连接数限制** + **IP/CIDR威胁情报** |
-| 4 | 流控分流 | 21 | 6 | **29%** | QoS + per-IP 限速真实 tc / DPI 标记入内核 / 多WAN 策略路由真实下发 |
+| 4 | 流控分流 | 21 | 15 | **71%** | QoS + per-IP 限速 + **DPI流跟踪(TLS SNI/HTTP Host/DNS)** + **HTB带宽保证** + **多线负载均衡(平滑加权轮询)** + **应用限速配额** |
 | 5 | 认证计费 | 28 | 12 | **43%** | Portal + PPPoE 服务端 + RADIUS + 账号管理(批量导入/配额/绑定MAC) + 套餐计费；缺真实流量统计与账单 |
 | 6 | 无线服务 | 21 | 0.5 | **2%** | **AC 管理已取消**；仅保留本机 AP 的 SSID/hostapd 配置 |
 | 7 | 高级服务 | 32 | 16 | **50%** | DDNS + NTP + SNMP(v2c/v3) + UPnP/IGD + 网络诊断(ping/traceroute/dns) + WOL；缺邮件告警/远程升级 |
