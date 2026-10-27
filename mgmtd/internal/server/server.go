@@ -327,6 +327,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/ddns/records", s.auth(s.handleListDDNS))
 	s.mux.HandleFunc("POST /api/v1/ddns/records", s.auth(s.handleSetDDNS))
 	s.mux.HandleFunc("GET /api/v1/ddns/check", s.auth(s.handleDDNSCheck))
+	// ---- P17: 卡密认证 ----
+	s.mux.HandleFunc("GET /api/v1/voucher/list", s.auth(s.handleListVouchers))
+	s.mux.HandleFunc("POST /api/v1/voucher/generate", s.auth(s.handleGenerateVouchers))
+	s.mux.HandleFunc("POST /api/v1/voucher/redeem", s.auth(s.handleRedeemVoucher))
+	s.mux.HandleFunc("DELETE /api/v1/voucher", s.auth(s.handleDeleteVoucher))
 	s.mux.HandleFunc("POST /api/v1/webadmin", s.auth(s.auditWrap("webadmin.set", s.handleSetWebAdmin)))
 	s.mux.HandleFunc("GET /api/v1/identity", s.auth(s.handleGetIdentity))
 	s.mux.HandleFunc("POST /api/v1/identity", s.auth(s.auditWrap("identity.set", s.handleSetIdentity)))
