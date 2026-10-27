@@ -42,7 +42,13 @@ func RenderNft(c Config) string {
 	}
 	b.WriteString("table inet router_guard {\n")
 	b.WriteString("	chain input {\n")
-	b.WriteString("		type filter hook input priority filter; policy drop;\n")
+	// ⚠ 必须 policy accept：本表只做「限速」，不负责默认拒绝。
+	// 写成 policy drop 会让除 SYN/ICMP 外的所有入站流量被静默丢弃 ——
+	// SSH、管理界面、DNS 响应全断，等于把机器锁死。默认拒绝是 firewall
+	// 模块的职责。
+	b.WriteString("		type filter hook input priority filter; policy accept;\n")
+	// 已建立连接直接放行，避免限速误伤长连接（SSH 会话、HTTP keep-alive）。
+	b.WriteString("		" + pfx + "ct state established,related accept\n")
 	b.WriteString("\n")
 	// nftables requires a unit after the burst value ("burst 20 packets").
 	// Omitting it is a syntax error, so the unit is always emitted.

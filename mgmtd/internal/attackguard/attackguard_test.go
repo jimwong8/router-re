@@ -120,3 +120,20 @@ func TestApply(t *testing.T) {
 		t.Errorf("input must not flush ruleset")
 	}
 }
+
+// TestRenderNftNeverDefaultsToDrop 锁死一个会锁死机器的设计错误：
+// attack guard 只负责限速，绝不能把 input 链设成 policy drop。
+// 一旦 policy drop，除 SYN/ICMP 外的入站全被静默丢弃 —— SSH、管理界面、
+// DNS 响应、已建立的 keep-alive 全部断掉。默认拒绝属于 firewall 模块。
+func TestRenderNftNeverDefaultsToDrop(t *testing.T) {
+	text := RenderNft(Config{SYNFloodPPS: 1000, ICMPFloodPPS: 200, ConnLimitPerIP: 100, Enabled: true})
+	if strings.Contains(text, "policy drop") {
+		t.Fatalf("input chain must not default to drop (locks out SSH/HTTP); got:\n%s", text)
+	}
+	if !strings.Contains(text, "policy accept") {
+		t.Fatalf("input chain should be policy accept; got:\n%s", text)
+	}
+	if !strings.Contains(text, "ct state established,related accept") {
+		t.Fatalf("must let established connections through so limiters don't kill long-lived sessions; got:\n%s", text)
+	}
+}

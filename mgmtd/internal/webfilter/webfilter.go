@@ -73,11 +73,19 @@ func Apply(r execx.Runner, rs []Rule, confPath string) error {
 	if err := os.WriteFile(confPath, []byte(RenderDnsmasq(rs)), 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", confPath, err)
 	}
+	sysErr := error(nil)
 	if _, err := r.Run("systemctl", "restart", "dnsmasq"); err == nil {
 		return nil
+	} else {
+		sysErr = err
 	}
+	initErr := error(nil)
 	if _, err := r.Run("/etc/init.d/dnsmasq", "restart"); err == nil {
 		return nil
+	} else {
+		initErr = err
 	}
-	return fmt.Errorf("配置已写入但服务未重启：%s", confPath)
+	// 报真实原因（服务不存在 / 无权限 / 配置语法错），而不是把文件路径
+	// 当成"原因"抛出去 —— 那样运维看不出到底哪一步失败。
+	return fmt.Errorf("配置已写入 %s，但 dnsmasq 未重启：systemctl: %v；init.d: %v", confPath, sysErr, initErr)
 }
