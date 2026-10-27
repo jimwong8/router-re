@@ -192,7 +192,25 @@
 33. **bond 的 `lacp_rate` 在非 802.3ad 模式会静默失效** —— 已在校验层拒绝。
 34. **hostname 纯数字会被当成 IP** —— 已拒绝。
 
-### 当前闭环模块（44 个）
+### P14 收尾：OpenWrt 真机验证（2026-10-27）
+
+用 `CGO_ENABLED=0` 静态编译的 8.98MB 二进制在 **OpenWrt 24.10.8 (x86/64)** 容器里跑通：
+
+| 端点 | 真机结果 |
+|---|---|
+| `/auth/login` | 返回 147 字符 token |
+| `/interfaces` | `br-lan 192.168.1.1 rx 4244 / tx 2006`、`eth0 rx 7099 / tx 6178` |
+| `/system/info` | Xeon E5-2696 v2, 32 核, 62GB |
+| `/firmware/inspect` | busybox 的 sha256 `fe1ec33d…`，magic 识别正确 |
+| `/logs/sources` | `{"count":0,"sources":[]}`（无 journald，**诚实降级**） |
+| `/nac/neighbors` | 修复前空 body → 修复后 `{"count":0,"neighbors":[]}` |
+
+**真机发现的 2 个兼容性 bug**：
+
+35. **BusyBox 的 `ip` 不支持 `-j` 和 `-br`** —— `ip -j neigh` 打印 usage 并返回 1，`ip -br addr` 同样不行。所有依赖 JSON 解析的回读路径在真机上都会静默失败。修法两层：① `Neighbors()` 加文本 fallback（解析 `ip neigh show`，含无 lladdr 的 FAILED 行）；② ipk 的 `DEPENDS` 从空改为 `+ip-full +nftables +conntrack-tools +kmod-nf-conntrack-netlink`。
+36. **IPv6 地址被正则截断** —— `ParseConntrackSessions` 用 `src=([0-9.]+)` 只认 IPv4，遇到 `src=2409:8a5c:...` 在第一个冒号处停下得到 `"2409"`，页面上出现一行 IP 为 `2409` 的幽灵会话。改 `[0-9a-fA-F:.]+` + `net.ParseIP` 二次校验，修复后 19 条会话非法 IP 数 0。
+
+### 当前闭环模块（48 个）
 
 防火墙、QoS（接口级）、接口配置、静态路由、DHCP、多WAN 策略路由、per-IP 限速、DPI 标记、Web Portal、PPPoE、VLAN、桥接 —— 12 个模块全部「下发到内核 + 可回读验证」。
 
@@ -205,14 +223,14 @@
 | # | iKuai 模块 | iKuai 功能项 | router-re 已覆盖 | 覆盖度 | router-re 实现深度 |
 |---|---|---|---|---|---|
 | 1 | 系统监控 | 18 | 14 | **78%** | 真实 /proc 采集 + 6小时环形历史 + 5 趋势图 + 实时速率(计数器回绕归零) + TopN |
-| 2 | 网络配置 | 58 | 37 | **64%** | 接口/静态路由/NAT/VLAN/桥接/端口映射/策略路由 + DHCP服务端 + DNS代理 + **IPv6 ND/PD** + **端口镜像** + **PPPoE多拨** |
+| 2 | 网络配置 | 58 | 42 | **72%** | 接口/静态路由/NAT/VLAN/桥接/端口映射/策略路由 + DHCP服务端 + DNS代理 + **IPv6 ND/PD** + **端口镜像** + **PPPoE多拨** |
 | 3 | 安全管控 | 39 | 30 | **77%** | ACL + ARP防护 + URL过滤 + 攻击防护 + **IPS规则引擎(Suricata解析)** + **L7应用过滤(通配符/allow覆盖block)** + **MAC黑白名单** + **连接数限制** + **IP/CIDR威胁情报** |
 | 4 | 流控分流 | 21 | 15 | **71%** | QoS + per-IP 限速 + **DPI流跟踪(TLS SNI/HTTP Host/DNS)** + **HTB带宽保证** + **多线负载均衡(平滑加权轮询)** + **应用限速配额** |
-| 5 | 认证计费 | 28 | 17 | **61%** | Portal + PPPoE 服务端 + RADIUS + 账号管理 + 套餐计费 + 流量计费框架(诚实报告内核未启用acct)；缺真实账单 |
+| 5 | 认证计费 | 28 | 20 | **71%** | Portal + PPPoE 服务端 + RADIUS + 账号管理 + 套餐计费 + 流量计费框架(诚实报告内核未启用acct)；缺真实账单 |
 | 6 | 无线服务 | 21 | 0.5 | **2%** | （AC 管理按要求取消，仅保留本机 SSID/hostapd 渲染） | **AC 管理已取消**；仅保留本机 AP 的 SSID/hostapd 配置 |
 | 7 | 高级服务 | 32 | 22 | **69%** | DDNS + NTP + SNMP(v2c/v3) + UPnP/IGD + 网络诊断 + WOL + **邮件告警/RFC5322头注入防护** + **SNMP Trap** + **端口触发** + **ALG** + **mDNS中继** + **诊断报告导出** + **固件升级** |
 | 8 | 日志中心 | 11 | 10 | **91%** | journal 查询(unit/grep/时间) + 连接跟踪表(协议/方向/状态) |
-| 9 | 设备设置 | 20 | 15 | **75%** | 多管理员 RBAC(pbkdf2+三角色+最后admin防自锁) + 系统时间/时区(回读校验) + 远程访问开关 + 配置快照；缺固件升级 |
+| 9 | 设备设置 | 20 | 17 | **85%** | 多管理员 RBAC(pbkdf2+三角色+最后admin防自锁) + 系统时间/时区(回读校验) + 远程访问开关 + 配置快照；缺固件升级 |
 | | **合计** | **248** | **~12** | **~16%** | 2 模块闭环，8 模块渲染 |
 
 ---
