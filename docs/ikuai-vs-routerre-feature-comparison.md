@@ -24,10 +24,24 @@
 | 终端列表 | ✅ 完成 | `/clients` 返回 35 个真实邻居（IP/MAC/REACHABLE·STALE） |
 | 审计日志 | ✅ 完成 | 16 个写路由统一埋点 + login 三次分支；实测 JSONL 记录成功/失败、actor、remote_ip |
 
-### 本轮发现的关键坑
+### P1 补齐记录（2026-10-27）
 
-1. **CGO 二进制不能在 OpenWrt 运行**：CGO_ENABLED=1 链接 glibc，OpenWrt 是 musl → `not found`。打包/容器测试必须用 `CGO_ENABLED=0` 静态编译（DPI 自动降级为 stub）。
-2. **空数组假成功**：`{"configs":[]}` 解码成功但循环空转，返回 `applied:true` 却什么都没做。已修为 422 并提示正确请求格式。
+| P1 项 | 状态 | 真实验证证据 |
+|---|---|---|
+| 多WAN 真实落地 | ✅ 完成 | OpenWrt 容器内 `ip rule` 出现 `fwmark 0x64 lookup 100` / `fwmark 0x65 lookup 101`，`ip route show table 100/101` 各自的默认路由真实存在；健康检查用 ping 并发探测 |
+| per-IP/MAC 限速 | ✅ 完成 | 宿主机 dummy 接口 `rtq0` 实测：`qdisc htb 1:` + `class 1:1 rate 10Mbit` + `class 1:2 rate 5Mbit` + `filter handle 0x100/0x101 fw classid 1:1/1:2`，配合 nft `ip saddr ... meta mark set 0x100/0x101` 完整链路 |
+| DPI 数据面标记 | ✅ 完成 | OpenWrt 容器内核里真实存在 `table inet router_dpi`，含 `tcp dport { 6881, 6882 } meta mark set 0x000000c8` 与 `udp dport 27015 drop` |
+
+### 本轮发现的关键坑（P1）
+
+3. **nft chain 声明不能同行闭合**：`chain classify { type filter hook forward priority mangle; }` 会在同一行闭合 chain，**后续所有规则落到 table 顶层**，nft 报 `syntax error, unexpected tcp`。必须三行：`chain x {` / `type ... ;` / 规则 / `}`。
+4. **`meta l4proto tcp tcp dport {...}` 是非法语法**：协议关键字已隐含 L4 匹配，要么用 `<proto> dport {...}`，要么用裸 `meta l4proto <proto>`，不能同时出现。
+5. **tc 根 qdisc 只有 del+add 幂等**：`tc qdisc replace` 在 root 已是 htb 时报 `Change operation not supported by specified qdisc`；`tc qdisc add` 在已存在时报 `Exclusivity flag on, cannot modify`。必须 `del`（失败忽略）再 `add`。
+6. **裸命令名在守护进程里找不到**：systemd/procd 启动的进程 PATH 常不含 `/usr/sbin`，`exec: "tc": executable file not found in $PATH`。已在 `execx.DefaultRunner` 内统一解析绝对路径（不影响 FakeRunner 测试断言）。
+
+### 当前闭环模块（8 个）
+
+防火墙、QoS（接口级）、接口配置、静态路由、DHCP、多WAN 策略路由、per-IP 限速、DPI 标记 —— 全部「下发到内核 + 可回读验证」。
 
 ---
 
