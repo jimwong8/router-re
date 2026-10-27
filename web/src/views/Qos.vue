@@ -52,6 +52,55 @@
       <pre v-if="tcOutput.length" class="cmd-output">{{ cmdText }}</pre>
       <el-empty v-else description="尚未提交" />
     </el-card>
+
+    <el-card shadow="never" style="margin-top: 16px">
+      <template #header>按 IP/MAC 限速</template>
+      <el-form inline @submit.prevent>
+        <el-form-item label="选择器">
+          <el-input v-model="newClient.selector" placeholder="ip:192.168.1.100 或 mac:aa:bb:cc:dd:ee:ff" style="width: 260px" />
+        </el-form-item>
+        <el-form-item label="上行 (kbps)">
+          <el-input-number v-model="newClient.upload_kbps" :min="0" :max="1000000" />
+        </el-form-item>
+        <el-form-item label="下行 (kbps)">
+          <el-input-number v-model="newClient.download_kbps" :min="0" :max="1000000" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="newClient.comment" placeholder="如 客厅电视" />
+        </el-form-item>
+        <el-form-item label="设备">
+          <el-input v-model="clientDevice" placeholder="eth0" />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" @click="addClientLimit">添加</el-button>
+        </el-form-item>
+      </el-form>
+
+      <el-table :data="clientLimits" border style="width: 100%; margin-top: 12px;">
+        <el-table-column prop="selector" label="选择器" width="220" />
+        <el-table-column prop="upload_kbps" label="上行 (kbps)" />
+        <el-table-column prop="download_kbps" label="下行 (kbps)" />
+        <el-table-column prop="comment" label="备注" />
+        <el-table-column label="操作" width="120">
+          <template #default="{ row }">
+            <el-button type="danger" size="small" @click="removeClientLimit(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <el-button
+        type="primary"
+        style="margin-top: 16px"
+        :loading="clientSubmitting"
+        @click="submitClientLimits"
+      >
+        提交限速
+      </el-button>
+
+      <el-divider>nft 规则（返回）</el-divider>
+      <pre v-if="clientNftOutput.length" class="cmd-output">{{ clientNftOutput }}</pre>
+      <el-empty v-else description="尚未提交" />
+    </el-card>
   </div>
 </template>
 
@@ -77,6 +126,68 @@ const newLimit = ref<LimitRow>(emptyLimit());
 const limits = ref<LimitRow[]>([]);
 const tcOutput = ref<string[]>([]);
 const submitting = ref(false);
+
+// --- per-client (IP/MAC) limits ---
+interface ClientLimitRow {
+  selector: string;
+  upload_kbps: number;
+  download_kbps: number;
+  comment: string;
+}
+
+function emptyClientLimit(): ClientLimitRow {
+  return { selector: '', upload_kbps: 0, download_kbps: 0, comment: '' };
+}
+
+const newClient = ref<ClientLimitRow>(emptyClientLimit());
+const clientLimits = ref<ClientLimitRow[]>([]);
+const clientDevice = ref('eth0');
+const clientNftOutput = ref('');
+const clientSubmitting = ref(false);
+
+function addClientLimit() {
+  if (!newClient.value.selector) {
+    ElMessage.warning('选择器必填');
+    return;
+  }
+  clientLimits.value.push({ ...newClient.value });
+  newClient.value = emptyClientLimit();
+}
+
+function removeClientLimit(row: ClientLimitRow) {
+  clientLimits.value = clientLimits.value.filter((l) => l !== row);
+}
+
+async function loadClientLimits() {
+  try {
+    const res = await api.get('/api/v1/qos/client-limits');
+    clientLimits.value = (res.data?.limits || []) as ClientLimitRow[];
+    clientNftOutput.value = res.data?.nft || '';
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || e.message);
+  }
+}
+
+async function submitClientLimits() {
+  if (!clientLimits.value.length) {
+    ElMessage.warning('请先添加限速规则');
+    return;
+  }
+  clientSubmitting.value = true;
+  try {
+    const res = await api.post('/api/v1/qos/client-limits', {
+      limits: clientLimits.value,
+      device: clientDevice.value,
+    });
+    clientNftOutput.value = res.data?.nft || '';
+    ElMessage.success('限速已提交');
+    await loadClientLimits();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || e.message);
+  } finally {
+    clientSubmitting.value = false;
+  }
+}
 
 const cmdText = computed(() => tcOutput.value.join('\n'));
 
@@ -121,7 +232,10 @@ async function submit() {
   }
 }
 
-onMounted(load);
+onMounted(() => {
+  load();
+  loadClientLimits();
+});
 </script>
 
 <style scoped>

@@ -10,6 +10,7 @@ import Clients from '../views/Clients.vue';
 import Interface from '../views/Interface.vue';
 import StaticRoute from '../views/StaticRoute.vue';
 import Audit from '../views/Audit.vue';
+import Dpi from '../views/Dpi.vue';
 
 const routes = [
   { path: '/', component: Dashboard, meta: { requiresAuth: true } },
@@ -22,6 +23,7 @@ const routes = [
   { path: '/interfaces', component: Interface, meta: { requiresAuth: true } },
   { path: '/static-route', component: StaticRoute, meta: { requiresAuth: true } },
   { path: '/audit', component: Audit, meta: { requiresAuth: true } },
+  { path: '/dpi', component: Dpi, meta: { requiresAuth: true } },
   { path: '/login', component: Login },
   { path: '/:pathMatch(.*)*', redirect: '/login' },
 ];

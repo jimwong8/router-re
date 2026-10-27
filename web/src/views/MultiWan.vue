@@ -44,6 +44,30 @@
       <el-divider>策略路由命令（返回）</el-divider>
       <pre v-if="tcOutput.length" class="cmd-output">{{ cmdText }}</pre>
       <el-empty v-else description="尚未提交" />
+
+      <el-divider>WAN 健康状态</el-divider>
+      <el-button type="primary" size="small" :loading="checking" style="margin-bottom:12px" @click="loadHealth">
+        刷新健康状态
+      </el-button>
+      <el-table v-if="health.length" :data="health" border style="width:100%">
+        <el-table-column prop="name" label="WAN名" width="120" />
+        <el-table-column prop="interface" label="接口" width="120" />
+        <el-table-column label="在线" width="100">
+          <template #default="{ row }">
+            <el-tag :type="row.alive ? 'success' : 'danger'">{{ row.alive ? '在线' : '离线' }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="latency_ms" label="延迟(ms)" width="110" />
+        <el-table-column prop="loss_pct" label="丢包(%)" width="110">
+          <template #default="{ row }">{{ (row.loss_pct ?? 0).toFixed(1) }}</template>
+        </el-table-column>
+        <el-table-column label="检查时间">
+          <template #default="{ row }">
+            {{ new Date((row.checked_at || 0) * 1000).toLocaleString() }}
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-empty v-else-if="!checking" description="暂无健康数据（点击刷新检查）" />
     </el-card>
   </div>
 </template>
@@ -64,6 +88,8 @@ const newLink = ref<WanLink>({ name: '', interface: '', gateway: '', weight: 1 }
 const links = ref<WanLink[]>([]);
 const tcOutput = ref<string[]>([]);
 const submitting = ref(false);
+const health = ref<any[]>([]);
+const checking = ref(false);
 
 const cmdText = computed(() => tcOutput.value.join('\n'));
 
@@ -108,7 +134,22 @@ async function submit() {
   }
 }
 
-onMounted(load);
+async function loadHealth() {
+  checking.value = true;
+  try {
+    const res = await api.get('/api/v1/wan/status');
+    health.value = res.data?.status || [];
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || e.message);
+  } finally {
+    checking.value = false;
+  }
+}
+
+onMounted(() => {
+  load();
+  loadHealth();
+});
 </script>
 
 <style scoped>

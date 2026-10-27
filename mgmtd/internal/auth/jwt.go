@@ -13,12 +13,19 @@ type TokenManager struct {
 }
 
 // NewTokenManager creates a TokenManager. secret should be >= 32 random bytes.
+// A defensive copy of secret is taken so later mutation of the caller's slice
+// cannot invalidate issued tokens or corrupt verification.
 func NewTokenManager(secret []byte, ttl time.Duration) *TokenManager {
-	return &TokenManager{secret: secret, ttl: ttl}
+	cp := make([]byte, len(secret))
+	copy(cp, secret)
+	return &TokenManager{secret: cp, ttl: ttl}
 }
 
 // Issue signs a JWT with subject in "sub" and iat/exp set from ttl.
 func (t *TokenManager) Issue(subject string) (string, error) {
+	if subject == "" {
+		return "", jwt.ErrTokenInvalidSubject
+	}
 	now := time.Now()
 	claims := jwt.MapClaims{
 		"sub": subject,

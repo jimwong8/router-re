@@ -90,6 +90,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
 	s.mux.HandleFunc("GET /api/v1/system/info", s.auth(s.handleSystemInfo))
 	s.mux.HandleFunc("GET /api/v1/qos/limits", s.auth(s.handleGetQoSLimits))
+	s.mux.HandleFunc("GET /api/v1/qos/client-limits", s.auth(s.handleGetClientLimits))
+	s.mux.HandleFunc("POST /api/v1/qos/client-limits", s.auth(s.auditWrap("qos.client_limits.set", s.handleSetClientLimits)))
 	s.mux.HandleFunc("POST /api/v1/qos/limits", s.auth(s.auditWrap("qos.limits.set", s.handleSetQoSLimits)))
 	s.mux.HandleFunc("GET /api/v1/interfaces", s.auth(s.handleInterfaces))
 	s.mux.HandleFunc("GET /api/v1/firewall/rules", s.auth(s.handleGetFirewallRules))
@@ -115,6 +117,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/wireless/ssids", s.auth(s.auditWrap("wireless.ssid.set", s.handlePostWirelessSSIDs)))
 	s.mux.HandleFunc("GET /api/v1/dpi/rules", s.auth(s.handleGetDPIRules))
 	s.mux.HandleFunc("POST /api/v1/dpi/rules", s.auth(s.auditWrap("dpi.rules.set", s.handleSetDPIRules)))
+	s.mux.HandleFunc("GET /api/v1/dpi/marks", s.auth(s.handleGetDPIMarks))
+	s.mux.HandleFunc("POST /api/v1/dpi/marks", s.auth(s.auditWrap("dpi.marks.set", s.handleSetDPIMarks)))
 	s.mux.HandleFunc("GET /api/v1/dpi/classify", s.auth(s.handleDPIClassify))
 	s.mux.HandleFunc("POST /api/v1/vpn/wireguard/keypair", s.auth(s.auditWrap("vpn.wireguard.keypair", s.handleWireGuardKeypair)))
 	s.mux.HandleFunc("POST /api/v1/vpn/wireguard/config", s.auth(s.auditWrap("vpn.wireguard.config", s.handleWireGuardConfig)))
@@ -123,6 +127,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/route/static", s.auth(s.handleGetStaticRoutes))
 	s.mux.HandleFunc("POST /api/v1/route/static", s.auth(s.auditWrap("route.static.set", s.handleSetStaticRoutes)))
 	s.mux.HandleFunc("GET /api/v1/audit/events", s.auth(s.handleGetAuditEvents))
+	s.mux.HandleFunc("GET /api/v1/wan/status", s.auth(s.handleWANStatus))
 }
 
 // handleLogin authenticates a fixed dev account and issues a JWT session token.
@@ -398,10 +403,18 @@ func (s *Server) handleSetWANLinks(w http.ResponseWriter, r *http.Request) {
 		s.store.Set("wan", key+".table", itoa(l.Table))
 		s.store.Set("wan", key+".health_target", l.HealthTarget)
 	}
+	// 真实执行：用 Applier 通过 execx 实际下发策略路由规则。
+	applier := &wan.Applier{R: execx.DefaultRunner{}}
+	if err := applier.Apply(req.Links); err != nil {
+		s.logAudit(r, "wan.links.set", fmt.Sprintf("%d links", len(req.Links)), "fail", "apply: "+err.Error())
+		writeJSON(w, 500, errBody(10044, "wan policy apply failed", err.Error()))
+		return
+	}
 	s.logAudit(r, "wan.links.set", fmt.Sprintf("%d links", len(req.Links)), "ok", "")
 	writeJSON(w, 200, map[string]interface{}{
-		"links":    req.Links,
-		"commands": wan.RenderPolicyRouting(req.Links),
+		"links":     req.Links,
+		"applied":   true,
+		"commands":  wan.RenderPolicyRouting(req.Links),
 	})
 }
 
@@ -540,6 +553,57 @@ func (s *Server) handleGetDPIRules(w http.ResponseWriter, r *http.Request) {
 		"rules": rules,
 		"nft":   dpi.RenderNftRules(rules),
 	})
+}
+
+// handleSetDPIMarks applies DPI mark rules to the data plane. Unlike
+// handleSetDPIRules (which only renders text), this really installs the
+// nftables marks; `applied` reports whether that succeeded so the UI can
+// never show a green state for a rule that was not installed.
+func (s *Server) handleSetDPIMarks(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Rules []dpi.MarkRule `json:"rules"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+		return
+	}
+	if len(req.Rules) == 0 {
+		writeJSON(w, 422, errBody(10043, "dpi mark apply failed", "rules must contain at least one entry (expected {\"rules\":[...]})"))
+		return
+	}
+	nftText, err := dpi.RenderMarkNft(req.Rules)
+	if err != nil {
+		writeJSON(w, 400, errBody(10043, "invalid dpi mark rule", err.Error()))
+		return
+	}
+	applied := true
+	applyErr := ""
+	if err := dpi.ApplyMarks(execx.DefaultRunner{}, req.Rules); err != nil {
+		applied = false
+		applyErr = err.Error()
+	}
+	if raw, mErr := json.Marshal(req.Rules); mErr == nil {
+		_ = s.store.Set("dpi", "marks", string(raw))
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"rules":   req.Rules,
+		"nft":     nftText,
+		"tc":      dpi.MarkRulesForTC(req.Rules),
+		"applied": applied,
+		"error":   applyErr,
+	})
+}
+
+// handleGetDPIMarks returns the last DPI mark rules that were submitted.
+func (s *Server) handleGetDPIMarks(w http.ResponseWriter, r *http.Request) {
+	var rules []dpi.MarkRule
+	if raw, err := s.store.Get("dpi", "marks"); err == nil && raw != "" {
+		_ = json.Unmarshal([]byte(raw), &rules)
+	}
+	if rules == nil {
+		rules = []dpi.MarkRule{}
+	}
+	writeJSON(w, 200, map[string]interface{}{"rules": rules})
 }
 
 // handleSetDPIRules persists submitted DPI rules and returns rendered nftables text.
@@ -1133,4 +1197,128 @@ func (s *Server) handleSetStaticRoutes(w http.ResponseWriter, r *http.Request) {
 		"routes":   req.Routes,
 		"commands": route.RenderStaticCommands(req.Routes),
 	})
+}
+
+// handleWANStatus returns health reports for all configured WAN links.
+func (s *Server) handleWANStatus(w http.ResponseWriter, r *http.Request) {
+	var links []wan.WANLink
+	for i := 0; ; i++ {
+		name, err := s.store.Get("wan", itoa(i)+".name")
+		if err != nil || name == "" {
+			break
+		}
+		iface, _ := s.store.Get("wan", itoa(i)+".interface")
+		gw, _ := s.store.Get("wan", itoa(i)+".gateway")
+		wl := wan.WANLink{Name: name, Interface: iface, Gateway: gw}
+		links = append(links, wl)
+	}
+	checker := &wan.Checker{R: execx.DefaultRunner{}, Count: 3}
+	status := checker.Check(links)
+	writeJSON(w, 200, map[string]interface{}{"status": status})
+}
+
+// handleGetClientLimits returns persisted per-client limits and their rendered commands.
+func (s *Server) handleGetClientLimits(w http.ResponseWriter, r *http.Request) {
+	limits := s.clientLimitsFromStore()
+	nft, err := qos.RenderClientMarkNft(limits)
+	if err != nil {
+		nft = "" // 无 limits 或非法时渲染失败，返回空
+	}
+	tc, _ := qos.RenderClientTcCommands(limits, "")
+	writeJSON(w, 200, map[string]interface{}{
+		"limits": limits,
+		"nft":    nft,
+		"tc":     tc,
+	})
+}
+
+// handleSetClientLimits validates, applies (real nft/tc), persists per-client limits.
+func (s *Server) handleSetClientLimits(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Limits []qos.ClientLimit `json:"limits"`
+		Device string            `json:"device"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.logAudit(r, "qos.client_limits.set", "", "fail", "json decode: "+err.Error())
+		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+		return
+	}
+	if len(req.Limits) == 0 {
+		s.logAudit(r, "qos.client_limits.set", "", "fail", "empty limits")
+		writeJSON(w, 422, errBody(10020, "invalid client limits", "limits must not be empty"))
+		return
+	}
+	// 校验 selector 格式
+	for _, lim := range req.Limits {
+		if _, _, err := qos.ParseSelector(lim.Selector); err != nil {
+			s.logAudit(r, "qos.client_limits.set", "", "fail", "validate: "+err.Error())
+			writeJSON(w, 422, errBody(10021, "invalid client selector", err.Error()))
+			return
+		}
+	}
+	// 真实下发（nft mark + tc）
+	if err := qos.ApplyClientLimits(execx.DefaultRunner{}, req.Limits, req.Device); err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "permission") || strings.Contains(strings.ToLower(msg), "operation not permitted") {
+			msg = "apply requires root privileges"
+		}
+		s.logAudit(r, "qos.client_limits.set", "", "fail", "apply: "+msg)
+		writeJSON(w, 500, errBody(10022, "qos client limits apply failed", msg))
+		return
+	}
+	// 持久化到 store（整体覆盖：先清旧 client_limits 键）
+	s.clearClientLimitsStore()
+	for i, lim := range req.Limits {
+		key := itoa(i)
+		s.store.Set("qos", "client_limits."+key+".selector", lim.Selector)
+		s.store.Set("qos", "client_limits."+key+".upload_kbps", fmt.Sprintf("%d", lim.UploadKbps))
+		s.store.Set("qos", "client_limits."+key+".download_kbps", fmt.Sprintf("%d", lim.DownloadKbps))
+		s.store.Set("qos", "client_limits."+key+".comment", lim.Comment)
+	}
+	nft, _ := qos.RenderClientMarkNft(req.Limits)
+	tc, _ := qos.RenderClientTcCommands(req.Limits, req.Device)
+	s.logAudit(r, "qos.client_limits.set", fmt.Sprintf("%d limits on %s", len(req.Limits), req.Device), "ok", "")
+	writeJSON(w, 200, map[string]interface{}{
+		"limits": req.Limits,
+		"nft":    nft,
+		"tc":     tc,
+	})
+}
+
+// clientLimitsFromStore 从 config.Store 读回 per-client 限速列表。
+func (s *Server) clientLimitsFromStore() []qos.ClientLimit {
+	var limits []qos.ClientLimit
+	for i := 0; ; i++ {
+		key := "client_limits." + itoa(i)
+		sel, err := s.store.Get("qos", key+".selector")
+		if err != nil || sel == "" {
+			break
+		}
+		up, _ := s.store.Get("qos", key+".upload_kbps")
+		down, _ := s.store.Get("qos", key+".download_kbps")
+		cmt, _ := s.store.Get("qos", key+".comment")
+		var upK, downK int
+		fmt.Sscanf(up, "%d", &upK)
+		fmt.Sscanf(down, "%d", &downK)
+		limits = append(limits, qos.ClientLimit{
+			Selector: sel, UploadKbps: upK, DownloadKbps: downK, Comment: cmt,
+		})
+	}
+	return limits
+}
+
+// clearClientLimitsStore 清空旧的 client_limits 键（防止幽灵规则复活）。
+// MockStore.Get 永远返回 nil error，所以用"值非空"判断存在性（同 clientLimitsFromStore 的 break 条件）。
+func (s *Server) clearClientLimitsStore() {
+	for i := 0; i < 256; i++ { // 上限 256 防死循环
+		key := "client_limits." + itoa(i)
+		sel, _ := s.store.Get("qos", key+".selector")
+		if sel == "" {
+			break
+		}
+		s.store.Set("qos", key+".selector", "")
+		s.store.Set("qos", key+".upload_kbps", "")
+		s.store.Set("qos", key+".download_kbps", "")
+		s.store.Set("qos", key+".comment", "")
+	}
 }

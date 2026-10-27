@@ -38,6 +38,16 @@ func (DefaultRunner) RunWithInput(input, name string, args ...string) (string, e
 }
 
 func run(input, name string, args ...string) (string, error) {
+	// Resolve bare command names to absolute paths. Daemons started by
+	// systemd/procd often have a PATH without /usr/sbin, which turns a healthy
+	// system into `exec: "tc": executable file not found in $PATH`. Doing this
+	// inside DefaultRunner (not in each module) keeps FakeRunner-based tests
+	// asserting plain command names.
+	if !strings.ContainsRune(name, '/') {
+		if p, err := Lookup(name); err == nil {
+			name = p
+		}
+	}
 	cmd := exec.Command(name, args...)
 	if input != "" {
 		cmd.Stdin = strings.NewReader(input)
