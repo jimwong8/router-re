@@ -1,20 +1,15 @@
+// Package wireless renders hostapd / wpa_supplicant configuration for the
+// router's own radio (local AP mode).
+//
+// It deliberately does NOT implement an AC (Access Controller): managing
+// remote access points requires a CAPWAP/vendor protocol and real hardware
+// to verify, so that capability was removed rather than shipped as a stub.
 package wireless
 
 import (
 	"fmt"
 	"strings"
 )
-
-// AP is a managed access point.
-type AP struct {
-	ID      string   `json:"id"`
-	Name    string   `json:"name"`
-	MAC     string   `json:"mac"`
-	IP      string   `json:"ip"`
-	SSIDs   []string `json:"ssids"`
-	Channel int      `json:"channel"`
-	Online  bool     `json:"online"`
-}
 
 // SSID is an SSID profile.
 type SSID struct {

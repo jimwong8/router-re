@@ -16,7 +16,25 @@ start_service() {
 		session_secret="$(uci -q get router-re.main.session_secret 2>/dev/null)"
 	fi
 	[ -z "$addr" ] && addr="${MGM_ADDR:-:8080}"
-	[ -z "$session_secret" ] && session_secret="${MGM_SESSION_SECRET:-change-me-32-bytes-minimum-secret!!}"
+
+	# Session secret: never hardcode a default. On first boot, generate a
+	# random 32-byte key via /dev/urandom and persist it to UCI so all
+	# subsequent boots reuse the same key (tokens survive restarts).
+	if [ -z "$session_secret" ]; then
+		if [ -c /dev/urandom ] && command -v uci >/dev/null 2>&1; then
+			session_secret="$(head -c 32 /dev/urandom | hexdump -ve '1/1 "%02x"')"
+			uci set router-re.main.session_secret="$session_secret"
+			uci commit router-re
+		else
+			# Fallback: use env var or fail closed (no weak default).
+			session_secret="${MGM_SESSION_SECRET}"
+		fi
+	fi
+
+	if [ -z "$session_secret" ]; then
+		logger -t router-re "ERROR: no session secret configured (set uci router-re.main.session_secret or env MGM_SESSION_SECRET)"
+		return 1
+	fi
 
 	procd_open_instance
 	procd_set_param command "$PROG"

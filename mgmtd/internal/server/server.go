@@ -51,6 +51,9 @@ type Server struct {
 	tm       *auth.TokenManager
 	cloudMgr *cloud.Manager
 	audit    *audit.Logger
+	// loginLimiter throttles failed login attempts per remote IP to blunt
+	// brute-force / credential-stuffing attacks.
+	loginLimiter *loginLimiter
 }
 
 func New(cfg Config) *Server {
@@ -62,12 +65,13 @@ func New(cfg Config) *Server {
 		cfg.AdminPassword = "admin123"
 	}
 	s := &Server{
-		cfg:      cfg,
-		mux:      http.NewServeMux(),
-		store:    config.NewMockStore(),
-		tm:       auth.NewTokenManager(cfg.SecretKey, 15*time.Minute),
-		cloudMgr:    cloud.NewManager(),
-		dhcpApplier: dhcp.NewApplier(),
+		cfg:          cfg,
+		mux:          http.NewServeMux(),
+		store:        config.NewMockStore(),
+		tm:           auth.NewTokenManager(cfg.SecretKey, 15*time.Minute),
+		cloudMgr:     cloud.NewManager(),
+		dhcpApplier:  dhcp.NewApplier(),
+		loginLimiter: newLoginLimiter(5, time.Minute),
 	}
 	// Audit logger: MGM_AUDIT_LOG env or default; degrade to ./audit.jsonl
 	// if the default dir cannot be created (never fail startup for logging).
@@ -111,8 +115,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/cloud/devices", s.auth(s.handleGetCloudDevices))
 	s.mux.HandleFunc("POST /api/v1/cloud/devices", s.auth(s.auditWrap("cloud.device.register", s.handlePostCloudDevices)))
 	s.mux.HandleFunc("POST /api/v1/cloud/devices/{id}/heartbeat", s.auth(s.auditWrap("cloud.device.heartbeat", s.handlePostCloudHeartbeat)))
-	s.mux.HandleFunc("GET /api/v1/wireless/aps", s.auth(s.handleGetWirelessAPs))
-	s.mux.HandleFunc("POST /api/v1/wireless/aps", s.auth(s.auditWrap("wireless.ap.set", s.handlePostWirelessAPs)))
 	s.mux.HandleFunc("GET /api/v1/wireless/ssids", s.auth(s.handleGetWirelessSSIDs))
 	s.mux.HandleFunc("POST /api/v1/wireless/ssids", s.auth(s.auditWrap("wireless.ssid.set", s.handlePostWirelessSSIDs)))
 	s.mux.HandleFunc("GET /api/v1/dpi/rules", s.auth(s.handleGetDPIRules))
@@ -138,6 +140,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+		return
+	}
+	// Rate-limit brute force per source IP BEFORE credential work.
+	if !s.loginLimiter.allow(clientIP(r.RemoteAddr)) {
+		s.logAudit(r, "auth.login", req.Username, "fail", "rate limited")
+		writeJSON(w, 429, errBody(10002, "too many attempts", "try again later"))
 		return
 	}
 	// Compare in constant time to avoid leaking length/prefix information.
@@ -546,12 +554,19 @@ func (s *Server) handleSetQoSLimits(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleGetDPIRules returns persisted DPI rules and their rendered nftables text.
+// handleGetDPIRules returns the last DPI mark rules that were submitted.
 func (s *Server) handleGetDPIRules(w http.ResponseWriter, r *http.Request) {
-	rules := s.dpiRulesFromStore()
+	var rules []dpi.MarkRule
+	if raw, err := s.store.Get("dpi", "marks"); err == nil && raw != "" {
+		_ = json.Unmarshal([]byte(raw), &rules)
+	}
+	if rules == nil {
+		rules = []dpi.MarkRule{}
+	}
+	nft, _ := dpi.RenderMarkNft(rules)
 	writeJSON(w, 200, map[string]interface{}{
 		"rules": rules,
-		"nft":   dpi.RenderNftRules(rules),
+		"nft":   nft,
 	})
 }
 
@@ -606,30 +621,39 @@ func (s *Server) handleGetDPIMarks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]interface{}{"rules": rules})
 }
 
-// handleSetDPIRules persists submitted DPI rules and returns rendered nftables text.
+// handleSetDPIRules applies DPI mark rules to the data plane (real execution).
 func (s *Server) handleSetDPIRules(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Rules []dpi.AppRule `json:"rules"`
+		Rules []dpi.MarkRule `json:"rules"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
 		return
 	}
-	// 用递增索引存储（沿用 firewall/nat 风格）
-	for i, rule := range req.Rules {
-		s.store.Set("dpi", itoa(i)+".name", rule.Name)
-		s.store.Set("dpi", itoa(i)+".category", rule.Category)
-		s.store.Set("dpi", itoa(i)+".match_type", rule.MatchType)
-		s.store.Set("dpi", itoa(i)+".match_value", rule.MatchValue)
-		s.store.Set("dpi", itoa(i)+".action", rule.Action)
-		if rule.RateMbps != 0 {
-			s.store.Set("dpi", itoa(i)+".rate_mbps", itoa(rule.RateMbps))
-		}
-		s.store.Set("dpi", itoa(i)+".priority", itoa(rule.Priority))
+	if len(req.Rules) == 0 {
+		writeJSON(w, 422, errBody(10043, "dpi mark apply failed", "rules must contain at least one entry (expected {\"rules\":[...]}"))
+		return
+	}
+	nftText, err := dpi.RenderMarkNft(req.Rules)
+	if err != nil {
+		writeJSON(w, 400, errBody(10043, "invalid dpi mark rule", err.Error()))
+		return
+	}
+	applied := true
+	applyErr := ""
+	if err := dpi.ApplyMarks(execx.DefaultRunner{}, req.Rules); err != nil {
+		applied = false
+		applyErr = err.Error()
+	}
+	if raw, mErr := json.Marshal(req.Rules); mErr == nil {
+		_ = s.store.Set("dpi", "marks", string(raw))
 	}
 	writeJSON(w, 200, map[string]interface{}{
-		"rules": req.Rules,
-		"nft":   dpi.RenderNftRules(req.Rules),
+		"rules":   req.Rules,
+		"nft":     nftText,
+		"tc":      dpi.MarkRulesForTC(req.Rules),
+		"applied": applied,
+		"error":   applyErr,
 	})
 }
 
@@ -726,19 +750,6 @@ func (s *Server) wirelessSSIDs() []wireless.SSID {
 		return []wireless.SSID{}
 	}
 	return out
-}
-
-func (s *Server) handleGetWirelessAPs(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]interface{}{"aps": []interface{}{}})
-}
-
-func (s *Server) handlePostWirelessAPs(w http.ResponseWriter, r *http.Request) {
-	var ap wireless.AP
-	if err := json.NewDecoder(r.Body).Decode(&ap); err != nil {
-		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
-		return
-	}
-	writeJSON(w, 200, map[string]interface{}{"ap": ap, "message": "ap saved"})
 }
 
 func (s *Server) handleGetWirelessSSIDs(w http.ResponseWriter, r *http.Request) {

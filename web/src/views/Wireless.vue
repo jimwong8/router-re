@@ -1,23 +1,16 @@
 <template>
   <div>
     <el-card shadow="never" class="section">
-      <template #header>AP 列表</template>
-      <el-table :data="aps" border style="width: 100%">
-        <el-table-column prop="id" label="AP ID" width="140" />
-        <el-table-column prop="name" label="名称" />
-        <el-table-column prop="mac" label="MAC" />
-        <el-table-column prop="channel" label="信道" width="80" />
-        <el-table-column prop="online" label="状态" width="80">
-          <template #default="{ row }">
-            <el-tag :type="row.online ? 'success' : 'danger'">{{ row.online ? '在线' : '离线' }}</el-tag>
-          </template>
-        </el-table-column>
-      </el-table>
-      <el-button type="primary" style="margin-top: 12px" @click="loadAPs">刷新</el-button>
-    </el-card>
+      <template #header>本机无线（AP 模式）— SSID 配置</template>
 
-    <el-card shadow="never" class="section" style="margin-top: 16px;">
-      <template #header>SSID 配置</template>
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        style="margin-bottom: 12px"
+        title="仅配置本机无线网卡。本系统不做 AC 控制器（不管理远程 AP）。"
+      />
+
       <el-form inline @submit.prevent="addSSID">
         <el-form-item label="名称">
           <el-input v-model="newSSID.name" placeholder="SSID 名称" />
@@ -49,6 +42,11 @@
             <el-switch v-model="row.enabled" size="small" />
           </template>
         </el-table-column>
+        <el-table-column label="操作" width="110">
+          <template #default="{ row }">
+            <el-button type="danger" size="small" @click="removeSSID(row)">删除</el-button>
+          </template>
+        </el-table-column>
       </el-table>
       <el-button type="primary" style="margin-top: 12px" :loading="submitting" @click="submitSSIDs">提交</el-button>
 
@@ -68,23 +66,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import api from '../api';
 
-const aps = ref<any[]>([]);
 const ssids = ref<any[]>([]);
 const submitting = ref(false);
 const hostapdText = ref('');
 const wpaText = ref('');
 
 const newSSID = ref({ name: '', security: 'wpa2', password: '', vlan: 10, enabled: true });
-
-function loadAPs() {
-  api.get('/api/v1/wireless/aps').then((res) => {
-    aps.value = res.data?.aps || [];
-  }).catch((e: any) => ElMessage.error(e?.response?.data?.message || e.message));
-}
 
 function loadSSIDs() {
   api.get('/api/v1/wireless/ssids').then((res) => {
@@ -101,10 +92,22 @@ function addSSID() {
   newSSID.value = { name: '', security: 'wpa2', password: '', vlan: 10, enabled: true };
 }
 
+function removeSSID(row: any) {
+  ssids.value = ssids.value.filter((s) => s !== row);
+}
+
 async function submitSSIDs() {
   submitting.value = true;
   try {
-    const res = await api.post('/api/v1/wireless/ssids', { ssids: ssids.value.map(s => ({ name: s.name, security: s.security, password: s.password, vlan: s.vlan, enabled: s.enabled })) });
+    const res = await api.post('/api/v1/wireless/ssids', {
+      ssids: ssids.value.map((s) => ({
+        name: s.name,
+        security: s.security,
+        password: s.password,
+        vlan: s.vlan,
+        enabled: s.enabled,
+      })),
+    });
     hostapdText.value = res.data?.hostapd || res.data?.hostapd_conf || '';
     wpaText.value = res.data?.wpa_supplicant || res.data?.wpa_conf || '';
     if (Array.isArray(res.data?.ssids)) {
@@ -119,10 +122,7 @@ async function submitSSIDs() {
   }
 }
 
-onMounted(() => {
-  loadAPs();
-  loadSSIDs();
-});
+onMounted(loadSSIDs);
 </script>
 
 <style scoped>

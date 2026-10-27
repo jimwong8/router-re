@@ -67,7 +67,8 @@ define Package/router-re/install
 	$(INSTALL_DIR) $(1)/etc/config
 	echo 'config router-re "main"' > $(1)/etc/config/router-re
 	echo '	option addr ":8080"' >> $(1)/etc/config/router-re
-	echo '	option session_secret "change-me-32-bytes-minimum-secret!!"' >> $(1)/etc/config/router-re
+	# session_secret intentionally absent: init script generates a random
+	# 32-byte key on first boot via /dev/urandom and persists to UCI.
 endef
 
 $(eval $(call BuildPackage,router-re))

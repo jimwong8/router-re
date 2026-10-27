@@ -216,7 +216,7 @@ func TestDPIEndpoints(t *testing.T) {
 	json.NewDecoder(rr0.Body).Decode(&resp)
 
 	// POST 规则
-	body := `{"rules":[{"name":"bittorrent","category":"p2p","match_type":"dport","match_value":"6881","action":"drop","priority":10},{"name":"netflix","category":"video","match_type":"host","match_value":"10.0.0.9","action":"accept","priority":5}]}`
+	body := `{"rules":[{"app":"bittorrent","protocol":"tcp","dports":[6881],"mark":10,"action":"drop"},{"app":"dns","protocol":"udp","dports":[53],"mark":11,"action":"mark"}]}`
 	req1 := httptest.NewRequest("POST", "/api/v1/dpi/rules", strings.NewReader(body))
 	req1.Header.Set("Authorization", "Bearer "+resp.Token)
 	rr1 := httptest.NewRecorder()
@@ -227,6 +227,9 @@ func TestDPIEndpoints(t *testing.T) {
 	if !strings.Contains(rr1.Body.String(), "dport") || !strings.Contains(rr1.Body.String(), "drop") {
 		t.Fatalf("POST response missing dport/drop: %s", rr1.Body.String())
 	}
+	if !strings.Contains(rr1.Body.String(), `"applied"`) {
+		t.Fatalf("POST response missing applied field: %s", rr1.Body.String())
+	}
 
 	// GET 回读
 	req2 := httptest.NewRequest("GET", "/api/v1/dpi/rules", nil)
@@ -236,7 +239,7 @@ func TestDPIEndpoints(t *testing.T) {
 	if rr2.Code != http.StatusOK {
 		t.Fatalf("GET dpi failed: %d %s", rr2.Code, rr2.Body.String())
 	}
-	if !strings.Contains(rr2.Body.String(), `"name":"bittorrent"`) {
+	if !strings.Contains(rr2.Body.String(), `"app":"bittorrent"`) {
 		t.Fatalf("GET response missing persisted rule: %s", rr2.Body.String())
 	}
 }

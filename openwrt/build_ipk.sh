@@ -12,6 +12,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# ROOT_DIR is .../router-re/openwrt; the source tree lives one level up.
+PROJECT_DIR="$(cd "$ROOT_DIR/.." && pwd)"
 SDK_DIR="${SDK_DIR:-/home/jimwong/openwrt-sdk/sdk}"
 PKG_DIR="$SDK_DIR/package/router-re"
 
@@ -23,8 +25,8 @@ fi
 
 # Sync package definition into SDK.
 mkdir -p "$PKG_DIR/files"
-cp "$ROOT_DIR/openwrt/package/router-re/Makefile" "$PKG_DIR/Makefile"
-cp "$ROOT_DIR/openwrt/package/router-re/files/mgmtd.init" "$PKG_DIR/files/mgmtd.init"
+cp "$ROOT_DIR/package/router-re/Makefile" "$PKG_DIR/Makefile"
+cp "$ROOT_DIR/package/router-re/files/mgmtd.init" "$PKG_DIR/files/mgmtd.init"
 
 # Ensure a sane .config exists.
 cd "$SDK_DIR"
@@ -41,6 +43,3 @@ IPK="$(ls -1 "$SDK_DIR"/bin/packages/x86_64/base/router-re_*.ipk 2>/dev/null | t
 echo "=== IPK built ==="
 echo "$IPK"
 ls -lh "$IPK"
-EOF
-chmod +x /home/jimwong/projects/router-re/openwrt/build_ipk.sh
-echo written
