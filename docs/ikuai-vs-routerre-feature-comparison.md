@@ -146,7 +146,24 @@
 24. **E2E 把「正确拒绝」当失败** —— `/lb/preview` 没配置成员时返回 422 是正确语义，但 E2E 记成 FAIL。加 `EXPECTED_422` 白名单，区分「接口坏了」和「缺前置条件」。
 25. **pQ 交了乱码** —— 它回的是 `I willlinkybCc\nApApApAkA1,`，一个文件都没写。重派时把任务拆成"只做后端 + 两个文件 + 明确函数签名"，一次就落地了。
 
-### 当前闭环模块（32 个）
+### P9 补齐记录（2026-10-27）
+
+| P9 项 | 状态 | 真实验证证据 |
+|---|---|---|
+| IPv6 ND | OK | 下发 hop_limit=32/dad_transmits=3 -> `applied:true`；**内核回读 32/3**（改前 64/1），还原后 64/1 |
+| IPv6 PD | OK | 生成 dhcp6c.conf（`send ia-pd 0` + `prefix-interface lxcbr0` + `sla-len 8`）；dhcp6c 未装 -> 诚实报系统错误 |
+| 端口镜像 | OK | `source=lo` -> 422「tc on lo throttles local traffic and locks out ssh/curl」；未 confirm -> dry-run |
+| PPPoE 多拨 | OK | 写入后响应**不含明文密码**（`password:"***"`），配置文件 0600 |
+| 流量计费 | OK | `available:false` + `acct_enabled:false` + 373 条连接中 **0 条有 bytes=** + 完整启用方法说明 |
+
+### P9 修的 4 个 bug
+
+26. **`sysctl -w` 传文件路径必然失败** —— `sysctl -w /proc/sys/net/ipv6/conf/ens18/hop_limit=64` 会被 sysctl 再拼一次前缀，报 `无法获取/proc/sys//proc/sys/...`。改为直接 `os.WriteFile` 写 `/proc/sys`。（为可测试性加 `sysctlWriter` 注入点，生产路径不变。）
+27. **RA 间隔 0 被当成非法值** —— 用户只想调 hop_limit/mtu 时 `ra_interval_min=0` 被拒，但 0 的语义应该是"不改这项"。改为 0 时跳过校验。
+28. **端口镜像的 shell 语法泄漏进 tc argv** —— `RenderScript` 生成 `... 2>/dev/null || true`（给人看的），`Apply` 直接 `strings.Fields` 拆分后把 `2>/dev/null`、`||`、`true` 当参数传给 tc，报错又被 `qdisc del` 分支吞掉 → **旧 qdisc 实际没删** → 第二次应用必报 `File exists`。加回归测试 `TestApplyStripsShellSyntax`。
+29. **路由冲突** —— `/api/v1/pppoe/sessions` 已被"服务端会话"占用，多拨客户端会话注册同名路径会让 ServeMux panic（测试直接崩）。改名 `/api/v1/pppoe/multidial`。
+
+### 当前闭环模块（36 个）
 
 防火墙、QoS（接口级）、接口配置、静态路由、DHCP、多WAN 策略路由、per-IP 限速、DPI 标记、Web Portal、PPPoE、VLAN、桥接 —— 12 个模块全部「下发到内核 + 可回读验证」。
 
@@ -159,10 +176,10 @@
 | # | iKuai 模块 | iKuai 功能项 | router-re 已覆盖 | 覆盖度 | router-re 实现深度 |
 |---|---|---|---|---|---|
 | 1 | 系统监控 | 18 | 14 | **78%** | 真实 /proc 采集 + 6小时环形历史 + 5 趋势图 + 实时速率(计数器回绕归零) + TopN |
-| 2 | 网络配置 | 58 | 24 | **41%** | 接口/静态路由/NAT/VLAN/桥接/端口映射/策略路由 + DHCP服务端(静态绑定/池冲突校验) + DNS代理 + IPv6地址与RA |
+| 2 | 网络配置 | 58 | 33 | **57%** | 接口/静态路由/NAT/VLAN/桥接/端口映射/策略路由 + DHCP服务端 + DNS代理 + **IPv6 ND/PD** + **端口镜像** + **PPPoE多拨** |
 | 3 | 安全管控 | 39 | 27 | **69%** | ACL + ARP防护 + URL过滤 + 攻击防护 + **IPS规则引擎(Suricata解析)** + **L7应用过滤(通配符/allow覆盖block)** + **MAC黑白名单** + **连接数限制** + **IP/CIDR威胁情报** |
 | 4 | 流控分流 | 21 | 15 | **71%** | QoS + per-IP 限速 + **DPI流跟踪(TLS SNI/HTTP Host/DNS)** + **HTB带宽保证** + **多线负载均衡(平滑加权轮询)** + **应用限速配额** |
-| 5 | 认证计费 | 28 | 12 | **43%** | Portal + PPPoE 服务端 + RADIUS + 账号管理(批量导入/配额/绑定MAC) + 套餐计费；缺真实流量统计与账单 |
+| 5 | 认证计费 | 28 | 14 | **50%** | Portal + PPPoE 服务端 + RADIUS + 账号管理 + 套餐计费 + 流量计费框架(诚实报告内核未启用acct)；缺真实账单 |
 | 6 | 无线服务 | 21 | 0.5 | **2%** | **AC 管理已取消**；仅保留本机 AP 的 SSID/hostapd 配置 |
 | 7 | 高级服务 | 32 | 16 | **50%** | DDNS + NTP + SNMP(v2c/v3) + UPnP/IGD + 网络诊断(ping/traceroute/dns) + WOL；缺邮件告警/远程升级 |
 | 8 | 日志中心 | 11 | 5 | **45%** | journal 查询(unit/grep/时间) + 连接跟踪表(协议/方向/状态) |
