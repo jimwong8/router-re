@@ -37,6 +37,7 @@
           <router-link to="/alerts" style="color:#eee; text-decoration:none;">告警规则</router-link>
           <router-link to="/network-advanced" style="color:#eee; text-decoration:none;">网络高级</router-link>
           <router-link to="/cert" style="color:#eee; text-decoration:none;">证书管理</router-link>
+          <router-link to="/online-users" style="color:#eee; text-decoration:none;">在线用户</router-link>
           <router-link to="/snmp" style="color:#eee; text-decoration:none;">SNMP</router-link>
           <router-link to="/services" style="color:#eee; text-decoration:none;">高级服务</router-link>
           <router-link to="/ipv6" style="color:#eee; text-decoration:none;">IPv6</router-link>

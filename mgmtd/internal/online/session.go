@@ -2,6 +2,7 @@ package online
 
 import (
 	"fmt"
+	"net"
 	"regexp"
 	"strings"
 )
@@ -24,13 +25,22 @@ type Session struct {
 // numbers. LoginAt is 0 because conntrack does not carry login time.
 func ParseConntrackSessions(text string) map[string]Session {
 	res := map[string]Session{}
-	re := regexp.MustCompile(`src=([0-9.]+)`)
+	// ⚠ 必须同时匹配 IPv4 和 IPv6。原正则 `src=([0-9.]+)` 只认 IPv4，
+	// 遇到 IPv6 行（src=2409:8a5c:...）会在第一个冒号处停下，得到 "2409" ——
+	// 那不是任何合法地址，却被当成一个"在线用户"，页面上就会出现
+	// 一行 IP 为 "2409" 的幽灵会话。
+	re := regexp.MustCompile(`src=([0-9a-fA-F:.]+)`)
 	for _, line := range strings.Split(text, "\n") {
 		m := re.FindStringSubmatch(line)
 		if m == nil {
 			continue
 		}
 		ip := m[1]
+		// 只有冒号或只有点都可能是残片：冒号结尾去掉，纯数字不是地址
+		ip = strings.TrimSuffix(ip, ":")
+		if !isPlausibleIP(ip) {
+			continue
+		}
 		s := res[ip]
 		s.IP = ip
 		// bytes= is only present when nf_conntrack_acct is enabled; absent
@@ -43,6 +53,14 @@ func ParseConntrackSessions(text string) map[string]Session {
 		res[ip] = s
 	}
 	return res
+}
+
+// isPlausibleIP 过滤正则抓到的残片（如 "2409"、"0.0.0"）。
+func isPlausibleIP(s string) bool {
+	if net.ParseIP(s) != nil {
+		return true
+	}
+	return false
 }
 
 func extractField(line, key string) string {
@@ -97,10 +115,19 @@ func Merge(accounts map[string]string, sessions map[string]Session) []Session {
 			continue
 		}
 		s.Online = true
+		// 这些会话来自 conntrack，本来就没有账号归属。留空会让前端表格
+		// 出现一列空白，看起来像"加载失败"；给一个明确标识更诚实。
+		if s.Username == "" {
+			s.Username = unauthenticatedLabel
+		}
 		out = append(out, s)
 	}
 	return out
 }
+
+// unauthenticatedLabel 是"有流量但没有账号归属"的会话显示名。
+// 不要用空串，也不要用 "-"（看起来像缺数据），要说清楚它是什么。
+const unauthenticatedLabel = "(未认证)"
 
 // Kick generates the conntrack delete command for a session by IP. It never
 // kills a process by username — that would hit another user's session.
