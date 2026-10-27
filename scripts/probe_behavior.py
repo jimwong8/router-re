@@ -25,7 +25,6 @@ import os
 import random
 import shutil
 import socket
-import subprocess
 import string
 import subprocess
 import sys
@@ -33,9 +32,9 @@ import time
 import urllib.error
 import urllib.request
 
-MGMT_DIR = "/home/jimwong/projects/router-re/mgmtd"
+MGMT_DIR = os.environ.get("WORK_DIR", "/home/jimwong/projects/router-re/mgmtd")
 WORKDIR = "/tmp/mgmprobe"
-PORT = 28090
+PORT = int(os.environ.get("PROBE_PORT", "28090"))
 BASE = f"http://127.0.0.1:{PORT}"
 
 RESULTS: list[tuple[str, bool, str]] = []
@@ -50,12 +49,15 @@ HERDR = shutil.which("herdr") or str(pathlib.Path.home() / ".local/bin/herdr")
 
 
 def notify_workers(msg: str) -> None:
-    """behavior 是无人值守定时任务，跑完往 4 个工人 pane 各回贴一句话。
+    """behavior 是无人值守定时任务，跑完往工人 pane 各回贴一句话。
 
+    pane 列表从 PANES 环境变量来（与调度器同一份），不写死 ——
+    以前写死 4 个 pane，换一批工人就全贴错地方。
     坚哥在 konsole 点开任意工人对话框就能看到最近一次回归结果，
     不用去翻 journal。失败只打印不影响退出码。
     """
-    for pane in ("w1:pM", "w1:pN", "w1:pQ", "w1:pP"):
+    panes = os.environ.get("PANES", "w1:pM w1:pN w1:pQ w1:pP").split()
+    for pane in panes:
         try:
             subprocess.run([HERDR, "agent", "prompt", pane, msg],
                            capture_output=True, text=True, timeout=30)

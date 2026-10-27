@@ -34,11 +34,12 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-ROOT = Path("/home/jimwong/projects/router-re")
+ROOT = Path(os.environ.get("WORK_DIR", "/home/jimwong/projects/router-re"))
 QUEUE = ROOT / "ops" / "tasks.jsonl"
 LOG = ROOT / "logs" / "verify.log"
 GATEWAY = os.environ.get("GATEWAY_URL", "http://10.100.1.17:8085/v1/chat/completions")
 HERDR = shutil.which("herdr") or str(Path.home() / ".local/bin/herdr")
+MUST_BUILD_DIR = os.environ.get("BUILD_DIR", "mgmtd")  # 新项目不是 Go 就改这里
 
 # 验证者模型必须与实现者不同，否则等于自审。
 # 工人主力是 beam-free（opencode-zen 免费层），所以验证者默认用 deepseek-v4-flash。
@@ -254,7 +255,7 @@ def static_check(paths: list[Path]) -> tuple[list[str], list[str]]:
 def build_check() -> tuple[bool, str]:
     """编译检查。返回 (是否通过, 输出摘要)。"""
     try:
-        r = subprocess.run(["go", "build", "./..."], cwd=ROOT / "mgmtd",
+        r = subprocess.run(["go", "build", "./..."], cwd=ROOT / MUST_BUILD_DIR,
                            capture_output=True, text=True, timeout=240)
         if r.returncode == 0:
             return True, "build ok"

@@ -31,17 +31,36 @@ import urllib.request
 from collections import Counter
 from pathlib import Path
 
-ROOT = Path("/home/jimwong/projects/router-re")
+ROOT = Path(os.environ.get("WORK_DIR", "/home/jimwong/projects/router-re"))
 SERVER_GO = ROOT / "mgmtd" / "internal" / "server" / "server.go"
 WORKDIR = "/tmp/mgmprobe"
-PORT = 28091
+PORT = int(os.environ.get("PROBE_PORT", "28091"))
 
-# 明确会改系统状态的端点，空 body 也**不要碰**（宁可漏测也不误伤）
+# 明确会改系统状态的端点，空 body 也**不要碰**（宁可漏测也不误伤）。
+# 覆盖原则：凡是向 nftables / 系统服务 / 账号凭证 / 固件 / 配置恢复写的东西，
+# 一律进名单。以前靠手写 15 个前缀，漏了 6 类（portmap / wol / threat/apply /
+# system/services-action / processes-kill / config/restore / firmware-apply /
+# voucher / accounts），现在按动作语义补齐。
 DANGEROUS = [
     "/interfaces/config", "/firewall/rules", "/wan/links", "/route/",
     "/nat/rules", "/vlan", "/bridge", "/vpn/", "/wireless/ssids",
     "/dhcp/config", "/dhcp/server", "/qos/", "/dns/config", "/upnp/config",
     "/snmp/config", "/radius/config", "/ddns/config", "/ntp/config",
+    # --- 本轮补齐（按动作语义，空 body 或默认 body 会真改系统）---
+    "/portmap/",          # NAT 端口映射，直接写 nft
+    "/wol/",              # 魔术包唤醒，会真发包
+    "/threat/",           # block/apply 写 ipset+nft；import 写情报库
+    "/system/services/action", "/system/processes/kill",  # 启停服务 / 杀进程
+    "/security/ddos",     # DDoS 防护开关，写限速规则
+    "/config/restore",    # 配置恢复，会覆盖整机配置
+    "/firmware/",         # 固件计划/升级，最高危
+    "/voucher",           # 卡密生成/核销，改余额类状态
+    "/accounts",          # 账号增删改，改凭证
+    "/online/kick",       # 踢在线用户，真下线人
+    "/cert/self-signed",  # 会真签发证书写盘
+    "/system/time",       # 改系统时钟
+    "/ddns/config",       # DDNS 供应商密钥（与 /ddns/records 不同，后者只是记录列表）
+    # 注意 /ddns/records 不在这里：已加 confirm 保护的"全量替换"走正常探针验证
 ]
 
 

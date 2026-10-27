@@ -292,7 +292,7 @@ async function addBlockIp() {
 async function delBlock(ip: string) {
   try {
     const next = blocklist.value.filter(x => x !== ip);
-    const res = await api.post('/api/v1/ips/blocklist', { ips: next });
+    const res = await api.post('/api/v1/ips/blocklist', { ips: next, confirm: next.length === 0 });
     if (res.data?.applied) {
       await loadBlocklist();
       ElMessage.success('解封成功');

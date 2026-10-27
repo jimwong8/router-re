@@ -3606,10 +3606,18 @@ func (s *Server) handleSetIPSBlocklist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		IPs []string `json:"ips"`
+		IPs     []string `json:"ips"`
+		Confirm bool     `json:"confirm"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, 400, errBody(10039, "invalid body", err.Error()))
+		return
+	}
+	// 空数组是全量替换语义：会清空整个封禁列表（解封所有 IP）并返回 200。
+	// 必须显式 confirm:true 才允许清空 —— 误发空 body 就全网解封的风险太高。
+	if len(req.IPs) == 0 && !req.Confirm {
+		writeJSON(w, 422, errBody(10043, "ips must not be empty",
+			"to clear all blocked ips, send {ips:[],confirm:true}"))
 		return
 	}
 	blocked := make(map[string]bool, len(req.IPs))

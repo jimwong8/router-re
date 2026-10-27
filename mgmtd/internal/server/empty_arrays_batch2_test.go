@@ -60,3 +60,44 @@ func TestEmptyArrayRequiresConfirmBatch2(t *testing.T) {
 		})
 	}
 }
+
+func TestIPSBlocklistEmptyRequiresConfirm(t *testing.T) {
+	s := New(Config{
+		Addr:          ":0",
+		SecretKey:     []byte("0123456789abcdef0123456789abcdef"),
+		AdminUser:     "admin",
+		AdminPassword: "pw",
+	})
+
+	// 空数组 = 全网解封，必须 422；带 confirm 才能放行
+	for _, tc := range []struct {
+		name   string
+		body   string
+		wantOK bool
+		code   string
+	}{
+		{"空数组被拒", `{"ips":[]}`, false, "10043"},
+		{"confirm 放行", `{"ips":[],"confirm":true}`, true, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			s.handleSetIPSBlocklist(rec, req)
+			if tc.wantOK {
+				// 无 aclApplier 的单测环境会 500（exec runner 未初始化），
+				// 关键是不能 422 —— 说明空数组检查已通过
+				if rec.Code == http.StatusUnprocessableEntity {
+					t.Fatalf("带 confirm 不应再报 422，实际 body=%s", rec.Body.String())
+				}
+				return
+			}
+			if rec.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("应返回 422，实际 %d body=%s", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), tc.code) {
+				t.Fatalf("错误码应含 %s，实际 %s", tc.code, rec.Body.String())
+			}
+		})
+	}
+}
