@@ -275,10 +275,20 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 429, errBody(10002, "too many attempts", "try again later"))
 		return
 	}
+	// 先查 RBAC 用户表：POST /api/v1/users 建出来的账号必须能真正登录，
+	// 否则多用户管理只是摆设（实测踩到：用户建成功但 /auth/login 恒 401，
+	// 因为这里只比环境变量里的 admin）。
+	// 环境变量 admin 仍然兜底，保证原有部署方式和首次登录不被破坏。
+	rbacOK := false
+	if s.rbacMgr != nil {
+		if u, ok := s.rbacMgr.Get(req.Username); ok && u.Enabled {
+			rbacOK = rbac.VerifyPassword(req.Password, u.PasswordHash)
+		}
+	}
 	// Compare in constant time to avoid leaking length/prefix information.
 	userOK := subtle.ConstantTimeCompare([]byte(req.Username), []byte(s.cfg.AdminUser)) == 1
 	passOK := subtle.ConstantTimeCompare([]byte(req.Password), []byte(s.cfg.AdminPassword)) == 1
-	if !userOK || !passOK {
+	if !rbacOK && (!userOK || !passOK) {
 		s.logAudit(r, "auth.login", req.Username, "fail", "invalid credentials")
 		writeJSON(w, 401, errBody(10001, "invalid credentials", ""))
 		return
