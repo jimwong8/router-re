@@ -44,8 +44,9 @@ def run_case(pane_state_value, ctx, expect_reset, expect_dispatch, name,
             "expect": ["out.txt"], "prefer": "w1:pX",
         }, ensure_ascii=False) + "\n", encoding="utf-8")
         # 产出文件不存在，避免被误判 done
-        d.PANES = ["w1:pX"]
-        d.MAX_PER_ROUND = 4
+        d.PANES_RAW = ["w1:pX"]
+        d.resolve_panes = lambda: ["w1:pX"]  # 不真调 herdr
+        d.MAX_PER_ROUND = 0  # 自动 = pane 数
 
         calls = {"reset": 0, "dispatch": 0}
         cur = {"state": pane_state_value}
@@ -106,8 +107,9 @@ def run_custom(tasks, pane_state_val="idle", ctx=20.0, panes=("w1:pX",)):
         d.QUEUE.write_text(
             "\n".join(json.dumps(x, ensure_ascii=False) for x in tasks) + "\n",
             encoding="utf-8")
-        d.PANES = list(panes)
-        d.MAX_PER_ROUND = 4
+        d.PANES_RAW = list(panes)
+        d.MAX_PER_ROUND = 0  # 自动 = pane 数
+        d.resolve_panes = lambda: list(panes)  # 不真调 herdr
 
         calls = {"dispatch": 0}
         d.pane_state = lambda p: pane_state_val
@@ -196,7 +198,9 @@ with tempfile.TemporaryDirectory() as td:
     td = Path(td)
     d.QUEUE, d.STATE, d.LOG = td/"tasks.jsonl", td/".state.json", td/"dispatch.log"
     d.QUEUE.write_text(json.dumps({"id":"v1","status":"pending","prompt":"审这个","tier":"verify"})+"\n", encoding="utf-8")
-    d.PANES = ["w1:pN", "w1:pM"]          # pN=free, pM=strong
+    d.PANES_RAW = ["w1:pN", "w1:pM"]          # pN=free, pM=strong
+    d.STRONG_PANES = {"w1:pM"}
+    d.resolve_panes = lambda: ["w1:pN", "w1:pM"]
     d.MAX_PER_ROUND = 1
     d.pane_state = lambda p: "idle"
     d.context_pct = lambda p: 10.0
@@ -213,7 +217,9 @@ with tempfile.TemporaryDirectory() as td:
     td = Path(td)
     d.QUEUE, d.STATE, d.LOG = td/"tasks.jsonl", td/".state.json", td/"dispatch.log"
     d.QUEUE.write_text(json.dumps({"id":"v2","status":"pending","prompt":"审这个","tier":"verify"})+"\n", encoding="utf-8")
-    d.PANES = ["w1:pN", "w1:pQ"]
+    d.PANES_RAW = ["w1:pN", "w1:pQ"]
+    d.STRONG_PANES = {"w1:pM"}  # 本轮没有 strong pane
+    d.resolve_panes = lambda: ["w1:pN", "w1:pQ"]
     d.MAX_PER_ROUND = 1
     d.pane_state = lambda p: "idle"
     d.context_pct = lambda p: 10.0
@@ -232,7 +238,8 @@ with tempfile.TemporaryDirectory() as td:
     td = Path(td)
     d.QUEUE, d.STATE, d.LOG = td/"tasks.jsonl", td/".state.json", td/"dispatch.log"
     d.QUEUE.write_text(json.dumps({"id":"e1","status":"pending","prompt":"改个文件"})+"\n", encoding="utf-8")
-    d.PANES = ["w1:pN"]
+    d.PANES_RAW = ["w1:pN"]
+    d.resolve_panes = lambda: ["w1:pN"]
     d.MAX_PER_ROUND = 1
     d.pane_state = lambda p: "idle"
     d.context_pct = lambda p: 10.0

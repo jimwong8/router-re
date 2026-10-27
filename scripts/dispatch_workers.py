@@ -57,25 +57,21 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-QUEUE = ROOT / "ops" / "tasks.jsonl"
-LOG = ROOT / "logs" / "dispatch.log"
-STATE = ROOT / ".dispatch-state.json"
+QUEUE = Path(os.environ.get("QUEUE_PATH", str(ROOT / "ops" / "tasks.jsonl")))
+LOG = Path(os.environ.get("DISPATCH_LOG", str(ROOT / "logs" / "dispatch.log")))
+STATE = Path(os.environ.get("DISPATCH_STATE", str(ROOT / ".dispatch-state.json")))
+WORKDIR = Path(os.environ.get("WORK_DIR", str(ROOT)))
 
-PANES = os.environ.get("PANES", "w1:pN w1:pQ w1:pP w1:pM").split()
-MAX_PER_ROUND = int(os.environ.get("MAX_PER_ROUND", "4"))
-
-# pane 的模型档位。任务可以用 tier 声明自己需要哪一档：
-#   plan / verify —— 需要判断，只给强模型（免费模型会给你自信的废话）
-#   exec（默认）  —— 机械执行，任何 pane 都行
-# 实测依据：弱模型能过"文件在/能编译"，但"这个设计对不对"这类判断给它是浪费；
-# 而 12 个开发任务里 11 个由免费模型完成且全部通过验收，说明 exec 类完全可以下放。
-# 注意：改 pane 的模型后必须同步这里，否则 tier 路由会失效。
-PANE_TIER = {
-    "w1:pM": "strong",      # OpenCode + deepseek-v4-flash
-    "w1:pN": "free",        # Hermes + beam-free
-    "w1:pQ": "free",
-    "w1:pP": "free",
-}
+# PANES 支持两种写法，坚哥报哪种都行：
+#   pane 写法（herdr-konsole 里直接看到的）：w1:pN w1:pQ w1:pP
+#   会话 ID 写法（长串如 abc123...）：自动映射到 pane（见 resolve_panes()）。
+# 数量即规模：一拖二就报 2 个，一拖三报 3 个，一拖四报 4 个，脚本智能识别。
+PANES_RAW = os.environ.get("PANES", "w1:pN w1:pQ w1:pP w1:pM").split()
+MAX_PER_ROUND = int(os.environ.get("MAX_PER_ROUND", "0"))  # 0 = 自动 = pane 数
+# pane 的模型档位。默认全 free（机械执行）；哪个 pane 是强模型就把它的 id 写进
+# STRONG_PANES（如 "w1:pM"），plan/verify 类任务只派给它们。
+# 为什么改成环境变量：以前写死 PANE_TIER，每换一批 pane 就要改代码。
+STRONG_PANES = set(os.environ.get("STRONG_PANES", "w1:pM").split())
 JUDGEMENT_TIERS = {"plan", "verify"}
 STALE_MINUTES = float(os.environ.get("STALE_MINUTES", "20"))  # 派发后多久没产出算失败
 # 工人已经 idle（它认为做完了）但产出不达标，多久之后释放它。
@@ -355,6 +351,55 @@ def retry_ready(task: dict, t: float) -> bool:
     return t >= float(ra)
 
 
+def pane_identities() -> dict[str, str]:
+    """pane_id -> 会话标识。一次 herdr 调用拿全量，避免每个 pane 读一次。
+
+    坚哥报的可能是 pane 号（w1:pN），也可能是会话 ID（herdr 里那串长的）。
+    这里把两者都建成索引：pane_id 本身 + terminal_title 里能看到的标识。
+    """
+    try:
+        r = subprocess.run([HERDR, "agent", "list"],
+                           capture_output=True, text=True, timeout=15)
+        agents = json.loads(r.stdout).get("result", {}).get("agents", [])
+    except Exception:  # noqa: BLE001
+        return {}
+    out = {}
+    for a in agents:
+        pid = a.get("pane_id", "")
+        if pid:
+            out[pid] = pid
+            # terminal_id 也建索引，万一坚哥报的是那串 term_xxx
+            tid = a.get("terminal_id", "")
+            if tid:
+                out[tid] = pid
+    return out
+
+
+def resolve_panes() -> list[str]:
+    """把 PANES_RAW 解析成真正的 pane_id 列表。
+
+    - 已经是 w1:pX 格式：直接用。
+    - 别的格式（会话 ID / terminal_id）：查 pane_identities() 映射。
+    - 映射不到：在日志里 WARN 并跳过，不让一个错 ID 卡死整轮。
+    数量即规模：一拖二就是 2 个，一拖三 3 个，一拖四 4 个，不用再配别的东西。
+    """
+    table = pane_identities()
+    panes = []
+    for raw in PANES_RAW:
+        if re.match(r"^w\d+:p[A-Z]+$", raw):
+            panes.append(raw)
+        elif raw in table:
+            panes.append(table[raw])
+        else:
+            log(f"WARN PANES 里 {raw!r} 不是 pane 号也映射不到会话，已跳过")
+    return panes
+
+
+def pane_tier(pane: str) -> str:
+    """plan / verify 只给强模型。默认全 free，STRONG_PANES 环境变量指定强 pane。"""
+    return "strong" if pane in STRONG_PANES else "free"
+
+
 def wall_limit_minutes(task: dict) -> float:
     """任务级硬预算，缺省回落到全局 STALE_MINUTES。
 
@@ -554,9 +599,15 @@ def main() -> int:
     busy_panes = {task.get("pane") for task in tasks if task.get("status") == "dispatched"}
 
     # 4) 派发：空闲 pane 领 pending 任务
+    # PANES 在这里解析（不是模块顶层）：坚哥每次报的 pane 可能不一样，
+    # 环境变量 PANES 由启动器按本轮传入，脚本只负责解析 + 智能识别规模。
+    panes = resolve_panes()
+    if not panes:
+        log("WARN 没有可用的 pane，本轮跳过派发（只做结算）")
+    max_round = MAX_PER_ROUND if MAX_PER_ROUND > 0 else len(panes)  # 0 = 自动 = pane 数
     dispatched_now = 0
-    for pane in PANES:
-        if dispatched_now >= MAX_PER_ROUND:
+    for pane in panes:
+        if dispatched_now >= max_round:
             break
         if pane in busy_panes:
             continue
@@ -599,7 +650,7 @@ def main() -> int:
             if not retry_ready(task, t) or not deps_satisfied(task, tasks):
                 return False
             # 判断类任务不给免费模型：给它也做不对，还占着 pane 烧 token
-            if task.get("tier") in JUDGEMENT_TIERS and PANE_TIER.get(pane) != "strong":
+            if task.get("tier") in JUDGEMENT_TIERS and pane_tier(pane) != "strong":
                 return False
             return True
 
