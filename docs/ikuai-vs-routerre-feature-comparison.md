@@ -56,7 +56,24 @@
 9. **VLAN 的 VID 在 `linkinfo.info_data.id`**，不是顶层 `vlan_info.id`（写错静默得 0，界面显示"VID 0"但实际是 100）。
 10. **`ip -j link show type bridge` 必须加 `-d`**，否则 linkinfo 为空、stp_state 取不到；成员不能解析 `bridge link show` 文本（每行开头是序号，会得到 `["6059:"]`），要从各 link 的 `master` 字段反查。
 
-### 当前闭环模块（8 个）
+### P3 补齐记录（2026-10-27）
+
+| P3 项 | 状态 | 真实验证证据 |
+|---|---|---|
+| ACL 规则 | ✅ | 内核 `table inet router_acl` 含 `ip saddr 192.168.1.0/24 tcp dport 445 drop` + `tcp dport 80 accept` + 兜底 accept |
+| ARP 防护 | ✅ | `net.ipv4.conf.all.arp_ignore = 1` / `arp_announce = 2`（`/proc/sys` 实测）。⚠ 只设了 `all`，各接口仍为 0，需补 per-interface |
+| DDNS | ✅ | `/ddns/ip` 探测到真实公网 IP `103.240.198.142`；Cloudflare + 阿里云双 provider（httptest 覆盖成功/失败/私有 IP 拒绝） |
+| NTP | ✅ | `timedatectl` 真实状态：`ntp=yes` / `ntpsynchronized=yes` / `timezone=Asia/Shanghai` |
+| 端口映射 | ✅ | 内核 `table inet router_portmap` 含 `tcp dport 8080 dnat ip to 10.100.1.18:80` + forward accept + hairpin masquerade |
+| 策略路由 | ✅ | `ip rule add ... lookup <table> priority <pri>` 真实下发（与多WAN 共用 table 机制） |
+
+### P3 发现的 nft 语法 bug（第二次踩同类）
+
+11. **`flush ruleset` 又出现了**（`acl.go`）—— 和 portal 完全同一类：会清空整机所有 nft 表。已删 + 回归测试。
+12. **空集合 `elements = {}` 是语法错误**，nft 报 `syntax error, unexpected '}'`。不需要 set 就别写。
+13. **inet 表里 `dnat to` 必须写 `dnat ip to`**，否则 nft 报 `specify 'dnat ip' or 'dnat ip6' in inet table to disambiguate`。
+
+### 当前闭环模块（12 个）
 
 防火墙、QoS（接口级）、接口配置、静态路由、DHCP、多WAN 策略路由、per-IP 限速、DPI 标记、Web Portal、PPPoE、VLAN、桥接 —— 12 个模块全部「下发到内核 + 可回读验证」。
 
@@ -69,12 +86,12 @@
 | # | iKuai 模块 | iKuai 功能项 | router-re 已覆盖 | 覆盖度 | router-re 实现深度 |
 |---|---|---|---|---|---|
 | 1 | 系统监控 | 18 | 11 | **61%** | 真实 /proc 采集 + 6小时环形历史 + 5 条趋势图 + 接口流量明细 |
-| 2 | 网络配置 | 58 | 8 | **14%** | 接口/静态路由/NAT/DHCP 真实生效 + VLAN/桥接真实下发 |
-| 3 | 安全管控 | 39 | 1.5 | **6%** | ACL 真实 nft 下发 ✅ |
+| 2 | 网络配置 | 58 | 14 | **24%** | 接口/静态路由/NAT/DHCP/VLAN/桥接/端口映射/策略路由 真实生效 |
+| 3 | 安全管控 | 39 | 8 | **21%** | ACL 真实 nft 下发 + ARP 防护 sysctl 生效；缺 URL 过滤/IPS |
 | 4 | 流控分流 | 21 | 6 | **29%** | QoS + per-IP 限速真实 tc / DPI 标记入内核 / 多WAN 策略路由真实下发 |
 | 5 | 认证计费 | 28 | 6 | **21%** | Web Portal(nft authorized set) + PPPoE 服务端(真实启动) + RADIUS 客户端(RFC2865)；缺计费账务 |
 | 6 | 无线服务 | 21 | 0.5 | **2%** | **AC 管理已取消**；仅保留本机 AP 的 SSID/hostapd 配置 |
-| 7 | 高级服务 | 32 | 1 | **6%** | 仅配置快照 |
+| 7 | 高级服务 | 32 | 6 | **19%** | DDNS(Cloudflare/阿里云双 provider) + NTP 配置真实生效 |
 | 8 | 日志中心 | 11 | 5 | **45%** | journal 查询(unit/grep/时间) + 连接跟踪表(协议/方向/状态) |
 | 9 | 设备设置 | 20 | 1.5 | **15%** | 单管理员 + 快照 |
 | | **合计** | **248** | **~12** | **~16%** | 2 模块闭环，8 模块渲染 |
