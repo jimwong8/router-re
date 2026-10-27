@@ -114,7 +114,10 @@ func TestRenderConnlimitUsesCtCount(t *testing.T) {
 }
 
 func TestNeighborsJSON(t *testing.T) {
-	jsonStr := `[{"dev":"ens18","dst":"10.0.0.1","lladdr":"aa:bb:cc:dd:ee:ff","state":"REACHABLE"},{"dev":"ens18","dst":"10.0.0.2","lladdr":"11:22:33:44:55:66","state":"STALE"}]`
+	// ⚠ state 必须是**数组**：这是 `ip -j neigh show` 的真实格式。
+	// 之前这里写成字符串 "REACHABLE"，测试绿了但真实调用 500 —— 测试捏造了
+	// 输入格式，等于没测。
+	jsonStr := `[{"dev":"ens18","dst":"10.0.0.1","lladdr":"aa:bb:cc:dd:ee:ff","state":["REACHABLE"]},{"dev":"ens18","dst":"10.0.0.2","lladdr":"11:22:33:44:55:66","state":["STALE"]}]`
 	r := &stubRunner{out: jsonStr}
 	devs, err := Neighbors(r)
 	if err != nil {
