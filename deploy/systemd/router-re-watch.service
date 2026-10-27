@@ -1,0 +1,19 @@
+[Unit]
+Description=router-re 工人空闲监控（空闲超时弹桌面通知）
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/jimwong/projects/router-re
+ExecStart=/usr/bin/python3 /home/jimwong/projects/router-re/scripts/watch_workers.py
+Environment=PATH=/home/jimwong/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=IDLE_MINUTES=5
+Environment=WATCH_INTERVAL=30
+Environment=DISPLAY=:10.0
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%U/bus
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
