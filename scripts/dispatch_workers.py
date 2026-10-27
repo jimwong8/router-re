@@ -63,6 +63,10 @@ STATE = ROOT / ".dispatch-state.json"
 PANES = os.environ.get("PANES", "w1:pN w1:pQ w1:pP w1:pM").split()
 MAX_PER_ROUND = int(os.environ.get("MAX_PER_ROUND", "4"))
 STALE_MINUTES = float(os.environ.get("STALE_MINUTES", "20"))  # 派发后多久没产出算失败
+# 工人已经 idle（它认为做完了）但产出不达标，多久之后释放它。
+# 没有这个，会出现"任务卡在 WAIT 占着 pane，pane 又领不到新活"的死局：
+# 实测 pQ 写了 97 行（要求 120）后认为自己完成，之后一直空转。
+IDLE_STUCK_MINUTES = float(os.environ.get("IDLE_STUCK_MINUTES", "4"))
 HERDR = shutil.which("herdr") or str(Path.home() / ".local/bin/herdr")
 
 # 终端里的忙/闲标记。与 watch_workers.py 保持一致。
@@ -201,7 +205,8 @@ def produced(task: dict) -> bool:
 
     1. expect      —— 文件存在
     2. min_lines   —— {"path": 行数}，挡住空壳（一个 200 行的 handler 不可能 3 行写完）
-    3. must_build  —— 跑一次 go build，挡住写不出来的代码
+    3. must_contain —— {path: [必须出现的字符串]}，比行数精确
+    4. must_build  —— 跑一次 go build，挡住写不出来的代码
     """
     expect = task.get("expect") or []
     if not expect:
@@ -220,6 +225,23 @@ def produced(task: dict) -> bool:
         if got < int(need):
             log(f"WAIT  {task['id']}: {path} 只有 {got} 行（要求 >= {need}）")
             return False
+
+    # must_contain：文件里必须出现的字符串。比 min_lines 精确 ——
+    # 行数只是"写了多少"的粗代理，实测出现过 97 行的完整实现被 120 行门槛
+    # 挡住（p18b.go 三个 handler 全在、CSP 头也有）。真正该断言的是
+    # "关键东西在不在"，不是"够不够长"。
+    for path, needles in (task.get("must_contain") or {}).items():
+        f = ROOT / path
+        if not f.exists():
+            return False
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return False
+        for needle in needles:
+            if needle not in text:
+                log(f"WAIT  {task['id']}: {path} 缺少关键内容 {needle!r}")
+                return False
 
     if task.get("must_build"):
         for workdir, cmd in (task.get("build_cmds") or [("mgmtd", ["go", "build", "./..."])]):
@@ -266,6 +288,30 @@ def main() -> int:
             task["fail_reason"] = f"派发 {int(age_min)} 分钟仍无产出文件"
             log(f"FAIL  {task['id']}  {task['fail_reason']} (pane={task.get('pane')})")
             state.pop(task.get("pane", ""), None)
+
+    # 2.5) 工人已经空闲但产出不达标 -> 释放 pane，任务标 failed
+    #
+    # 死局场景：工人写了 97 行（要求 120）后自己认为完成并回到 idle，
+    # 调度器因为 min_lines 不通过而卡在 WAIT。此时任务仍占着 pane，
+    # 该 pane 领不到新活 —— 工人和任务互相等待，纯浪费。
+    # 判据：pane 已 idle + 距离派发已超过 IDLE_STUCK_MINUTES。
+    for task in tasks:
+        if task.get("status") != "dispatched":
+            continue
+        pane = task.get("pane", "")
+        age_min = (t - task.get("dispatched_at", t)) / 60
+        if age_min < IDLE_STUCK_MINUTES:
+            continue
+        if pane_state(pane) != "idle":
+            continue
+        task["status"] = "failed"
+        task["failed_at"] = t
+        task["fail_reason"] = (
+            f"工人已空闲但产出不达标（{int(age_min)} 分钟）: "
+            f"没通过 {'/'.join(task.get('min_lines') or {}) or '文件存在性'} 检查"
+        )
+        log(f"RELEASE {task['id']}  工人 {pane} 已空闲但产出不达标，释放 pane")
+        state.pop(pane, None)
 
     # 3) 哪些 pane 手上还有活（dispatched 未结算）
     busy_panes = {task.get("pane") for task in tasks if task.get("status") == "dispatched"}

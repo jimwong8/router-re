@@ -183,9 +183,9 @@ func (s *Server) handleLinkCheckStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"count":   len(targets),
-		"up":      up,
-		"down":    down,
-		"states":  states,
+		"count":  len(targets),
+		"up":     up,
+		"down":   down,
+		"states": states,
 	})
 }
