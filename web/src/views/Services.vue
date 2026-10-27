@@ -65,14 +65,14 @@
             <el-table-column prop="user" label="用户" width="110" />
             <el-table-column label="CPU%" width="90">
               <template #default="{ row }">
-                <span :style="{ color: cpuColor(row.cpu) }">{{ Number(row.cpu).toFixed(1) }}</span>
+                <span :style="{ color: cpuColor(row.cpu_pct) }">{{ Number(row.cpu_pct).toFixed(1) }}</span>
               </template>
             </el-table-column>
             <el-table-column label="内存%" width="90">
-              <template #default="{ row }">{{ Number(row.mem).toFixed(1) }}</template>
+              <template #default="{ row }">{{ Number(row.mem_pct).toFixed(1) }}</template>
             </el-table-column>
-            <el-table-column prop="rss" label="RSS(KB)" width="110" />
-            <el-table-column prop="cmd" label="命令" min-width="300" show-overflow-tooltip />
+            <el-table-column prop="rss_kb" label="RSS(KB)" width="110" />
+            <el-table-column prop="command" label="命令" min-width="300" show-overflow-tooltip />
             <el-table-column label="操作" width="110">
               <template #default="{ row }">
                 <el-button link size="small" type="danger"
@@ -163,7 +163,9 @@ async function loadServices() {
     svcAvailable.value = d.available !== false;
     svcReason.value = d.reason || '';
     svcHint.value = d.hint || '';
-    services.value = d.services || d.items || [];
+    // 后端字段是 units（见 handleListServices），不是 services/items。
+    // 猜字段名的代价是表格永远空，而页面没有任何报错。
+    services.value = d.units || d.services || d.items || [];
   } catch (e: any) {
     showError(e, '加载服务失败');
     svcError.value = e?.response?.data?.detail || e?.response?.data?.message || e?.message || '加载失败';
@@ -210,7 +212,8 @@ async function loadProcesses() {
   try {
     const res = await api.get('/api/v1/system/processes', { params: { n: 20 } });
     const d = res.data || {};
-    processes.value = d.processes || d.items || [];
+    // 后端字段是 top（见 handleListProcesses），不是 processes/items
+    processes.value = d.top || d.processes || d.items || [];
     procTotal.value = d.total || processes.value.length;
   } catch (e: any) {
     showError(e, '加载进程失败');

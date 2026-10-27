@@ -44,6 +44,8 @@ import Alerts from '../views/Alerts.vue';
 import NetworkAdvanced from '../views/NetworkAdvanced.vue';
 import CertManage from '../views/CertManage.vue';
 import OnlineUsers from '../views/OnlineUsers.vue';
+import Services from '../views/Services.vue';
+import NetworkTools from '../views/NetworkTools.vue';
 import Quota from '../views/Quota.vue';
 
 const routes = [
@@ -91,6 +93,8 @@ const routes = [
   { path: '/network-advanced', component: NetworkAdvanced, meta: { requiresAuth: true } },
   { path: '/cert', component: CertManage, meta: { requiresAuth: true } },
   { path: '/online-users', component: OnlineUsers, meta: { requiresAuth: true } },
+  { path: '/services', component: Services, meta: { requiresAuth: true } },
+  { path: '/network-tools', component: NetworkTools, meta: { requiresAuth: true } },
   { path: '/quota', component: Quota, meta: { requiresAuth: true } },
   { path: '/login', component: Login },
   { path: '/:pathMatch(.*)*', redirect: '/login' },
