@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """watch_workers.py — 三工人进度快照 + 空闲/阻塞超时主动提醒。
 
-为什么是 Python：`herdr agent list` 返回 JSON，解析终端文本判断"在不在干活"
-不可靠（提示符样式会变）。agent_status 是明确的枚举：
-    working | blocked | done | idle | unknown
+判定忙闲只能读终端文本，不能信 `herdr agent list` 的 agent_status。
+实测：派 `sleep 45` 给 w1:pN，上下文 0%→13%、模型切换，明显在干活，
+但 agent_status 全程报 idle。用它会得出「全员空闲」的假结论。
 
 行为：
   1. 进度快照：Go 文件数 / 包数 / 端点数 / 前端视图数，只在变化时写
-     logs/worker-watch.log（保持原设计，避免日志刷屏）。
-  2. 空闲提醒：窗口处于 idle/done/unknown 且持续 >= IDLE_MINUTES（默认 5）
-     → 桌面通知 + logs/worker-alerts.log，每个空闲周期只提醒一次。
-  3. 阻塞提醒：窗口进入 blocked（在等你确认/输入）→ 立刻提醒，没有延迟。
-  4. 状态持久化：logs/.worker_state.json，脚本重启不会让计时归零。
+     logs/worker-watch.log（避免日志刷屏）。
+  2. 空闲提醒：pane 尾部是空闲占位符（❯ Ask anything 等）且持续
+     >= IDLE_MINUTES（默认 5）→ 桌面通知 + logs/worker-alerts.log，
+     每个空闲周期只提醒一次。
+  3. unknown（读不到输出 / 既无忙标记也无空闲占位符）不计入空闲 —
+     宁可漏提醒，也不要在工人真在干活时弹「闲置」。
 
 环境变量：
   IDLE_MINUTES      空闲多少分钟提醒（默认 5）
@@ -83,17 +84,57 @@ def notify(title: str, body: str, urgency: str = "normal") -> None:
 
 
 def agent_states() -> dict[str, str]:
-    """返回 {pane_id: agent_status}；herdr 不可用时返回空字典。"""
+    """已废弃：herdr agent_status 恒为 idle，不能判忙闲。
+
+    实测（2026-10-27）：给 w1:pN 派 `sleep 45` 任务，上下文从 0% 走到 13%、
+    模型从 deepseek-v4-flash 切到 AUTO，说明确实在干活，但 `herdr agent list`
+    的 agent_status 全程报 idle。保留此函数仅为兼容，主循环不再调用它。
+    """
+    return {}
+
+
+# 忙碌标记：Hermes TUI 的 spinner 标签 + 执行指示。
+# 缺任何一个都会把真在干活的 worker 误判成空闲（历史踩坑：漏掉 pondering/
+# synthesizing/mulling 等词，用户连续三次纠正「两个工人空闲了你居然不知道」）。
+BUSY_MARKERS = (
+    "Working", "pondering", "synthesizing", "reasoning", "contemplating",
+    "processing", "reflecting", "musing", "computing", "formulating",
+    "ruminating", "analyzing", "designing", "writing", "mulling",
+    "deliberating", "cogitating", "waiting on",
+    "💻", "✍️", "📝", "⏳",
+    "type to redirect this turn",  # 忙碌时才出现的提示语
+)
+
+# 空闲标记：只有这些输入框占位符才代表真的在等输入。
+IDLE_MARKERS = (
+    "❯ Ask anything",
+    "❯ Explain this error",
+    "❯ Draft a reply",
+    "❯ Type / to browse commands",
+)
+
+
+def pane_state(pane: str) -> str:
+    """读取 pane 尾部文本判定 busy / idle / unknown。
+
+    unknown 故意不当成空闲：误报「闲置」会打扰人，漏报只是少提醒一次。
+    """
     try:
         out = subprocess.run(
-            [HERDR, "agent", "list"], capture_output=True, text=True, timeout=15
+            [HERDR, "agent", "read", pane, "--lines", "8"],
+            capture_output=True, text=True, timeout=15,
         ).stdout
-        data = json.loads(out)
-        agents = data.get("result", {}).get("agents", [])
-        return {a["pane_id"]: a.get("agent_status", "unknown") for a in agents}
     except Exception as exc:  # noqa: BLE001
-        append(ALERT, f"[{stamp()}] herdr agent list failed: {exc}")
-        return {}
+        append(ALERT, f"[{stamp()}] herdr agent read {pane} failed: {exc}")
+        return "unknown"
+
+    if not out.strip():
+        return "unknown"
+    if any(m in out for m in BUSY_MARKERS):
+        return "busy"
+    if any(m in out for m in IDLE_MARKERS):
+        return "idle"
+    return "unknown"
 
 
 def project_metrics() -> tuple[int, int, int, int]:
@@ -129,10 +170,9 @@ def main() -> int:
     # last_remind 故意不继承：进程重启后宁可重复提醒一次，也不能因为上次
     # 运行留下的记录而永久漏提醒（提醒是目的，重复只是噪音）。
     last_remind: dict[str, float] = {}
-    blocked_seen: set[str] = set(state.get("blocked_seen", []))
 
     # 启动基线：已在空闲的窗口从现在开始计时，避免刚启动就弹通知
-    probe = agent_states()
+    probe = {p: pane_state(p) for p in PANES}
     start = now()
     for pane in PANES:
         if probe.get(pane) in ("idle", "done", "unknown") and pane not in idle_since:
@@ -143,7 +183,7 @@ def main() -> int:
                 f"panes={','.join(PANES)})")
 
     while True:
-        states = agent_states()
+        states = {p: pane_state(p) for p in PANES}
         t = now()
 
         # ---- 进度快照（只在变化时记录）----
@@ -157,26 +197,20 @@ def main() -> int:
 
         # ---- 逐窗口判定 ----
         expired: list[tuple[str, float]] = []
-        newly_blocked: list[str] = []
 
         for pane in PANES:
             st = states.get(pane, "unknown")
 
-            if st == "working":
+            if st == "busy":
                 idle_since.pop(pane, None)
                 last_remind.pop(pane, None)
-                blocked_seen.discard(pane)
                 continue
 
-            if st == "blocked":
-                idle_since.pop(pane, None)
-                last_remind.pop(pane, None)
-                if pane not in blocked_seen:
-                    blocked_seen.add(pane)
-                    newly_blocked.append(pane)
+            if st != "idle":
+                # unknown / 空输出：不参与空闲计时。宁可漏提醒，
+                # 也不要在工人其实在干活时弹「闲置」打扰人。
                 continue
 
-            # idle / done / unknown
             since = idle_since.setdefault(pane, t)
             idle_min = (t - since) / 60.0
             if idle_min < IDLE_MINUTES:
@@ -191,11 +225,6 @@ def main() -> int:
                 last_remind[pane] = t
 
         # ---- 提醒 ----
-        if newly_blocked:
-            msg = f"{', '.join(newly_blocked)} 在等待输入/确认"
-            append(ALERT, f"[{stamp(t)}] BLOCKED {msg}")
-            notify("⚠ router-re 工人阻塞", msg, urgency="critical")
-
         if expired:
             detail = ", ".join(f"{p}({fmt_idle(m)})" for p, m in expired)
             append(ALERT, f"[{stamp(t)}] IDLE {detail}")
@@ -208,7 +237,6 @@ def main() -> int:
         save_state({
             "idle_since": {k: v for k, v in idle_since.items()},
             "last_remind": {k: v for k, v in last_remind.items()},
-            "blocked_seen": sorted(blocked_seen),
         })
 
         time.sleep(INTERVAL)
