@@ -10,9 +10,9 @@ import (
 // It is intentionally simple and in-memory: on a small router daemon it
 // protects against one-host brute force without pulling in a cache backend.
 type loginLimiter struct {
-	mu      sync.Mutex
-	max     int           // allowed attempts per IP per window
-	window  time.Duration // sliding window length
+	mu       sync.Mutex
+	max      int           // allowed attempts per IP per window
+	window   time.Duration // sliding window length
 	attempts map[string]*bucket
 }
 

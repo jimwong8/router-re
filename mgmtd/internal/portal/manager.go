@@ -10,11 +10,11 @@ import (
 
 // Client represents an authenticated network device.
 type Client struct {
-	MAC             string `json:"mac"`
-	IP              string `json:"ip"`
-	Authorized      bool   `json:"authorized"`
-	AuthorizedAt    int64  `json:"authorized_at"`
-	ExpiresAt       int64  `json:"expires_at"`
+	MAC          string `json:"mac"`
+	IP           string `json:"ip"`
+	Authorized   bool   `json:"authorized"`
+	AuthorizedAt int64  `json:"authorized_at"`
+	ExpiresAt    int64  `json:"expires_at"`
 }
 
 // Manager stores clients in a thread-safe in-memory map keyed by MAC.

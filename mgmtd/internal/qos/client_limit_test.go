@@ -34,12 +34,12 @@ func TestParseSelectorValid(t *testing.T) {
 
 func TestParseSelectorInvalid(t *testing.T) {
 	bad := []string{
-		"",                     // empty
-		"192.168.1.1",          // no prefix
-		"ip:notanip",           // bad IP
-		"mac:zz:zz",            // bad MAC
-		"foo:1.2.3.4",          // bad kind
-		"ip:",                  // empty value
+		"",            // empty
+		"192.168.1.1", // no prefix
+		"ip:notanip",  // bad IP
+		"mac:zz:zz",   // bad MAC
+		"foo:1.2.3.4", // bad kind
+		"ip:",         // empty value
 	}
 	for _, s := range bad {
 		if _, _, err := ParseSelector(s); err == nil {

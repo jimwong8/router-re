@@ -9,11 +9,11 @@ import (
 
 // Config describes a network interface configuration.
 type Config struct {
-	Name     string   `json:"name"`
-	Address  string   `json:"address"`
-	Netmask  string   `json:"netmask"`
-	Gateway  string   `json:"gateway"`
-	DNS      []string `json:"dns"`
+	Name    string   `json:"name"`
+	Address string   `json:"address"`
+	Netmask string   `json:"netmask"`
+	Gateway string   `json:"gateway"`
+	DNS     []string `json:"dns"`
 }
 
 // Applier applies interface settings using an execx.Runner.
@@ -103,8 +103,8 @@ func (a *Applier) Status(name string) (map[string]interface{}, error) {
 	}
 	// Minimal parsing: return address and netmask extracted via strings.
 	res := map[string]interface{}{
-		"name":    name,
-		"raw":     out,
+		"name": name,
+		"raw":  out,
 	}
 	if strings.Contains(out, `"local"`) {
 		res["has_local"] = true

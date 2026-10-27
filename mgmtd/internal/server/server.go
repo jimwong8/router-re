@@ -6,20 +6,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/jimwong/router-re/mgmtd/internal/auth"
 	"github.com/jimwong/router-re/mgmtd/internal/audit"
+	"github.com/jimwong/router-re/mgmtd/internal/auth"
+	"github.com/jimwong/router-re/mgmtd/internal/client"
 	"github.com/jimwong/router-re/mgmtd/internal/cloud"
 	"github.com/jimwong/router-re/mgmtd/internal/config"
 	"github.com/jimwong/router-re/mgmtd/internal/dhcp"
-	"github.com/jimwong/router-re/mgmtd/internal/client"
 	"github.com/jimwong/router-re/mgmtd/internal/dpi"
 	"github.com/jimwong/router-re/mgmtd/internal/execx"
 	"github.com/jimwong/router-re/mgmtd/internal/firewall"
@@ -49,12 +49,12 @@ type Config struct {
 type Server struct {
 	cfg         Config
 	dhcpApplier *dhcp.Applier
-	mux      *http.ServeMux
-	store    config.Store
-	tm       *auth.TokenManager
-	cloudMgr     *cloud.Manager
-	pppoeUsers   []pppoe.User
-	audit        *audit.Logger
+	mux         *http.ServeMux
+	store       config.Store
+	tm          *auth.TokenManager
+	cloudMgr    *cloud.Manager
+	pppoeUsers  []pppoe.User
+	audit       *audit.Logger
 	// loginLimiter throttles failed login attempts per remote IP to blunt
 	// brute-force / credential-stuffing attacks.
 	loginLimiter *loginLimiter
@@ -265,9 +265,9 @@ func (s *Server) handleSetDHCPConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	s.logAudit(r, "dhcp.config.set", cfg.Interface, "ok", "")
 	writeJSON(w, 200, map[string]interface{}{
-		"config":   cfg,
-		"dnsmasq":  dhcp.RenderDnsmasq(cfg),
-		"applied":  true,
+		"config":  cfg,
+		"dnsmasq": dhcp.RenderDnsmasq(cfg),
+		"applied": true,
 	})
 }
 
@@ -443,9 +443,9 @@ func (s *Server) handleSetWANLinks(w http.ResponseWriter, r *http.Request) {
 	}
 	s.logAudit(r, "wan.links.set", fmt.Sprintf("%d links", len(req.Links)), "ok", "")
 	writeJSON(w, 200, map[string]interface{}{
-		"links":     req.Links,
-		"applied":   true,
-		"commands":  wan.RenderPolicyRouting(req.Links),
+		"links":    req.Links,
+		"applied":  true,
+		"commands": wan.RenderPolicyRouting(req.Links),
 	})
 }
 
@@ -1544,7 +1544,6 @@ func (s *Server) portalPort() int {
 	return 8080
 }
 
-
 // ===== PPPoE 模块（P1-5，仅本区块，不动 portal 区块）=====
 
 func (s *Server) handleGetPPPoEConfig(w http.ResponseWriter, r *http.Request) {
@@ -1567,14 +1566,16 @@ func (s *Server) handleGetPPPoEConfig(w http.ResponseWriter, r *http.Request) {
 		_ = status
 	}
 	writeJSON(w, 200, map[string]interface{}{
-		"config":   cfg,
-		"users":    users,
+		"config":       cfg,
+		"users":        users,
 		"options_path": optsPath,
 		"secrets_path": secretsPath,
 		"options_text": optsText,
 		"secrets_text": secretsText,
 		"render_error": func() interface{} {
-			if err2 != nil { return err2.Error() }
+			if err2 != nil {
+				return err2.Error()
+			}
 			return nil
 		}(),
 	})
@@ -1611,8 +1612,13 @@ func (s *Server) handleSetPPPoEConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]interface{}{
 			"applied": applied,
 			"detail":  detail,
-			"error":   func() interface{} { if applyErr != nil { return applyErr.Error() }; return nil }(),
-			"config":  req.Config,
+			"error": func() interface{} {
+				if applyErr != nil {
+					return applyErr.Error()
+				}
+				return nil
+			}(),
+			"config": req.Config,
 		})
 		return
 	}

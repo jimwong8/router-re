@@ -11,11 +11,11 @@ import (
 
 // Client 描述一个检测到的终端（来自网络邻居表），可与 DHCP 租约合并补全主机名。
 type Client struct {
-	IP        string `json:"ip"`
-	MAC       string `json:"mac"`
-	Hostname  string `json:"hostname"`
-	State     string `json:"state"`
-	LastSeen  int64  `json:"last_seen"`
+	IP       string `json:"ip"`
+	MAC      string `json:"mac"`
+	Hostname string `json:"hostname"`
+	State    string `json:"state"`
+	LastSeen int64  `json:"last_seen"`
 }
 
 // List 执行 "ip neigh show" 并解析输出，返回 Client 列表。
@@ -75,10 +75,10 @@ func List(r execx.Runner) ([]Client, error) {
 		}
 
 		clients = append(clients, Client{
-			IP: ip,
-			MAC: mac,
+			IP:       ip,
+			MAC:      mac,
 			Hostname: "",
-			State: state,
+			State:    state,
 			LastSeen: 0,
 		})
 	}

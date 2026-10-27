@@ -9,10 +9,10 @@ import (
 
 // StaticRoute describes a static routing entry.
 type StaticRoute struct {
-	Dest     string `json:"dest"`
-	Gateway  string `json:"gateway"`
-	Device   string `json:"device"`
-	Metric   int    `json:"metric"`
+	Dest    string `json:"dest"`
+	Gateway string `json:"gateway"`
+	Device  string `json:"device"`
+	Metric  int    `json:"metric"`
 }
 
 // SplitPriority defines the iKuai priority chain for routing rules.

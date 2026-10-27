@@ -14,10 +14,10 @@ const ClientMarkBase = 0x100
 
 // ClientLimit 描述对单个 IP 或 MAC 的上/下行速率限制。
 type ClientLimit struct {
-	Selector     string `json:"selector"`       // "ip:1.2.3.4" 或 "mac:aa:bb:cc:dd:ee:ff"
-	UploadKbps   int    `json:"upload_kbps"`    // 上传限速（kbps），<=0 表示不限制
-	DownloadKbps int    `json:"download_kbps"`  // 下载限速（kbps），<=0 表示不限制
-	Comment      string `json:"comment"`        // 备注
+	Selector     string `json:"selector"`      // "ip:1.2.3.4" 或 "mac:aa:bb:cc:dd:ee:ff"
+	UploadKbps   int    `json:"upload_kbps"`   // 上传限速（kbps），<=0 表示不限制
+	DownloadKbps int    `json:"download_kbps"` // 下载限速（kbps），<=0 表示不限制
+	Comment      string `json:"comment"`       // 备注
 }
 
 // ParseSelector 校验并拆分解 Selector 为 (kind, value)。

@@ -8,12 +8,12 @@ import (
 
 // Config 描述 PPPoE 服务器基本配置。
 type Config struct {
-	Interface    string   `json:"interface"`     // 物理接口，如 "eth0"
-	LocalIP      string   `json:"local_ip"`       // 服务器本地 IP
-	PoolStart    string   `json:"pool_start"`     // 客户端 IP 池起始
-	PoolEnd      string   `json:"pool_end"`       // 客户端 IP 池结束
-	DNS          []string `json:"dns"`           // 提供给客户端的 DNS
-	ServiceName  string   `json:"service_name"`   // PPPoE 服务名
+	Interface   string   `json:"interface"`    // 物理接口，如 "eth0"
+	LocalIP     string   `json:"local_ip"`     // 服务器本地 IP
+	PoolStart   string   `json:"pool_start"`   // 客户端 IP 池起始
+	PoolEnd     string   `json:"pool_end"`     // 客户端 IP 池结束
+	DNS         []string `json:"dns"`          // 提供给客户端的 DNS
+	ServiceName string   `json:"service_name"` // PPPoE 服务名
 }
 
 // User 描述一个 PPPoE 认证用户（chap-secrets 格式 "name" * "password" "ip"）。

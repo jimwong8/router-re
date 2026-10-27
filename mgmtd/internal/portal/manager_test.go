@@ -42,7 +42,7 @@ func TestRevokeRemovesClient(t *testing.T) {
 func TestAuthorizedFiltersExpired(t *testing.T) {
 	m := NewManager()
 	m.Authorize("aa:aa:aa:aa:aa:aa", "10.0.0.1", 30*time.Minute)
-	auth := m.Authorized(time.Now().Add(2*time.Hour))
+	auth := m.Authorized(time.Now().Add(2 * time.Hour))
 	if len(auth) != 0 {
 		t.Fatalf("expected 0 authorized clients (expired), got %d", len(auth))
 	}

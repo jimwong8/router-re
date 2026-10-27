@@ -13,11 +13,11 @@ import (
 // Lease 描述 dnsmasq 租约文件中的一条租约记录。
 // 解析自 /var/lib/misc/dnsmasq.leases。
 type Lease struct {
-	Expiry    int64  `json:"expiry"`
-	MAC       string `json:"mac"`
-	IP        string `json:"ip"`
-	Hostname  string `json:"hostname"`
-	ClientID  string `json:"client_id"`
+	Expiry   int64  `json:"expiry"`
+	MAC      string `json:"mac"`
+	IP       string `json:"ip"`
+	Hostname string `json:"hostname"`
+	ClientID string `json:"client_id"`
 }
 
 // Applier 执行 DHCP 配置的真实应用（写配置文件 + 重载 dnsmasq）。

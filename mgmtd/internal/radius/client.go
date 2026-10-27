@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"strconv"
 	"time"
 )
 
@@ -109,7 +110,9 @@ func (c Config) Authenticate(username, password string) (Result, error) {
 	copy(pkt[4:20], ra)
 	copy(pkt[20:], attrs)
 
-	addr := fmt.Sprintf("%s:%d", c.Server, c.port())
+	// net.JoinHostPort handles IPv6 correctly (brackets the literal);
+	// fmt.Sprintf("%s:%d") would produce "::1:1812" and fail to dial.
+	addr := net.JoinHostPort(c.Server, strconv.Itoa(c.port()))
 	conn, err := net.DialTimeout("udp", addr, c.timeout())
 	if err != nil {
 		return Result{}, err
