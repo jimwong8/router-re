@@ -2,6 +2,7 @@ package logcenter
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -199,9 +200,16 @@ func Sources() ([]string, error) {
 		return sourcesCache, nil
 	}
 
-	cmd := exec.Command("journalctl", "--field=_SYSTEMD_UNIT", "--no-pager", "-n", "20000")
+	// 加 10s 上限：journalctl 首次要建索引，慢机器上能拖到 19s+，
+	// 无超时的 cmd.Output() 会让 HTTP 请求一起挂死。超时返回已有缓存或空列表。
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "journalctl", "--field=_SYSTEMD_UNIT", "--no-pager", "-n", "20000")
 	out, err := cmd.Output()
 	if err != nil {
+		if sourcesCache != nil {
+			return sourcesCache, nil // 有旧缓存就先用旧缓存，别让前端空转
+		}
 		return nil, err
 	}
 	seen := make(map[string]bool)

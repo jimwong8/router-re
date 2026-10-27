@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -14,9 +15,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jimwong/router-re/mgmtd/internal/account"
 	"github.com/jimwong/router-re/mgmtd/internal/acl"
 	"github.com/jimwong/router-re/mgmtd/internal/audit"
 	"github.com/jimwong/router-re/mgmtd/internal/auth"
+	"github.com/jimwong/router-re/mgmtd/internal/billing"
 	"github.com/jimwong/router-re/mgmtd/internal/client"
 	"github.com/jimwong/router-re/mgmtd/internal/cloud"
 	"github.com/jimwong/router-re/mgmtd/internal/config"
@@ -35,6 +38,7 @@ import (
 	"github.com/jimwong/router-re/mgmtd/internal/pppoe"
 	"github.com/jimwong/router-re/mgmtd/internal/qos"
 	"github.com/jimwong/router-re/mgmtd/internal/radius"
+	"github.com/jimwong/router-re/mgmtd/internal/rbac"
 	"github.com/jimwong/router-re/mgmtd/internal/route"
 	"github.com/jimwong/router-re/mgmtd/internal/stats"
 	"github.com/jimwong/router-re/mgmtd/internal/system"
@@ -71,6 +75,30 @@ type Server struct {
 	statsRing *stats.Ring
 	// aclApplier runs nft rulesets (reuses execx; nil-safe in handlers).
 	aclApplier execx.Runner
+	// accountMgr holds PPPoE/portal billing accounts (P4-2).
+	accountMgr *account.Manager
+	// billingPlans holds the sellable package list (P4-2).
+	billingPlans []billing.Plan
+	// rbacMgr is the multi-admin user/role store for /api/v1/users.
+	rbacMgr *rbac.Manager
+}
+
+// newConfigStore returns the configuration store for this process.
+//
+// MGM_CONFIG_FILE selects a JSON file that survives restarts (the production
+// path). When it is unset the server falls back to the in-memory MockStore,
+// which keeps local development and the test suite free of disk side effects.
+func newConfigStore() config.Store {
+	path := os.Getenv("MGM_CONFIG_FILE")
+	if path == "" {
+		return config.NewMockStore()
+	}
+	fs, err := config.NewFileStore(path)
+	if err != nil {
+		log.Printf("mgmtd: filestore unavailable (%v); falling back to in-memory store", err)
+		return config.NewMockStore()
+	}
+	return fs
 }
 
 func New(cfg Config) *Server {
@@ -84,7 +112,7 @@ func New(cfg Config) *Server {
 	s := &Server{
 		cfg:          cfg,
 		mux:          http.NewServeMux(),
-		store:        config.NewMockStore(),
+		store:        newConfigStore(),
 		pppoeUsers:   []pppoe.User{},
 		tm:           auth.NewTokenManager(cfg.SecretKey, 15*time.Minute),
 		cloudMgr:     cloud.NewManager(),
@@ -93,6 +121,9 @@ func New(cfg Config) *Server {
 		portalMgr:    portal.NewManager(),
 		statsRing:    stats.NewRing(720),
 		aclApplier:   execx.DefaultRunner{},
+		accountMgr:   account.NewManager(),
+		billingPlans: billing.DefaultPlans(),
+		rbacMgr:      rbac.NewManager(cfg.AdminUser, cfg.AdminPassword),
 	}
 	// Start the background stats collector: sample every 30s, run until
 	// process exit. Sleep inside the goroutine so it never blocks requests.
@@ -108,6 +139,9 @@ func New(cfg Config) *Server {
 	}
 	s.audit = audit.New(auditPath)
 	s.routes()
+	// Restore persisted accounts and billing plans (P4-2).
+	s.loadAccounts()
+	s.loadBillingPlans()
 	return s
 }
 
@@ -203,7 +237,26 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/security/arp", s.auth(s.handleGetArp))
 	s.mux.HandleFunc("POST /api/v1/security/arp", s.auth(s.auditWrap("security.arp.set", s.handleSetArp)))
 	s.mux.HandleFunc("GET /api/v1/security/arp/neighbors", s.auth(s.handleGetNeighbors))
+	s.mux.HandleFunc("GET /api/v1/webfilter/rules", s.auth(s.handleGetWebfilterRules))
+	s.mux.HandleFunc("POST /api/v1/webfilter/rules", s.auth(s.auditWrap("webfilter.rules.set", s.handleSetWebfilterRules)))
+	s.mux.HandleFunc("GET /api/v1/security/attack-guard", s.auth(s.handleGetAttackGuard))
+	s.mux.HandleFunc("POST /api/v1/security/attack-guard", s.auth(s.auditWrap("security.attackguard.set", s.handleSetAttackGuard)))
 	s.mux.HandleFunc("GET /api/v1/ddns/status", s.auth(s.handleGetDDNSStatus))
+	// P4-2 认证计费（账号 + 套餐，仅本区块）
+	s.mux.HandleFunc("GET /api/v1/accounts", s.auth(s.handleGetAccounts))
+	s.mux.HandleFunc("POST /api/v1/accounts", s.auth(s.auditWrap("accounts.set", s.handleSetAccounts)))
+	s.mux.HandleFunc("DELETE /api/v1/accounts/{username}", s.auth(s.auditWrap("accounts.delete", s.handleDeleteAccount)))
+	s.mux.HandleFunc("POST /api/v1/accounts/{username}/reset-usage", s.auth(s.auditWrap("accounts.reset_usage", s.handleResetAccountUsage)))
+	s.mux.HandleFunc("POST /api/v1/accounts/{username}/bind-mac", s.auth(s.auditWrap("accounts.bind_mac", s.handleBindAccountMAC)))
+	s.mux.HandleFunc("POST /api/v1/accounts/import", s.auth(s.auditWrap("accounts.import", s.handleImportAccounts)))
+	s.mux.HandleFunc("GET /api/v1/billing/plans", s.auth(s.handleGetBillingPlans))
+	s.mux.HandleFunc("POST /api/v1/billing/plans", s.auth(s.auditWrap("billing.plans.set", s.handleSetBillingPlans)))
+	s.mux.HandleFunc("GET /api/v1/billing/summary", s.auth(s.handleGetBillingSummary))
+	// P4-1 多管理员 RBAC（仅本区块）
+	s.mux.HandleFunc("GET /api/v1/users", s.auth(s.auditWrap("user.list", s.handleGetUsers)))
+	s.mux.HandleFunc("POST /api/v1/users", s.auth(s.auditWrap("user.create", s.handleCreateUser)))
+	s.mux.HandleFunc("DELETE /api/v1/users/{username}", s.auth(s.auditWrap("user.delete", s.handleDeleteUser)))
+	s.mux.HandleFunc("POST /api/v1/users/{username}/password", s.auth(s.auditWrap("user.password", s.handleSetUserPassword)))
 }
 
 // handleLogin authenticates a fixed dev account and issues a JWT session token.
@@ -2056,16 +2109,39 @@ func (s *Server) handleSetACLRules(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleGetArp returns the configured ARP-guard interface (read-only).
+// handleGetArp returns the configured ARP-guard interface and the actual
+// per-scope sysctl readback (all / default / each real interface).
 func (s *Server) handleGetArp(w http.ResponseWriter, r *http.Request) {
 	raw, _ := s.store.Get("security", "arp")
 	var cfg struct {
-		Iface string `json:"iface"`
+		Iface   string            `json:"iface"`
+		Sysctls map[string]string `json:"sysctls"`
 	}
 	if raw != "" {
 		_ = json.Unmarshal([]byte(raw), &cfg)
 	}
-	writeJSON(w, 200, cfg)
+	status := map[string]string{}
+	if s.aclApplier != nil {
+		for _, k := range []string{"arp_ignore", "arp_announce"} {
+			for _, scope := range []string{"all", "default"} {
+				key := "net.ipv4.conf." + scope + "." + k
+				if v, err := s.aclApplier.Run("sysctl", "-n", key); err == nil {
+					status[key] = strings.TrimSpace(v)
+				}
+			}
+			if cfg.Iface != "" && cfg.Iface != "all" {
+				key := "net.ipv4.conf." + cfg.Iface + "." + k
+				if v, err := s.aclApplier.Run("sysctl", "-n", key); err == nil {
+					status[key] = strings.TrimSpace(v)
+				}
+			}
+		}
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"iface":   cfg.Iface,
+		"sysctls": cfg.Sysctls,
+		"status":  status,
+	})
 }
 
 // handleSetArp applies ARP anti-spoof sysctls for the requested interface.
@@ -2089,9 +2165,15 @@ func (s *Server) handleSetArp(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 500, errBody(10096, "arp guard failed", err.Error()))
 		return
 	}
-	sysctls := map[string]string{
-		"net.ipv4.conf." + req.Iface + ".arp_ignore":   "1",
-		"net.ipv4.conf." + req.Iface + ".arp_announce": "2",
+	// Build per-scope readback: all / default / concrete iface (if not "all").
+	scopes := []string{"all", "default"}
+	if req.Iface != "all" {
+		scopes = append(scopes, req.Iface)
+	}
+	sysctls := map[string]string{}
+	for _, scope := range scopes {
+		sysctls["net.ipv4.conf."+scope+".arp_ignore"] = "1"
+		sysctls["net.ipv4.conf."+scope+".arp_announce"] = "2"
 	}
 	b, _ := json.Marshal(struct {
 		Iface   string            `json:"iface"`
@@ -2311,4 +2393,513 @@ func (s *Server) handleGetDDNSStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]interface{}{"status": status})
+}
+
+// ===== P4-2 认证计费（账号 + 套餐，仅本区块）=====
+
+// persistAccounts writes the in-memory account set to the config store.
+func (s *Server) persistAccounts() {
+	if s.accountMgr == nil {
+		return
+	}
+	// Persist a credential-free copy: the plaintext password is never written
+	// to the config store. On reload the account keeps its non-secret fields
+	// and its password is re-set by the operator (or via import).
+	stored := make([]account.Account, 0)
+	for _, a := range s.accountMgr.List() {
+		a.Password = ""
+		stored = append(stored, a)
+	}
+	s.storeJSON("accounts", "list", stored)
+}
+
+// loadAccounts restores accounts from the config store into the manager.
+func (s *Server) loadAccounts() {
+	if s.accountMgr == nil {
+		return
+	}
+	var accts []account.Account
+	if !s.loadJSON("accounts", "list", &accts) {
+		return
+	}
+	for _, a := range accts {
+		// CreateReloaded on a fresh store; Update when the account already
+		// exists (e.g. a later start that re-reads a partially populated
+		// store). The persisted form carries no password, so the load path
+		// must not require one.
+		if _, ok := s.accountMgr.Get(a.Username); ok {
+			_ = s.accountMgr.Update(a)
+			continue
+		}
+		_ = s.accountMgr.CreateReloaded(a)
+	}
+}
+
+// accountView is the wire representation of an account. It deliberately
+// omits the password so credentials can never leak through the API.
+type accountView struct {
+	Username  string `json:"username"`
+	Type      string `json:"type"`
+	Profile   string `json:"profile"`
+	QuotaMB   int    `json:"quota_mb"`
+	UsedMB    int    `json:"used_mb"`
+	ExpireAt  int64  `json:"expire_at"`
+	Enabled   bool   `json:"enabled"`
+	CreatedAt int64  `json:"created_at"`
+	Online    bool   `json:"online"`
+	BoundMAC  string `json:"bound_mac"`
+}
+
+func toAccountView(a account.Account) accountView {
+	return accountView{
+		Username:  a.Username,
+		Type:      a.Type,
+		Profile:   a.Profile,
+		QuotaMB:   a.QuotaMB,
+		UsedMB:    a.UsedMB,
+		ExpireAt:  a.ExpireAt,
+		Enabled:   a.Enabled,
+		CreatedAt: a.CreatedAt,
+		Online:    a.Online,
+		BoundMAC:  a.BoundMAC,
+	}
+}
+
+// accountViews converts a slice of accounts to their safe wire form.
+func accountViews(accts []account.Account) []accountView {
+	out := make([]accountView, 0, len(accts))
+	for _, a := range accts {
+		out = append(out, toAccountView(a))
+	}
+	return out
+}
+
+// handleGetAccounts lists accounts. Passwords are never serialized.
+func (s *Server) handleGetAccounts(w http.ResponseWriter, r *http.Request) {
+	accts := []account.Account{}
+	if s.accountMgr != nil {
+		accts = s.accountMgr.List()
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"accounts": accountViews(accts),
+		"count":    len(accts),
+	})
+}
+
+// accountBody accepts either a single account object or {"accounts":[...]}.
+// It returns the parsed list and whether the body was a batch request.
+func accountBody(r *http.Request) ([]account.Account, error) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil, err
+	}
+	var batch struct {
+		Accounts []account.Account `json:"accounts"`
+	}
+	if err := json.Unmarshal(body, &batch); err == nil && len(batch.Accounts) > 0 {
+		return batch.Accounts, nil
+	}
+	var single account.Account
+	if err := json.Unmarshal(body, &single); err == nil && single.Username != "" {
+		return []account.Account{single}, nil
+	}
+	var arr []account.Account
+	if err := json.Unmarshal(body, &arr); err == nil {
+		return arr, nil
+	}
+	return nil, fmt.Errorf("expected an account object or {\"accounts\":[...]}")
+}
+
+// handleSetAccounts creates or updates one or more accounts.
+func (s *Server) handleSetAccounts(w http.ResponseWriter, r *http.Request) {
+	accts, err := accountBody(r)
+	if err != nil {
+		writeJSON(w, 400, errBody(10140, "invalid body", err.Error()))
+		return
+	}
+	if len(accts) == 0 {
+		writeJSON(w, 422, errBody(10141, "empty account set", "POST /accounts must carry at least one account"))
+		return
+	}
+	created, updated, errs := 0, 0, []string{}
+	for i, a := range accts {
+		if err := account.Validate(a); err != nil {
+			errs = append(errs, fmt.Sprintf("account %d (%s): %v", i+1, a.Username, err))
+			continue
+		}
+		if _, ok := s.accountMgr.Get(a.Username); ok {
+			if err := s.accountMgr.Update(a); err != nil {
+				errs = append(errs, fmt.Sprintf("account %d (%s): %v", i+1, a.Username, err))
+				continue
+			}
+			updated++
+			continue
+		}
+		if a.CreatedAt == 0 {
+			a.CreatedAt = time.Now().Unix()
+		}
+		if err := s.accountMgr.Create(a); err != nil {
+			errs = append(errs, fmt.Sprintf("account %d (%s): %v", i+1, a.Username, err))
+			continue
+		}
+		created++
+	}
+	if created+updated == 0 {
+		writeJSON(w, 422, errBody(10142, "no account applied", strings.Join(errs, "; ")))
+		return
+	}
+	s.persistAccounts()
+	writeJSON(w, 200, map[string]interface{}{
+		"created":  created,
+		"updated":  updated,
+		"errors":   errs,
+		"accounts": accountViews(s.accountMgr.List()),
+	})
+}
+
+// handleDeleteAccount removes one account by username.
+func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
+	username := r.PathValue("username")
+	if username == "" {
+		writeJSON(w, 400, errBody(10143, "missing username", ""))
+		return
+	}
+	deleted := false
+	if s.accountMgr != nil {
+		deleted = s.accountMgr.Delete(username)
+	}
+	if !deleted {
+		writeJSON(w, 404, errBody(10144, "account not found", username))
+		return
+	}
+	s.persistAccounts()
+	writeJSON(w, 200, map[string]interface{}{
+		"deleted":  true,
+		"username": username,
+		"accounts": accountViews(s.accountMgr.List()),
+	})
+}
+
+// handleResetAccountUsage zeroes the used quota of one account.
+func (s *Server) handleResetAccountUsage(w http.ResponseWriter, r *http.Request) {
+	username := r.PathValue("username")
+	if username == "" {
+		writeJSON(w, 400, errBody(10145, "missing username", ""))
+		return
+	}
+	if s.accountMgr == nil || !s.accountMgr.ResetUsage(username) {
+		writeJSON(w, 404, errBody(10146, "account not found", username))
+		return
+	}
+	s.persistAccounts()
+	writeJSON(w, 200, map[string]interface{}{
+		"reset":    true,
+		"username": username,
+		"account":  toAccountView(mustGet(s.accountMgr, username)),
+	})
+}
+
+// handleBindAccountMAC attaches a MAC address to an account.
+func (s *Server) handleBindAccountMAC(w http.ResponseWriter, r *http.Request) {
+	username := r.PathValue("username")
+	if username == "" {
+		writeJSON(w, 400, errBody(10147, "missing username", ""))
+		return
+	}
+	var req struct {
+		MAC string `json:"mac"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10148, "invalid body", err.Error()))
+		return
+	}
+	if s.accountMgr == nil {
+		writeJSON(w, 503, errBody(10149, "no account manager", ""))
+		return
+	}
+	if err := s.accountMgr.BindMAC(username, req.MAC); err != nil {
+		writeJSON(w, 422, errBody(10150, "bind mac failed", err.Error()))
+		return
+	}
+	s.persistAccounts()
+	writeJSON(w, 200, map[string]interface{}{
+		"bound":    true,
+		"username": username,
+		"account":  toAccountView(mustGet(s.accountMgr, username)),
+	})
+}
+
+// handleImportAccounts bulk-imports accounts from CSV lines.
+func (s *Server) handleImportAccounts(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Lines []string `json:"lines"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10151, "invalid body", err.Error()))
+		return
+	}
+	if len(req.Lines) == 0 {
+		writeJSON(w, 422, errBody(10152, "empty import", "POST /accounts/import must carry lines"))
+		return
+	}
+	if s.accountMgr == nil {
+		writeJSON(w, 503, errBody(10153, "no account manager", ""))
+		return
+	}
+	created, errs := s.accountMgr.BulkImport(req.Lines)
+	if created > 0 {
+		s.persistAccounts()
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"created": created,
+		"errors":  errs,
+		"total":   len(req.Lines),
+	})
+}
+
+// mustGet returns the account for username, or an empty Account if missing.
+func mustGet(m *account.Manager, username string) account.Account {
+	if m == nil {
+		return account.Account{}
+	}
+	a, _ := m.Get(username)
+	return a
+}
+
+// ===== P4-2 套餐计费（billing 包，仅本区块）=====
+
+// persistBillingPlans writes the in-memory plan list to the config store.
+func (s *Server) persistBillingPlans() {
+	if s.billingPlans == nil {
+		return
+	}
+	s.storeJSON("billing", "plans", s.billingPlans)
+}
+
+// loadBillingPlans restores the plan list from the config store.
+func (s *Server) loadBillingPlans() {
+	var plans []billing.Plan
+	if !s.loadJSON("billing", "plans", &plans) {
+		return
+	}
+	s.billingPlans = plans
+}
+
+// handleGetBillingPlans returns the configured package list.
+func (s *Server) handleGetBillingPlans(w http.ResponseWriter, r *http.Request) {
+	plans := s.billingPlans
+	if plans == nil {
+		plans = []billing.Plan{}
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"plans": plans,
+		"count": len(plans),
+	})
+}
+
+// handleSetBillingPlans replaces the package list (single object or {"plans":[...]}).
+func (s *Server) handleSetBillingPlans(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeJSON(w, 400, errBody(10160, "read body fail", err.Error()))
+		return
+	}
+	var batch struct {
+		Plans []billing.Plan `json:"plans"`
+	}
+	var plans []billing.Plan
+	if err := json.Unmarshal(body, &batch); err == nil && len(batch.Plans) > 0 {
+		plans = batch.Plans
+	} else {
+		var single billing.Plan
+		if err := json.Unmarshal(body, &single); err == nil && single.Name != "" {
+			plans = []billing.Plan{single}
+		} else {
+			var arr []billing.Plan
+			if err := json.Unmarshal(body, &arr); err == nil {
+				plans = arr
+			} else {
+				writeJSON(w, 400, errBody(10161, "invalid body", "expected a plan object or {\"plans\":[...]}"))
+				return
+			}
+		}
+	}
+	if len(plans) == 0 {
+		writeJSON(w, 422, errBody(10162, "empty plan set", "POST /billing/plans must carry at least one plan"))
+		return
+	}
+	errs := []string{}
+	for i, p := range plans {
+		if err := billing.ValidatePlan(p); err != nil {
+			errs = append(errs, fmt.Sprintf("plan %d (%s): %v", i+1, p.Name, err))
+		}
+	}
+	if len(errs) > 0 {
+		writeJSON(w, 422, errBody(10163, "plan validation failed", strings.Join(errs, "; ")))
+		return
+	}
+	s.billingPlans = plans
+	s.persistBillingPlans()
+	writeJSON(w, 200, map[string]interface{}{
+		"plans":   s.billingPlans,
+		"count":   len(s.billingPlans),
+		"applied": true,
+	})
+}
+
+// handleGetBillingSummary aggregates account counts and revenue.
+func (s *Server) handleGetBillingSummary(w http.ResponseWriter, r *http.Request) {
+	now := time.Now().Unix()
+	summary := map[string]interface{}{
+		"total_accounts": 0,
+		"online":         0,
+		"expired":        0,
+		"over_quota":     0,
+		"revenue":        0.0,
+	}
+	if s.accountMgr == nil {
+		writeJSON(w, 200, summary)
+		return
+	}
+	accts := s.accountMgr.List()
+	counts := map[string]int{}
+	for _, a := range accts {
+		summary["total_accounts"] = summary["total_accounts"].(int) + 1
+		switch a.Status(now) {
+		case "online":
+			summary["online"] = summary["online"].(int) + 1
+		case "expired":
+			summary["expired"] = summary["expired"].(int) + 1
+		case "over_quota":
+			summary["over_quota"] = summary["over_quota"].(int) + 1
+		}
+		if a.Profile != "" {
+			counts[a.Profile]++
+		}
+	}
+	plans := s.billingPlans
+	if plans == nil {
+		plans = []billing.Plan{}
+	}
+	summary["revenue"] = billing.TotalRevenue(plans, counts)
+	writeJSON(w, 200, summary)
+}
+
+// --- P4-1 多管理员 RBAC (admin-only management endpoints) ---
+
+// currentActor returns the authenticated username from the request context
+// (set by s.auth). It returns "" when no actor is present.
+func (s *Server) currentActor(r *http.Request) string {
+	if v := r.Context().Value(ctxKeyActor); v != nil {
+		if name, ok := v.(string); ok {
+			return name
+		}
+	}
+	return ""
+}
+
+// requireAdmin denies non-admin callers with 403. It returns the actor name.
+func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) string {
+	actor := s.currentActor(r)
+	role, _ := s.rbacMgr.RoleOf(actor)
+	if role != rbac.RoleAdmin {
+		writeJSON(w, http.StatusForbidden, errBody(10210, "需要 admin 角色", fmt.Sprintf("角色为 %s，无权管理用户", role)))
+		return ""
+	}
+	return actor
+}
+
+// handleGetUsers returns all users. PasswordHash is omitted by the JSON tag.
+func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
+	if s.requireAdmin(w, r) == "" {
+		return
+	}
+	users := s.rbacMgr.List()
+	writeJSON(w, 200, map[string]interface{}{
+		"users": users,
+		"count": len(users),
+	})
+}
+
+// handleCreateUser adds a user. Request body: {username,password,role}.
+func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
+	if s.requireAdmin(w, r) == "" {
+		return
+	}
+	var req struct {
+		Username string    `json:"username"`
+		Password string    `json:"password"`
+		Role     rbac.Role `json:"role"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10211, "invalid body", err.Error()))
+		return
+	}
+	if err := rbac.ValidatePassword(req.Password); err != nil {
+		writeJSON(w, 422, errBody(10212, "weak password", err.Error()))
+		return
+	}
+	hash, err := rbac.HashPassword(req.Password)
+	if err != nil {
+		writeJSON(w, 500, errBody(10213, "hash error", err.Error()))
+		return
+	}
+	u := rbac.User{
+		Username:     req.Username,
+		PasswordHash: hash,
+		Role:         req.Role,
+		Enabled:      true,
+	}
+	if err := s.rbacMgr.Create(u); err != nil {
+		writeJSON(w, 409, errBody(10214, "create failed", err.Error()))
+		return
+	}
+	// Do NOT echo the password or hash back.
+	created, _ := s.rbacMgr.Get(req.Username)
+	writeJSON(w, 201, map[string]interface{}{"user": created})
+}
+
+// handleDeleteUser removes a user by username (path {username}).
+func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
+	if s.requireAdmin(w, r) == "" {
+		return
+	}
+	name := r.PathValue("username")
+	if name == "" {
+		writeJSON(w, 400, errBody(10215, "missing username", ""))
+		return
+	}
+	if err := s.rbacMgr.Delete(name); err != nil {
+		writeJSON(w, 409, errBody(10216, "delete failed", err.Error()))
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{"deleted": name})
+}
+
+// handleSetUserPassword changes a user's password. Body: {password}.
+func (s *Server) handleSetUserPassword(w http.ResponseWriter, r *http.Request) {
+	if s.requireAdmin(w, r) == "" {
+		return
+	}
+	name := r.PathValue("username")
+	if name == "" {
+		writeJSON(w, 400, errBody(10217, "missing username", ""))
+		return
+	}
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10218, "invalid body", err.Error()))
+		return
+	}
+	if err := rbac.ValidatePassword(req.Password); err != nil {
+		writeJSON(w, 422, errBody(10219, "weak password", err.Error()))
+		return
+	}
+	if err := s.rbacMgr.ChangePassword(name, req.Password); err != nil {
+		writeJSON(w, 409, errBody(10220, "password change failed", err.Error()))
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{"changed": name})
 }

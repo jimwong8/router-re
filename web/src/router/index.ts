@@ -20,6 +20,8 @@ import Stats from '../views/Stats.vue';
 import Network from '../views/Network.vue';
 import Security from '../views/Security.vue';
 import Services from '../views/Services.vue';
+import Accounts from '../views/Accounts.vue';
+import Users from '../views/Users.vue';
 
 const routes = [
   { path: '/', component: Dashboard, meta: { requiresAuth: true } },
@@ -42,6 +44,8 @@ const routes = [
   { path: '/stats', component: Stats, meta: { requiresAuth: true } },
   { path: '/network', component: Network, meta: { requiresAuth: true } },
   { path: '/security', component: Security, meta: { requiresAuth: true } },
+  { path: '/accounts', component: Accounts, meta: { requiresAuth: true } },
+  { path: '/users', component: Users, meta: { requiresAuth: true } },
   { path: '/login', component: Login },
   { path: '/:pathMatch(.*)*', redirect: '/login' },
 ];

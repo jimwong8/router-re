@@ -84,7 +84,7 @@ func RenderNft(rs []Rule) string {
 			continue
 		}
 		// inet 表同时承载 ipv4/ipv6，必须写 `dnat ip to` 消歧义，
-// 否则 nft 报 "specify `dnat ip' or `dnat ip6' in inet table to disambiguate"。
+		// 否则 nft 报 "specify `dnat ip' or `dnat ip6' in inet table to disambiguate"。
 		fmt.Fprintf(&b, "    %s dport %d dnat ip to %s:%d\n", r.Proto, r.ExtPort, r.IntIP, r.IntPort)
 	}
 	b.WriteString("  }\n")

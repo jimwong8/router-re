@@ -14,6 +14,7 @@
           <router-link to="/interfaces" style="color:#eee; text-decoration:none;">接口配置</router-link>
           <router-link to="/static-route" style="color:#eee; text-decoration:none;">静态路由</router-link>
           <router-link to="/audit" style="color:#eee; text-decoration:none;">审计日志</router-link>
+          <router-link to="/users" style="color:#eee; text-decoration:none;">用户管理</router-link>
           <router-link to="/radius" style="color:#eee; text-decoration:none;">RADIUS</router-link>
           <router-link to="/pppoe" style="color:#eee; text-decoration:none;">PPPoE服务</router-link>
           <router-link to="/l2" style="color:#eee; text-decoration:none;">VLAN/桥接</router-link>
@@ -24,6 +25,7 @@
           <router-link to="/network" style="color:#eee; text-decoration:none;">端口映射/策略路由</router-link>
           <router-link to="/security" style="color:#eee; text-decoration:none;">安全管控</router-link>
           <router-link to="/services" style="color:#eee; text-decoration:none;">高级服务</router-link>
+          <router-link to="/accounts" style="color:#eee; text-decoration:none;">认证计费</router-link>
         </nav>
       </div>
     </el-header>

@@ -17,28 +17,58 @@ func RenderSysctl(iface string) string {
 			"sysctl -w net.ipv4.conf.%s.arp_announce=2\n", iface, iface)
 }
 
-// ApplyArpGuard applies ARP anti-spoof sysctls on iface and verifies by
-// re-reading each value with `sysctl -n`.
+// ApplyArpGuard applies ARP anti-spoof sysctls and verifies by re-reading.
+//
+// For a concrete interface it writes net.ipv4.conf.all.*, net.ipv4.conf.default.*
+// and net.ipv4.conf.<iface>.*. For scope "all" it writes the all/default scopes
+// plus every concrete interface enumerated from /sys/class/net.
+//
+// Each sysctl is applied, then re-read back from /proc/sys/net/ipv4/conf/<scope>/<k>
+// and its value confirmed; any failure lists the exact scope/param that failed.
 func ApplyArpGuard(r execx.Runner, iface string) error {
 	if strings.TrimSpace(iface) == "" {
 		return fmt.Errorf("iface required")
 	}
-	pairs := []struct{ key, val string }{
-		{"net.ipv4.conf." + iface + ".arp_ignore", "1"},
-		{"net.ipv4.conf." + iface + ".arp_announce", "2"},
+	scopes := []string{"all", "default"}
+	if iface != "all" {
+		scopes = append(scopes, iface)
+	} else {
+		// enumerate real interfaces from /sys/class/net
+		if out, err := r.Run("sh", "-c", "ls /sys/class/net"); err != nil {
+			// fall back to all+default only if listing fails
+		} else {
+			for _, l := range strings.Fields(strings.TrimSpace(out)) {
+				if l != "" && l != "lo" {
+					scopes = append(scopes, l)
+				}
+			}
+		}
 	}
-	for _, p := range pairs {
-		setCmd := fmt.Sprintf("sysctl -w %s=%s", p.key, p.val)
-		if _, err := r.Run("sh", "-c", setCmd); err != nil {
-			return fmt.Errorf("set %s: %w", p.key, err)
+	var failed []string
+	pairs := []struct{ k, val string }{
+		{"arp_ignore", "1"},
+		{"arp_announce", "2"},
+	}
+	for _, scope := range scopes {
+		for _, p := range pairs {
+			key := "net.ipv4.conf." + scope + "." + p.k
+			setCmd := fmt.Sprintf("sysctl -w %s=%s", key, p.val)
+			if _, err := r.Run("sh", "-c", setCmd); err != nil {
+				failed = append(failed, fmt.Sprintf("set %s: %v", key, err))
+				continue
+			}
+			cur, err := r.Run("sysctl", "-n", key)
+			if err != nil {
+				failed = append(failed, fmt.Sprintf("verify-read %s: %v", key, err))
+				continue
+			}
+			if strings.TrimSpace(cur) != p.val {
+				failed = append(failed, fmt.Sprintf("verify %s: got %q want %q", key, cur, p.val))
+			}
 		}
-		cur, err := r.Run("sysctl", "-n", p.key)
-		if err != nil {
-			return fmt.Errorf("verify %s: %w", p.key, err)
-		}
-		if strings.TrimSpace(cur) != p.val {
-			return fmt.Errorf("verify %s: got %q want %q", p.key, cur, p.val)
-		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("ARP guard apply failed (%s): %s", strings.Join(scopes, ","), strings.Join(failed, "; "))
 	}
 	return nil
 }
