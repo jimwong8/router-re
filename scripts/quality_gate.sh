@@ -51,6 +51,18 @@ else
     echo "ok ($(grep -c '^ok' /tmp/quality_gate_test.log) packages)"
 fi
 
+# nftables 危险模式静态扫描。同一个错误已经重复出现过多次，靠 review 记不住：
+# flush ruleset（清空整机所有表）×3、policy drop（切断 SSH）×1、
+# 空集合 elements = {}（语法错）、inet 表裸 dnat to（被 nft 拒绝）。
+echo "== nft lint =="
+if ! python3 "$ROOT/scripts/nft_lint.py" >/tmp/quality_gate_nft.log 2>&1 ; then
+    echo "FAIL: nft 危险模式"
+    head -20 /tmp/quality_gate_nft.log
+    FAIL=1
+else
+    cat /tmp/quality_gate_nft.log
+fi
+
 # 前端调用的路径必须真在后端注册过。之前 /vpn/tunnels 就是前端调用了未注册路径，
 # 页面永远空白但所有后端测试都是绿的 —— 这类问题只有跨层对比才能发现。
 echo "== api contract =="
