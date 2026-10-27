@@ -36,6 +36,10 @@ import Upnp from '../views/Upnp.vue';
 import L7 from '../views/L7.vue';
 import Threat from '../views/Threat.vue';
 import Ips from '../views/Ips.vue';
+import Firmware from '../views/Firmware.vue';
+import RoutingPolicy from '../views/RoutingPolicy.vue';
+import ConfigSync from '../views/ConfigSync.vue';
+import Diagnostics from '../views/Diagnostics.vue';
 import Quota from '../views/Quota.vue';
 
 const routes = [
@@ -75,6 +79,10 @@ const routes = [
   { path: '/l7', component: L7, meta: { requiresAuth: true } },
   { path: '/threat', component: Threat, meta: { requiresAuth: true } },
   { path: '/ips', component: Ips, meta: { requiresAuth: true } },
+  { path: '/firmware', component: Firmware, meta: { requiresAuth: true } },
+  { path: '/routing-policy', component: RoutingPolicy, meta: { requiresAuth: true } },
+  { path: '/config-sync', component: ConfigSync, meta: { requiresAuth: true } },
+  { path: '/diagnostics', component: Diagnostics, meta: { requiresAuth: true } },
   { path: '/quota', component: Quota, meta: { requiresAuth: true } },
   { path: '/login', component: Login },
   { path: '/:pathMatch(.*)*', redirect: '/login' },
