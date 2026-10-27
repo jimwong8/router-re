@@ -337,6 +337,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/linkcheck/targets", s.auth(s.handleSetLinkCheck))
 	s.mux.HandleFunc("POST /api/v1/linkcheck/probe", s.auth(s.handleProbeLink))
 	s.mux.HandleFunc("GET /api/v1/linkcheck/status", s.auth(s.handleLinkCheckStatus))
+	// ---- P21: 防火墙日志分析 ----
+	s.mux.HandleFunc("GET /api/v1/firewall/log/analysis", s.auth(s.handleFwLogAnalysis))
+	s.mux.HandleFunc("GET /api/v1/firewall/log/suggestions", s.auth(s.handleFwLogSuggestions))
 	// ---- P18b: 认证门户模板 ----
 	s.mux.HandleFunc("GET /api/v1/portal/templates", s.auth(s.handleListPortalTemplates))
 	s.mux.HandleFunc("POST /api/v1/portal/template", s.auth(s.handleSetPortalTemplate))
