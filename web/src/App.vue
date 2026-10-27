@@ -20,6 +20,7 @@
           <router-link to="/pppoe" style="color:#eee; text-decoration:none;">PPPoE服务</router-link>
           <router-link to="/l2" style="color:#eee; text-decoration:none;">VLAN/桥接</router-link>
           <router-link to="/dpi" style="color:#eee; text-decoration:none;">应用识别</router-link>
+          <router-link to="/dpi-flow" style="color:#eee; text-decoration:none;">DPI 流表</router-link>
           <router-link to="/logs" style="color:#eee; text-decoration:none;">日志中心</router-link>
           <router-link to="/portal" style="color:#eee; text-decoration:none;">上网认证</router-link>
           <router-link to="/stats" style="color:#eee; text-decoration:none;">系统监控</router-link>
@@ -28,6 +29,7 @@
           <router-link to="/security" style="color:#eee; text-decoration:none;">安全管控</router-link>
           <router-link to="/dhcp" style="color:#eee; text-decoration:none;">DHCP 服务</router-link>
           <router-link to="/nac" style="color:#eee; text-decoration:none;">接入控制</router-link>
+          <router-link to="/lb" style="color:#eee; text-decoration:none;">负载均衡</router-link>
           <router-link to="/snmp" style="color:#eee; text-decoration:none;">SNMP</router-link>
           <router-link to="/services" style="color:#eee; text-decoration:none;">高级服务</router-link>
           <router-link to="/ipv6" style="color:#eee; text-decoration:none;">IPv6</router-link>
@@ -38,6 +40,7 @@
           <router-link to="/upnp" style="color:#eee; text-decoration:none;">UPnP/端口自动映射</router-link>
           <router-link to="/l7" style="color:#eee; text-decoration:none;">应用层过滤</router-link>
           <router-link to="/threat" style="color:#eee; text-decoration:none;">威胁情报</router-link>
+          <router-link to="/quota" style="color:#eee; text-decoration:none;">限速配额</router-link>
         </nav>
       </div>
     </el-header>

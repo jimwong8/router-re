@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,6 +30,7 @@ import (
 	"github.com/jimwong/router-re/mgmtd/internal/ddns"
 	"github.com/jimwong/router-re/mgmtd/internal/dhcp"
 	"github.com/jimwong/router-re/mgmtd/internal/dpi"
+	"github.com/jimwong/router-re/mgmtd/internal/dpiflow"
 	"github.com/jimwong/router-re/mgmtd/internal/execx"
 	"github.com/jimwong/router-re/mgmtd/internal/firewall"
 	"github.com/jimwong/router-re/mgmtd/internal/iface"
@@ -232,6 +234,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/dpi/marks", s.auth(s.handleGetDPIMarks))
 	s.mux.HandleFunc("POST /api/v1/dpi/marks", s.auth(s.auditWrap("dpi.marks.set", s.handleSetDPIMarks)))
 	s.mux.HandleFunc("GET /api/v1/dpi/classify", s.auth(s.handleDPIClassify))
+	// P8-1 DPI 接入转发路径（仅本区块，/dpi/flows、/dpi/apps 等不与上面冲突）
+	s.mux.HandleFunc("GET /api/v1/dpi/flows", s.auth(s.handleGetDPIFlows))
+	s.mux.HandleFunc("GET /api/v1/dpi/apps", s.auth(s.handleGetDPIApps))
+	s.mux.HandleFunc("GET /api/v1/dpi/tracker-stats", s.auth(s.handleGetDPITrackerStats))
+	s.mux.HandleFunc("POST /api/v1/dpi/classify-payload", s.auth(s.auditWrap("dpi.classify.payload", s.handleClassifyPayload)))
+	s.mux.HandleFunc("GET /api/v1/dpi/mark-rules", s.auth(s.handleGetDPIMarkRules))
+	s.mux.HandleFunc("POST /api/v1/dpi/mark-rules", s.auth(s.auditWrap("dpi.markrules.set", s.handleSetDPIMarkRules)))
 	s.mux.HandleFunc("GET /api/v1/vlan", s.auth(s.handleGetVLAN))
 	s.mux.HandleFunc("POST /api/v1/vlan", s.auth(s.auditWrap("vlan.apply", s.handleSetVLAN)))
 	s.mux.HandleFunc("DELETE /api/v1/vlan/{name}", s.auth(s.auditWrap("vlan.delete", s.handleDeleteVLAN)))
@@ -297,6 +306,20 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/threat/import", s.auth(s.auditWrap("threat.import", s.handleThreatImport)))
 	s.mux.HandleFunc("POST /api/v1/threat/fetch", s.auth(s.auditWrap("threat.fetch", s.handleThreatFetch)))
 	s.mux.HandleFunc("GET /api/v1/threat/stats", s.auth(s.handleThreatStats))
+	// P8-4 应用限速与连接配额（仅本区块）
+	s.mux.HandleFunc("GET /api/v1/htb/config", s.auth(s.handleGetHTBConfig))
+	s.mux.HandleFunc("POST /api/v1/htb/config", s.auth(s.auditWrap("htb.config.set", s.handleSetHTBConfig)))
+	s.mux.HandleFunc("POST /api/v1/htb/apply", s.auth(s.auditWrap("htb.apply", s.handleHTBApply)))
+	s.mux.HandleFunc("POST /api/v1/htb/cleanup", s.auth(s.auditWrap("htb.cleanup", s.handleHTBCleanup)))
+	s.mux.HandleFunc("GET /api/v1/htb/show", s.auth(s.handleHTBShow))
+	s.mux.HandleFunc("GET /api/v1/htb/report", s.auth(s.handleHTBReport))
+
+	s.mux.HandleFunc("GET /api/v1/quota/policies", s.auth(s.handleGetQuotaPolicies))
+	s.mux.HandleFunc("POST /api/v1/quota/policies", s.auth(s.auditWrap("quota.policies.set", s.handleSetQuotaPolicies)))
+	s.mux.HandleFunc("POST /api/v1/quota/apply", s.auth(s.auditWrap("quota.apply", s.handleQuotaApply)))
+	s.mux.HandleFunc("POST /api/v1/quota/test", s.auth(s.auditWrap("quota.test", s.handleQuotaTest)))
+	s.mux.HandleFunc("GET /api/v1/quota/report", s.auth(s.handleQuotaReport))
+	s.mux.HandleFunc("GET /api/v1/quota/nft", s.auth(s.handleQuotaNft))
 	// P3-1 安全管控（仅本区块）
 	s.mux.HandleFunc("GET /api/v1/acl/rules", s.auth(s.handleGetACLRules))
 	s.mux.HandleFunc("POST /api/v1/acl/rules", s.auth(s.auditWrap("acl.rules.set", s.handleSetACLRules)))
@@ -324,6 +347,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/nac/connlimits", s.auth(s.auditWrap("nac.connlimits.set", s.handleSetNACConnlimits)))
 	s.mux.HandleFunc("POST /api/v1/nac/connlimits/apply", s.auth(s.auditWrap("nac.connlimits.apply", s.handleApplyNACConnlimits)))
 	s.mux.HandleFunc("GET /api/v1/nac/top-connections", s.auth(s.handleGetNACTopConnections))
+	s.mux.HandleFunc("GET /api/v1/lb/config", s.auth(s.handleGetLBConfig))
+	s.mux.HandleFunc("POST /api/v1/lb/config", s.auth(s.auditWrap("lb.config.set", s.handleSetLBConfig)))
+	s.mux.HandleFunc("GET /api/v1/lb/status", s.auth(s.handleGetLBStatus))
+	s.mux.HandleFunc("POST /api/v1/lb/check", s.auth(s.auditWrap("lb.check", s.handleLBCheck)))
+	s.mux.HandleFunc("POST /api/v1/lb/apply", s.auth(s.auditWrap("lb.apply", s.handleLBApply)))
+	s.mux.HandleFunc("GET /api/v1/lb/preview", s.auth(s.handleLBPreview))
 	s.mux.HandleFunc("GET /api/v1/ddns/status", s.auth(s.handleGetDDNSStatus))
 	// P4-2 认证计费（账号 + 套餐，仅本区块）
 	s.mux.HandleFunc("GET /api/v1/accounts", s.auth(s.handleGetAccounts))
@@ -3510,4 +3539,119 @@ func (s *Server) handleSetIPSBlocklist(w http.ResponseWriter, r *http.Request) {
 		"detail":    detail,
 		"listing":   listOut,
 	})
+}
+
+// --- P8-1 DPI 接入转发路径 (仅本区块) ---
+
+// dpiTracker 是数据面流跟踪器单例。真实数据面接入前先用空 tracker 支撑 /dpi/flows 等接口。
+var dpiTracker = dpiflow.NewTracker(10000)
+
+func (s *Server) handleGetDPIFlows(w http.ResponseWriter, r *http.Request) {
+	limit := 500
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	writeJSON(w, 200, map[string]interface{}{"flows": dpiTracker.List(limit), "count": len(dpiTracker.List(limit))})
+}
+
+func (s *Server) handleGetDPIApps(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]interface{}{"apps": dpiTracker.Snapshot()})
+}
+
+func (s *Server) handleGetDPITrackerStats(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]interface{}{"stats": dpiTracker.Stats()})
+}
+
+func (s *Server) handleClassifyPayload(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		PayloadHex   string `json:"payload_hex"`
+		PayloadAscii string `json:"payload_ascii"`
+		DstPort      int    `json:"dst_port"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10050, "invalid body", err.Error()))
+		return
+	}
+	var payload []byte
+	if req.PayloadHex != "" {
+		h := strings.TrimPrefix(strings.TrimSpace(req.PayloadHex), "0x")
+		h = strings.ReplaceAll(h, " ", "")
+		decoded, err := hex.DecodeString(h)
+		if err != nil {
+			writeJSON(w, 422, errBody(10051, "invalid payload_hex", err.Error()))
+			return
+		}
+		payload = decoded
+	} else {
+		payload = []byte(req.PayloadAscii)
+	}
+	app, cat := dpiflow.DetectApp(payload, req.DstPort)
+	writeJSON(w, 200, map[string]interface{}{"app": app, "category": cat, "payload_len": len(payload)})
+}
+
+const dpiMarkRulesStoreKey = "dpi/mark-rules"
+
+func (s *Server) handleGetDPIMarkRules(w http.ResponseWriter, r *http.Request) {
+	appPorts := loadDPIMarkRules(s)
+	writeJSON(w, 200, map[string]interface{}{"app_ports": appPorts, "nft": dpiflow.RenderNftMarkRules(appPorts)})
+}
+
+func (s *Server) handleSetDPIMarkRules(w http.ResponseWriter, r *http.Request) {
+	if s.aclApplier == nil {
+		writeJSON(w, 500, errBody(10052, "exec runner not initialized", ""))
+		return
+	}
+	var req struct {
+		AppPorts map[string][]int `json:"app_ports"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10053, "invalid body", err.Error()))
+		return
+	}
+	if req.AppPorts == nil {
+		writeJSON(w, 422, errBody(10054, "invalid body", "app_ports required"))
+		return
+	}
+	// 校验端口范围
+	for app, ports := range req.AppPorts {
+		for _, p := range ports {
+			if p < 1 || p > 65535 {
+				writeJSON(w, 422, errBody(10055, "invalid port", fmt.Sprintf("app=%s port=%d", app, p)))
+				return
+			}
+		}
+	}
+	// 持久化
+	raw, _ := json.Marshal(req.AppPorts)
+	s.store.Set("dpi", dpiMarkRulesStoreKey, string(raw))
+
+	// 下发 nft：删表（忽略不存在）→ nft -f -
+	nftText := dpiflow.RenderNftMarkRules(req.AppPorts)
+	s.aclApplier.Run("nft", "delete", "table", "inet", "router_dpi")
+	applyOut, applyErr := s.aclApplier.RunWithInput(nftText, "nft", "-f", "-")
+	_ = applyOut
+	detail := ""
+	if applyErr != nil {
+		detail = applyErr.Error()
+	}
+	// 回读确认
+	listOut, _ := s.aclApplier.Run("nft", []string{"list", "table", "inet", "router_dpi"}...)
+	writeJSON(w, 200, map[string]interface{}{
+		"applied":   applyErr == nil,
+		"app_ports": req.AppPorts,
+		"nft":       nftText,
+		"detail":    detail,
+		"listing":   listOut,
+	})
+}
+
+// loadDPIMarkRules 从 store 读取 mark 规则配置。
+func loadDPIMarkRules(s *Server) map[string][]int {
+	appPorts := map[string][]int{}
+	if raw, err := s.store.Get("dpi", dpiMarkRulesStoreKey); err == nil && raw != "" {
+		_ = json.Unmarshal([]byte(raw), &appPorts)
+	}
+	return appPorts
 }

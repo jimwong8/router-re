@@ -32,11 +32,19 @@ SKIP_PATHS = {"/api/v1/auth/login"}  # POST-only; GET 会 405，单独测
 
 # 少数 GET 端点需要 query 参数，否则返回 400。这不是接口坏了，
 # 是验收脚本得按真实调用方式请求，否则会把"参数缺失"误报成失败。
+# 这些端点在没有配置/前置数据时返回 422 是**正确**的语义（不是接口坏了）：
+# 没有成员就选不出出口，没有规则就测不出命中。E2E 必须区分
+# 「正确拒绝」和「接口故障」，否则每次都要人工判断这条失败是不是真的。
+EXPECTED_422 = {
+    "/api/v1/lb/preview",       # 没有 enabled 成员时无法选路
+}
+
 DEFAULT_QUERY = {
     "/api/v1/dpi/classify": "?dport=80&proto=tcp",
     "/api/v1/stats/history": "?minutes=60",
     "/api/v1/conntrack": "?limit=50",
     "/api/v1/logs": "?limit=50",
+    "/api/v1/htb/show": "?iface=ens18",
 }
 
 
@@ -102,6 +110,9 @@ def main() -> int:
     for method, path in gets:
         url = path + DEFAULT_QUERY.get(path, "")
         status, body, elapsed = call(method, url, token=token)
+        if status == 422 and path in EXPECTED_422:
+            print(f"{'SKIP':<6} {status:<6} {elapsed:>6.2f}s {path}  (缺前置条件，拒绝正确)")
+            continue
         if status != 200:
             bad += 1
             failures.append(f"{path} → HTTP {status}: {body[:200]}")

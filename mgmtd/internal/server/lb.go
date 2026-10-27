@@ -1,0 +1,148 @@
+package server
+
+import (
+	"encoding/json"
+	"net/http"
+
+	"github.com/jimwong/router-re/mgmtd/internal/execx"
+	"github.com/jimwong/router-re/mgmtd/internal/lb"
+)
+
+func (s *Server) handleGetLBConfig(w http.ResponseWriter, r *http.Request) {
+	cfg := lb.Config{}
+	if raw, _ := s.store.Get("lb", "config"); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &cfg)
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"config":  cfg,
+		"marks":   lbMarks(cfg),
+		"iprules": lb.RenderIpRuleScript(cfg),
+	})
+}
+
+func (s *Server) handleSetLBConfig(w http.ResponseWriter, r *http.Request) {
+	var cfg lb.Config
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		writeJSON(w, 400, errBody(10160, "invalid body", err.Error()))
+		return
+	}
+	if err := lb.Validate(cfg); err != nil {
+		writeJSON(w, 422, errBody(10161, "validation failed", err.Error()))
+		return
+	}
+	applied := false
+	detail := ""
+	if s.aclApplier != nil {
+		if err := lb.ApplyMarkSet(s.aclApplier, lbMarks(cfg)); err != nil {
+			detail = err.Error()
+		} else if err := lb.ApplyIpRules(s.aclApplier, cfg); err != nil {
+			detail = err.Error()
+		} else {
+			applied = true
+			detail = "mark table + ip rules applied"
+		}
+	}
+	b, _ := json.Marshal(cfg)
+	_ = s.store.Set("lb", "config", string(b))
+	writeJSON(w, 200, map[string]interface{}{
+		"applied": applied,
+		"config":  cfg,
+		"marks":   lbMarks(cfg),
+		"iprules": lb.RenderIpRuleScript(cfg),
+		"detail":  detail,
+	})
+}
+
+func (s *Server) handleGetLBStatus(w http.ResponseWriter, r *http.Request) {
+	cfg := lb.Config{}
+	if raw, _ := s.store.Get("lb", "config"); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &cfg)
+	}
+	ch := lb.NewChecker(cfg.Health)
+	for _, m := range cfg.Members {
+		if m.Enabled {
+			ch.Check(execx.DefaultRunner{}, m)
+		}
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"config": cfg,
+		"status": ch.Snapshot(),
+	})
+}
+
+func (s *Server) handleLBCheck(w http.ResponseWriter, r *http.Request) {
+	cfg := lb.Config{}
+	if raw, _ := s.store.Get("lb", "config"); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &cfg)
+	}
+	ch := lb.NewChecker(cfg.Health)
+	for _, m := range cfg.Members {
+		if m.Enabled {
+			ch.Check(execx.DefaultRunner{}, m)
+		}
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"checked_at": ch.Snapshot()[0].LastCheck,
+		"status":     ch.Snapshot(),
+	})
+}
+
+func (s *Server) handleLBApply(w http.ResponseWriter, r *http.Request) {
+	cfg := lb.Config{}
+	if raw, _ := s.store.Get("lb", "config"); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &cfg)
+	}
+	applied := false
+	detail := ""
+	if s.aclApplier != nil {
+		if err := lb.ApplyMarkSet(s.aclApplier, lbMarks(cfg)); err != nil {
+			detail = err.Error()
+		} else if err := lb.ApplyIpRules(s.aclApplier, cfg); err != nil {
+			detail = err.Error()
+		} else {
+			applied = true
+			detail = "mark table + ip rules applied"
+		}
+	}
+	// read back ip rules to confirm
+	out, _ := execx.DefaultRunner{}.Run("ip", "rule", "show")
+	writeJSON(w, 200, map[string]interface{}{
+		"applied": applied,
+		"config":  cfg,
+		"marks":   lbMarks(cfg),
+		"iprules": lb.RenderIpRuleScript(cfg),
+		"rules":   out,
+		"detail":  detail,
+	})
+}
+
+func (s *Server) handleLBPreview(w http.ResponseWriter, r *http.Request) {
+	cfg := lb.Config{}
+	if raw, _ := s.store.Get("lb", "config"); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &cfg)
+	}
+	q := r.URL.Query()
+	hashKey := q.Get("hash_key")
+	state := map[string]int{}
+	m, err := lb.Pick(cfg.Mode, cfg.Members, state, hashKey)
+	if err != nil {
+		writeJSON(w, 422, errBody(10162, "no member", err.Error()))
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"mode":     cfg.Mode,
+		"hash_key": hashKey,
+		"member":   m,
+	})
+}
+
+// lbMarks assigns each enabled member a deterministic mark value.
+func lbMarks(cfg lb.Config) map[string]int {
+	marks := map[string]int{}
+	for _, m := range cfg.Members {
+		if m.Enabled {
+			marks[m.Name] = lb.MemberMark(m.Name)
+		}
+	}
+	return marks
+}
