@@ -61,6 +61,8 @@ DANGEROUS = [
     "/system/time",       # 改系统时钟
     "/ddns/config",       # DDNS 供应商密钥（与 /ddns/records 不同，后者只是记录列表）
     # 注意 /ddns/records 不在这里：已加 confirm 保护的"全量替换"走正常探针验证
+    "/ips/blocklist",     # 空数组会清空 nft blackhole 表（全网解封）再回写存储
+    # 注意 /ips/test 不在这里：纯匹配测试，不写任何状态
 ]
 
 
