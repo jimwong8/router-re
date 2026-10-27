@@ -167,7 +167,7 @@ async function addRule() {
   error.value = '';
   const next = [...rules.value, { ...newRule.value, id: genId() }];
   try {
-    const res = await api.post('/api/v1/l7/rules', { rules: next });
+    const res = await api.post('/api/v1/l7/rules', { rules: next, confirm: next.length === 0 });
     rules.value = res.data?.rules || next;
     dnsmasqText.value = res.data?.dnsmasq || dnsmasqText.value;
     applied.value = res.data?.applied ?? false;
@@ -186,7 +186,7 @@ async function removeRule(index: number) {
   catch { return; }
   const next = rules.value.filter((_, i) => i !== index);
   try {
-    const res = await api.post('/api/v1/l7/rules', { rules: next });
+    const res = await api.post('/api/v1/l7/rules', { rules: next, confirm: next.length === 0 });
     rules.value = res.data?.rules || next;
     dnsmasqText.value = res.data?.dnsmasq || dnsmasqText.value;
     await loadStats();
@@ -200,7 +200,7 @@ async function toggle(row: any, val: boolean) {
   row.enabled = val;
   const next = rules.value.map(r => r.id === row.id ? { ...r, enabled: val } : r);
   try {
-    const res = await api.post('/api/v1/l7/rules', { rules: next });
+    const res = await api.post('/api/v1/l7/rules', { rules: next, confirm: next.length === 0 });
     rules.value = res.data?.rules || next;
     dnsmasqText.value = res.data?.dnsmasq || dnsmasqText.value;
     await loadStats();

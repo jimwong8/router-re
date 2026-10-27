@@ -1,6 +1,6 @@
 # 写端点空输入审计
 
-生成于 2026-10-28 02:22:33｜共测 112 个写端点｜跳过高危 25 个
+生成于 2026-10-28 02:29:50｜共测 112 个写端点｜跳过高危 25 个
 
 方法：对每个 POST/DELETE 发送空 JSON `{}`。空 body 被校验拒绝 = 零副作用；
 同时对空 body 返回 2xx 的端点可疑（空操作当成功，或未解码请求体）。
@@ -9,18 +9,16 @@
 
 | 类别 | 数量 |
 |---|---|
-| 4xx 已校验（健康） | 76 |
-| 2xx 接受空body（可疑） | 24 |
+| 4xx 已校验（健康） | 80 |
+| 2xx 接受空body（可疑） | 22 |
 | 404 路由/资源不存在 | 6 |
-| 5xx 崩溃（真bug） | 4 |
+| 5xx 崩溃（真bug） | 3 |
 | 401/403 鉴权 | 1 |
-| 连接失败 | 1 |
 
 ## 可疑端点（空 body 也 2xx）
 
 | 状态 | 方法 | 路径 | 响应片段 |
 |---|---|---|---|
-| 200 | POST | `/api/v1/l7/rules` | `{"applied":false,"detail":"规则已保存；调用 /api/v1/l7/apply 写入 dnsm` |
 | 200 | POST | `/api/v1/l7/test` | `{"blocked":false,"by":"","hit":null}
 ` |
 | 200 | POST | `/api/v1/l7/apply` | `{"applied":false,"detail":"open /etc/dnsmasq.d/router-re-l7.` |
@@ -43,12 +41,8 @@
 | 200 | POST | `/api/v1/notify/smtp/preview` | `From: 
 To: 
 Subject: 
-Date: Wed, 28 Oct 2026 02:22:30 +08` |
-| 200 | POST | `/api/v1/routing/tables` | `{"count":0,"tables":null}
-` |
+Date: Wed, 28 Oct 2026 02:29:46 +08` |
 | 200 | POST | `/api/v1/routing/rules` | `{"count":0,"rules":null}
-` |
-| 200 | POST | `/api/v1/alerts/rules` | `{"count":0,"rules":null}
 ` |
 | 200 | POST | `/api/v1/alerts/test` | `{"count":0,"matched":[]}
 ` |
@@ -58,6 +52,8 @@ Date: Wed, 28 Oct 2026 02:22:30 +08` |
 ` |
 | 200 | POST | `/api/v1/quota/test` | `{"ctx":{"SrcIP":"","SrcMAC":"","DstIP":"","DstPort":"","App"` |
 | 200 | POST | `/api/v1/nac/connlimits/apply` | `{"applied":false,"detail":"/usr/sbin/nft -f -: netlink: Erro` |
+| 200 | POST | `/api/v1/lb/check` | `{"checked_at":null,"status":[]}
+` |
 | 200 | POST | `/api/v1/lb/apply` | `{"applied":false,"config":{"mode":"","members":null,"health"` |
 | 200 | POST | `/api/v1/ips/test` | `{"hits":null,"matched":false,"rule":null}
 ` |
@@ -70,8 +66,6 @@ Date: Wed, 28 Oct 2026 02:22:30 +08` |
 | 500 | POST | `/api/v1/wol/targets` | `{"code":"10149","detail":"mkdir /etc/router-re: permission d` |
 | 500 | POST | `/api/v1/threat/apply` | `{"code":"10163","detail":"/usr/sbin/nft -f -: netlink: Error` |
 | 500 | POST | `/api/v1/cert/self-signed` | `{"code":"10337","detail":"mkdir /etc/ssl/router-re: permissi` |
-| 500 | POST | `/api/v1/diag/dns` | `{"code":"10144","detail":"host required","message":"dns look` |
-| 0 | POST | `/api/v1/lb/check` | `RemoteDisconnected: Remote end closed connection without res` |
 
 ## 全部明细
 
@@ -81,7 +75,7 @@ Date: Wed, 28 Oct 2026 02:22:30 +08` |
 | 404 | POST | `/api/v1/dns/resolve` | 404 路由/资源不存在 |
 | 422 | POST | `/api/v1/upnp/mappings` | 4xx 已校验（健康） |
 | 404 | DELETE | `/api/v1/upnp/mappings` | 404 路由/资源不存在 |
-| 200 | POST | `/api/v1/l7/rules` | 2xx 接受空body（可疑） |
+| 422 | POST | `/api/v1/l7/rules` | 4xx 已校验（健康） |
 | 200 | POST | `/api/v1/l7/test` | 2xx 接受空body（可疑） |
 | 200 | POST | `/api/v1/l7/apply` | 2xx 接受空body（可疑） |
 | 400 | POST | `/api/v1/ddns/update` | 4xx 已校验（健康） |
@@ -141,9 +135,9 @@ Date: Wed, 28 Oct 2026 02:22:30 +08` |
 | 422 | POST | `/api/v1/notify/smtp` | 4xx 已校验（健康） |
 | 200 | POST | `/api/v1/notify/smtp/preview` | 2xx 接受空body（可疑） |
 | 422 | POST | `/api/v1/notify/trap` | 4xx 已校验（健康） |
-| 200 | POST | `/api/v1/routing/tables` | 2xx 接受空body（可疑） |
+| 422 | POST | `/api/v1/routing/tables` | 4xx 已校验（健康） |
 | 200 | POST | `/api/v1/routing/rules` | 2xx 接受空body（可疑） |
-| 200 | POST | `/api/v1/alerts/rules` | 2xx 接受空body（可疑） |
+| 422 | POST | `/api/v1/alerts/rules` | 4xx 已校验（健康） |
 | 200 | POST | `/api/v1/alerts/test` | 2xx 接受空body（可疑） |
 | 422 | POST | `/api/v1/logs/rotate` | 4xx 已校验（健康） |
 | 422 | POST | `/api/v1/logs/syslog` | 4xx 已校验（健康） |
@@ -170,12 +164,12 @@ Date: Wed, 28 Oct 2026 02:22:30 +08` |
 | 422 | POST | `/api/v1/ipv6/ra` | 4xx 已校验（健康） |
 | 422 | POST | `/api/v1/diag/ping` | 4xx 已校验（健康） |
 | 422 | POST | `/api/v1/diag/traceroute` | 4xx 已校验（健康） |
-| 500 | POST | `/api/v1/diag/dns` | 5xx 崩溃（真bug） |
+| 422 | POST | `/api/v1/diag/dns` | 4xx 已校验（健康） |
 | 422 | POST | `/api/v1/nac/config` | 4xx 已校验（健康） |
 | 400 | POST | `/api/v1/nac/connlimits` | 4xx 已校验（健康） |
 | 200 | POST | `/api/v1/nac/connlimits/apply` | 2xx 接受空body（可疑） |
 | 422 | POST | `/api/v1/lb/config` | 4xx 已校验（健康） |
-| 0 | POST | `/api/v1/lb/check` | 连接失败 |
+| 200 | POST | `/api/v1/lb/check` | 2xx 接受空body（可疑） |
 | 200 | POST | `/api/v1/lb/apply` | 2xx 接受空body（可疑） |
 | 400 | POST | `/api/v1/accounts` | 4xx 已校验（健康） |
 | 404 | DELETE | `/api/v1/accounts/{username}` | 404 路由/资源不存在 |

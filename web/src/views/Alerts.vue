@@ -204,7 +204,7 @@ async function saveAll(okMsg: string) {
   saving.value = true;
   try {
     // 后端要的是 {rules:[...]}，不是裸数组
-    await api.post('/api/v1/alerts/rules', { rules: rules.value });
+    await api.post('/api/v1/alerts/rules', { rules: rules.value, confirm: rules.value.length === 0 });
     ElMessage.success(okMsg);
     await load();
   } catch (e: any) {

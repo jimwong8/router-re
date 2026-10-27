@@ -55,9 +55,18 @@ func (s *Server) handleGetL7Rules(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSetL7Rules(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Rules []l7filter.Rule `json:"rules"`
+		Confirm bool `json:"confirm"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, 400, errBody(10150, "invalid body", err.Error()))
+		return
+	}
+	// 空数组是全量替换语义：会清空所有既有L7并返回 200。
+	// 误发空 body 就静默清空配置的风险太高，跟 timeschedule 对齐：
+	// 必须显式 confirm:true 才允许清空。
+	if len(req.Rules) == 0 && !req.Confirm {
+		writeJSON(w, 422, errBody(10153, "rules must not be empty",
+			"to clear all L7 rules, send {\"rules\":[],\"confirm\":true}"))
 		return
 	}
 	// 校验每一条，同时保证 ID 唯一。

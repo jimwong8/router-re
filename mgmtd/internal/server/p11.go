@@ -255,10 +255,19 @@ func (s *Server) handleGetPolicyTables(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSetPolicyTables(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Tables []policyroute.Table `json:"tables"`
+		Tables  []policyroute.Table `json:"tables"`
+		Confirm bool                `json:"confirm"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, 422, errBody(10316, "invalid body", err.Error()))
+		return
+	}
+	// 空数组是全量替换语义：会清空所有既有策略路由表并返回 200。
+	// 误发空 body 就静默清空配置的风险太高，跟 timeschedule 对齐：
+	// 必须显式 confirm:true 才允许清空。
+	if len(body.Tables) == 0 && !body.Confirm {
+		writeJSON(w, 422, errBody(10318, "tables must not be empty",
+			"to clear all policy routing tables, send {\"tables\":[],\"confirm\":true}"))
 		return
 	}
 	for i, t := range body.Tables {

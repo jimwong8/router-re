@@ -38,10 +38,19 @@ func (s *Server) handleGetAlertRules(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSetAlertRules(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Rules []alerting.Rule `json:"rules"`
+		Rules   []alerting.Rule `json:"rules"`
+		Confirm bool            `json:"confirm"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, 422, errBody(10210, "invalid body", err.Error()))
+		return
+	}
+	// 空数组是全量替换语义：会清空所有既有告警规则并返回 200。
+	// 误发空 body 就静默清空配置的风险太高，跟 timeschedule 对齐：
+	// 必须显式 confirm:true 才允许清空。
+	if len(body.Rules) == 0 && !body.Confirm {
+		writeJSON(w, 422, errBody(10212, "rules must not be empty",
+			"to clear all alert rules, send {\"rules\":[],\"confirm\":true}"))
 		return
 	}
 	for i, rl := range body.Rules {
