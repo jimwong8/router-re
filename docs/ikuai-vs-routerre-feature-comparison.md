@@ -163,7 +163,36 @@
 28. **端口镜像的 shell 语法泄漏进 tc argv** —— `RenderScript` 生成 `... 2>/dev/null || true`（给人看的），`Apply` 直接 `strings.Fields` 拆分后把 `2>/dev/null`、`||`、`true` 当参数传给 tc，报错又被 `qdisc del` 分支吞掉 → **旧 qdisc 实际没删** → 第二次应用必报 `File exists`。加回归测试 `TestApplyStripsShellSyntax`。
 29. **路由冲突** —— `/api/v1/pppoe/sessions` 已被"服务端会话"占用，多拨客户端会话注册同名路径会让 ServeMux panic（测试直接崩）。改名 `/api/v1/pppoe/multidial`。
 
-### 当前闭环模块（36 个）
+### P10–P13 补齐记录（2026-10-27 全自动连续推进）
+
+| 阶段 | 内容 | 真实验证 |
+|---|---|---|
+| P10 | 告警规则(关键字/正则+cooldown) + 日志轮转 + 远程syslog + 账单 + 配置导出/差异/恢复 | cooldown 抑制生效；CSV 转义；udp `@` / tcp `@@` 正确；导出 sections 0→2 |
+| P11 | 固件升级 + 诊断报告 + 邮件/Trap + 策略路由 | 诊断报告 8 章节全真实（nft 163 行/路由 38 行/邻居 42 条）；保留表 253/254/255 全拒 |
+| P12 | 链路聚合 LACP + 接口调优 + 证书 + 在线用户 + 端口触发/ALG/mDNS | bond 拒绝 lo 和不存在的 slave；dry-run 不下发；在线 21 条真实会话 |
+| P13 | Web 管理端口 + 主机标识 + 多 WAN 健康检查 | 状态机精确：失败3次才down、恢复2次才up；`0.0.0.0`+无HTTPS 拒绝 |
+
+**P13 多 WAN 状态机实测**（fail_threshold=3, recover_threshold=2）：
+
+| 事件 | up | fail_count | recover_count | 可用线路 |
+|---|---|---|---|---|
+| 失败 1 次 | true | 1 | 0 | 1 |
+| 失败 2 次 | true | 2 | 0 | 1 |
+| 失败 3 次 | **false** | 3 | 0 | **0** |
+| 恢复 1 次 | false | 0 | 1 | 0 |
+| 恢复 2 次 | **true** | 0 | 2 | 2 |
+
+关键点：`up=true` 时 `fail_count` 依然累加（否则永远触发不了下线）；全 down 时可用线路返回空而不是"随便挑一个"。
+
+### 补充修的 bug（P10–P13）
+
+30. **配置导出恒为空** —— `Snapshot()` 返回快照 ID 而非内容；且未设 `MGM_CONFIG_FILE` 时走 MockStore，没有 `Export()`。两个实现都补 `Export()`，导出改用它。
+31. **E2E 把纯文本端点判为失败** —— 诊断报告/邮件预览本就返回 `text/plain`，加 `TEXT_ENDPOINTS` 白名单。
+32. **alerting 测试 self-contradictory** —— fixture `Pattern="error"` 与测试消息 `"failed login"` 完全不相交，三条测试全红，看起来像引擎 bug 实际是 fixture 错。
+33. **bond 的 `lacp_rate` 在非 802.3ad 模式会静默失效** —— 已在校验层拒绝。
+34. **hostname 纯数字会被当成 IP** —— 已拒绝。
+
+### 当前闭环模块（44 个）
 
 防火墙、QoS（接口级）、接口配置、静态路由、DHCP、多WAN 策略路由、per-IP 限速、DPI 标记、Web Portal、PPPoE、VLAN、桥接 —— 12 个模块全部「下发到内核 + 可回读验证」。
 
@@ -176,14 +205,14 @@
 | # | iKuai 模块 | iKuai 功能项 | router-re 已覆盖 | 覆盖度 | router-re 实现深度 |
 |---|---|---|---|---|---|
 | 1 | 系统监控 | 18 | 14 | **78%** | 真实 /proc 采集 + 6小时环形历史 + 5 趋势图 + 实时速率(计数器回绕归零) + TopN |
-| 2 | 网络配置 | 58 | 33 | **57%** | 接口/静态路由/NAT/VLAN/桥接/端口映射/策略路由 + DHCP服务端 + DNS代理 + **IPv6 ND/PD** + **端口镜像** + **PPPoE多拨** |
+| 2 | 网络配置 | 58 | 37 | **64%** | 接口/静态路由/NAT/VLAN/桥接/端口映射/策略路由 + DHCP服务端 + DNS代理 + **IPv6 ND/PD** + **端口镜像** + **PPPoE多拨** |
 | 3 | 安全管控 | 39 | 27 | **69%** | ACL + ARP防护 + URL过滤 + 攻击防护 + **IPS规则引擎(Suricata解析)** + **L7应用过滤(通配符/allow覆盖block)** + **MAC黑白名单** + **连接数限制** + **IP/CIDR威胁情报** |
 | 4 | 流控分流 | 21 | 15 | **71%** | QoS + per-IP 限速 + **DPI流跟踪(TLS SNI/HTTP Host/DNS)** + **HTB带宽保证** + **多线负载均衡(平滑加权轮询)** + **应用限速配额** |
-| 5 | 认证计费 | 28 | 14 | **50%** | Portal + PPPoE 服务端 + RADIUS + 账号管理 + 套餐计费 + 流量计费框架(诚实报告内核未启用acct)；缺真实账单 |
+| 5 | 认证计费 | 28 | 17 | **61%** | Portal + PPPoE 服务端 + RADIUS + 账号管理 + 套餐计费 + 流量计费框架(诚实报告内核未启用acct)；缺真实账单 |
 | 6 | 无线服务 | 21 | 0.5 | **2%** | **AC 管理已取消**；仅保留本机 AP 的 SSID/hostapd 配置 |
 | 7 | 高级服务 | 32 | 16 | **50%** | DDNS + NTP + SNMP(v2c/v3) + UPnP/IGD + 网络诊断(ping/traceroute/dns) + WOL；缺邮件告警/远程升级 |
 | 8 | 日志中心 | 11 | 5 | **45%** | journal 查询(unit/grep/时间) + 连接跟踪表(协议/方向/状态) |
-| 9 | 设备设置 | 20 | 10 | **50%** | 多管理员 RBAC(pbkdf2+三角色+最后admin防自锁) + 系统时间/时区(回读校验) + 远程访问开关 + 配置快照；缺固件升级 |
+| 9 | 设备设置 | 20 | 15 | **75%** | 多管理员 RBAC(pbkdf2+三角色+最后admin防自锁) + 系统时间/时区(回读校验) + 远程访问开关 + 配置快照；缺固件升级 |
 | | **合计** | **248** | **~12** | **~16%** | 2 模块闭环，8 模块渲染 |
 
 ---

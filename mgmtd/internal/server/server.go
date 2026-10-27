@@ -307,6 +307,15 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/threat/fetch", s.auth(s.auditWrap("threat.fetch", s.handleThreatFetch)))
 	s.mux.HandleFunc("GET /api/v1/threat/stats", s.auth(s.handleThreatStats))
 	// P8-4 应用限速与连接配额（仅本区块）
+	// P13：Web 管理端口、主机标识、多 WAN 健康检查
+	s.mux.HandleFunc("GET /api/v1/webadmin", s.auth(s.handleGetWebAdmin))
+	s.mux.HandleFunc("POST /api/v1/webadmin", s.auth(s.auditWrap("webadmin.set", s.handleSetWebAdmin)))
+	s.mux.HandleFunc("GET /api/v1/identity", s.auth(s.handleGetIdentity))
+	s.mux.HandleFunc("POST /api/v1/identity", s.auth(s.auditWrap("identity.set", s.handleSetIdentity)))
+	s.mux.HandleFunc("GET /api/v1/multiwan", s.auth(s.handleGetMultiWAN))
+	s.mux.HandleFunc("POST /api/v1/multiwan", s.auth(s.auditWrap("multiwan.set", s.handleSetMultiWAN)))
+	s.mux.HandleFunc("POST /api/v1/multiwan/probe", s.auth(s.auditWrap("multiwan.probe", s.handleMultiWANProbeResult)))
+
 	// P12：链路聚合、接口调优、证书、在线用户、端口触发/ALG/mDNS
 	s.mux.HandleFunc("GET /api/v1/bond", s.auth(s.handleGetBond))
 	s.mux.HandleFunc("POST /api/v1/bond", s.auth(s.auditWrap("bond.set", s.handleSetBond)))
