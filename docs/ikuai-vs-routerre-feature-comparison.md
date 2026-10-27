@@ -73,7 +73,24 @@
 12. **空集合 `elements = {}` 是语法错误**，nft 报 `syntax error, unexpected '}'`。不需要 set 就别写。
 13. **inet 表里 `dnat to` 必须写 `dnat ip to`**，否则 nft 报 `specify 'dnat ip' or 'dnat ip6' in inet table to disambiguate`。
 
-### 当前闭环模块（12 个）
+### P4 补齐记录（2026-10-27）
+
+| P4 项 | 状态 | 真实验证证据 |
+|---|---|---|
+| 多管理员 RBAC | ✅ | 建 op1 → HTTP 201；op1 登录成功；访问 `/api/v1/users` → **403**「角色为 operator，无权管理用户」；只读端点 200；错密码 401；删最后一个 admin → `cannot delete the last admin`；`/users` 响应无 password/hash 字段 |
+| 认证计费 | ✅ | 账号 CRUD + 批量导入（逐行容错）+ 配额/到期状态机 + 套餐计价 |
+| URL 过滤 | ✅ | 生成 `address=/ads.example.com/0.0.0.0` + `address=/ads.example.com/::`；dnsmasq 未装时诚实返回 `applied:false` + 完整失败原因 |
+| 攻击防护 | ✅ | 内核 `table inet router_guard` 含 `limit rate 1000/second` + drop + `ct state established,related accept`；下发后 9090 HTTP 200 与 ICMP 均正常 |
+
+### P4 发现的致命 bug（会锁死机器）
+
+14. **攻击防护 input 链 `policy drop`** —— 表里只放行 SYN 和 ICMP，其他入站（SSH、管理界面、DNS 响应、keep-alive）全被静默丢弃，等于把机器锁死。默认拒绝是 firewall 模块的职责，攻击防护表只做限速 → 改 `policy accept` + `ct state established,related accept`，加回归测试 `TestRenderNftNeverDefaultsToDrop`。
+15. **`/auth/login` 不认 RBAC 用户表** —— `POST /api/v1/users` 建出来的账号登录恒 401，多用户管理成摆设。登录路径改为先查 rbac.Manager、环境变量 admin 兜底。
+16. **前端表格字段名凭想象写** —— ARP 邻居表读 `prop="ip"/"mac"`，后端返回 `dst`/`lladdr`，IP/MAC 两列全空。已修 + 用自动扫描（有数据行但整列为空）复查了全部 20 个页面。
+17. **日志时间戳透传裸微秒** —— `1793084380346468` 人类不可读，转 `2026-10-27 15:39:38`。
+18. **`/logs/sources` 无超时** —— journalctl 冷启动 19s+ 让 HTTP 挂死；加 10s 上限 + 旧缓存兜底 + 60s 缓存（1.01s → 0.0019s）。
+
+### 当前闭环模块（16 个）
 
 防火墙、QoS（接口级）、接口配置、静态路由、DHCP、多WAN 策略路由、per-IP 限速、DPI 标记、Web Portal、PPPoE、VLAN、桥接 —— 12 个模块全部「下发到内核 + 可回读验证」。
 
@@ -87,9 +104,9 @@
 |---|---|---|---|---|---|
 | 1 | 系统监控 | 18 | 11 | **61%** | 真实 /proc 采集 + 6小时环形历史 + 5 条趋势图 + 接口流量明细 |
 | 2 | 网络配置 | 58 | 14 | **24%** | 接口/静态路由/NAT/DHCP/VLAN/桥接/端口映射/策略路由 真实生效 |
-| 3 | 安全管控 | 39 | 8 | **21%** | ACL 真实 nft 下发 + ARP 防护 sysctl 生效；缺 URL 过滤/IPS |
+| 3 | 安全管控 | 39 | 13 | **33%** | ACL nft 下发 + ARP 防护(sysctl) + URL 过滤(dnsmasq) + 攻击防护(限速)；缺 IPS/应用层识别 |
 | 4 | 流控分流 | 21 | 6 | **29%** | QoS + per-IP 限速真实 tc / DPI 标记入内核 / 多WAN 策略路由真实下发 |
-| 5 | 认证计费 | 28 | 6 | **21%** | Web Portal(nft authorized set) + PPPoE 服务端(真实启动) + RADIUS 客户端(RFC2865)；缺计费账务 |
+| 5 | 认证计费 | 28 | 12 | **43%** | Portal + PPPoE 服务端 + RADIUS + 账号管理(批量导入/配额/绑定MAC) + 套餐计费；缺真实流量统计与账单 |
 | 6 | 无线服务 | 21 | 0.5 | **2%** | **AC 管理已取消**；仅保留本机 AP 的 SSID/hostapd 配置 |
 | 7 | 高级服务 | 32 | 6 | **19%** | DDNS(Cloudflare/阿里云双 provider) + NTP 配置真实生效 |
 | 8 | 日志中心 | 11 | 5 | **45%** | journal 查询(unit/grep/时间) + 连接跟踪表(协议/方向/状态) |
