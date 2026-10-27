@@ -26,6 +26,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -37,17 +38,11 @@ ROOT = Path("/home/jimwong/projects/router-re")
 QUEUE = ROOT / "ops" / "tasks.jsonl"
 LOG = ROOT / "logs" / "verify.log"
 GATEWAY = os.environ.get("GATEWAY_URL", "http://10.100.1.17:8085/v1/chat/completions")
+HERDR = shutil.which("herdr") or str(Path.home() / ".local/bin/herdr")
 
 # 验证者模型必须与实现者不同，否则等于自审。
 # 工人主力是 beam-free（opencode-zen 免费层），所以验证者默认用 deepseek-v4-flash。
 VERIFIER_MODEL = os.environ.get("VERIFIER_MODEL", "deepseek-v4-flash")
-# 实现者模型映射：pane -> 模型名。用来断言「验证者 ≠ 实现者」。
-PANE_MODEL = {
-    "w1:pN": "beam-free",
-    "w1:pQ": "beam-free",
-    "w1:pP": "beam-free",
-    "w1:pM": "deepseek-v4-flash",
-}
 
 MAX_FILE_CHARS = 12000     # 单文件送审上限，避免撑爆上下文
 MAX_FILES = 3              # 单任务最多审几个文件
@@ -149,6 +144,45 @@ def log(msg: str) -> None:
     print(line)
     with LOG.open("a", encoding="utf-8") as f:
         f.write(line + "\n")
+
+
+def notify_pane(pane: str, msg: str) -> None:
+    """往工人 pane 回贴一句话（坚哥在 konsole 对话框里直接看到进展）。
+
+    失败只记日志不阻塞验证 —— 通知挂了不能让验证停摆。
+    """
+    if not pane:
+        return
+    try:
+        r = subprocess.run(
+            [HERDR, "agent", "prompt", pane, msg],
+            capture_output=True, text=True, timeout=30,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log(f"WARN 回贴 {pane} 抛异常: {exc}")
+        return
+    if r.returncode != 0:
+        log(f"WARN 回贴 {pane} rc={r.returncode}: {(r.stderr or r.stdout)[:120]}")
+
+
+def pane_model(pane: str) -> str:
+    """从 pane 尾部状态栏实时读实现者模型（☤ 后面的词）。
+
+    读不到返回空字符串，调用方按"未知"处理（不判自审，只是不做自审保护）。
+    宁可漏保护一次，不可把异模型审误判成自审而 SKIP —— 后者会让验证
+    coverage 悄悄归零还不报任何错。
+    """
+    if not pane:
+        return ""
+    try:
+        out = subprocess.run(
+            [HERDR, "agent", "read", pane, "--lines", "3"],
+            capture_output=True, text=True, timeout=15,
+        ).stdout
+    except Exception:  # noqa: BLE001
+        return ""
+    m = re.search(r"☤\s*([A-Za-z0-9._-]+)", out)
+    return m.group(1) if m else ""
 
 
 def load_queue() -> list[dict]:
@@ -345,9 +379,12 @@ def verify_one(task: dict, key: str, dry: bool) -> str:
         log(f"FAIL  {tid}  产出文件缺失: {', '.join(missing)}")
         return "fail"
 
-    # 断言验证者与实现者不同
-    impl_model = PANE_MODEL.get(task.get("pane", ""), "unknown")
-    if impl_model == VERIFIER_MODEL:
+    # 断言验证者与实现者不同。
+    # 实现者模型从 pane 尾部状态栏实时读（☤ <model>），不写死映射 ——
+    # pane 的模型会换（如下午 pM 从 beam-free 切到 deepseek），写死的表一过期
+    # 就会把"异模型审"误判成自审而 SKIP，等于验证 coverage 悄悄归零。
+    impl_model = pane_model(task.get("pane", ""))
+    if impl_model and impl_model == VERIFIER_MODEL:
         log(f"SKIP  {tid}  验证者与实现者同为 {impl_model}，等于自审，跳过")
         return "skip"
 
@@ -454,6 +491,12 @@ def main() -> int:
         if not args.dry_run and verdict in ("pass", "fail"):
             t["verified"] = verdict
             t["verified_at"] = time.time()
+            # 工人对话框里能看到验证结论：PASS 报喜，FAIL 把原因贴回去让它改
+            pane = t.get("pane", "")
+            if verdict == "pass":
+                notify_pane(pane, f"✅ {t['id']} 独立验证通过（verified=pass）")
+            else:
+                notify_pane(pane, f"❌ {t['id']} 验证没过：{(t.get('verify_notes') or '')[:200]}，请按这个修")
         time.sleep(2)   # 低频，别把验证本身变成限流源
 
     if not args.dry_run:

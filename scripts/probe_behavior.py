@@ -19,10 +19,13 @@
 from __future__ import annotations
 
 import argparse
+import pathlib
 import json
 import os
 import random
+import shutil
 import socket
+import subprocess
 import string
 import subprocess
 import sys
@@ -41,6 +44,23 @@ RESULTS: list[tuple[str, bool, str]] = []
 def check(name: str, ok: bool, detail: str = "") -> None:
     RESULTS.append((name, ok, detail))
     print(f"  {'PASS' if ok else 'FAIL'}  {name}" + (f"   {detail}" if detail else ""))
+
+
+HERDR = shutil.which("herdr") or str(pathlib.Path.home() / ".local/bin/herdr")
+
+
+def notify_workers(msg: str) -> None:
+    """behavior 是无人值守定时任务，跑完往 4 个工人 pane 各回贴一句话。
+
+    坚哥在 konsole 点开任意工人对话框就能看到最近一次回归结果，
+    不用去翻 journal。失败只打印不影响退出码。
+    """
+    for pane in ("w1:pM", "w1:pN", "w1:pQ", "w1:pP"):
+        try:
+            subprocess.run([HERDR, "agent", "prompt", pane, msg],
+                           capture_output=True, text=True, timeout=30)
+        except Exception as exc:  # noqa: BLE001
+            print(f"回贴 {pane} 失败: {exc}")
 
 
 def rand_tag(n: int = 8) -> str:
@@ -200,6 +220,11 @@ def main() -> int:
     total = len(RESULTS)
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"\n=== 结果 {passed}/{total} 通过 ===")
+    fails = [name for name, ok, _ in RESULTS if not ok]
+    if passed == total:
+        notify_workers(f"✅ 行为探针 {passed}/{total} 全过（mgmtd 真实端点回归正常）")
+    else:
+        notify_workers(f"❌ 行为探针 {passed}/{total}，未过：{'、'.join(fails[:3])}，详见 journal")
     for name, ok, detail in RESULTS:
         if not ok:
             print(f"  未过: {name}  {detail}")

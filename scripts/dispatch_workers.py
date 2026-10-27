@@ -184,6 +184,30 @@ def log(msg: str) -> None:
     print(msg)
 
 
+def notify_pane(pane: str, msg: str) -> bool:
+    """往工人 pane 里回贴一句话，让坚哥在 konsole 对话框里直接看到进展。
+
+    为什么用 agent prompt 而不是 pane send-text：send-text 只打字不提交，
+    prompt 才是语义化提交。工人 pane 是 AI 会话，收到后会正常回应，
+    不会打断它正在做的事（它处于 idle 才会被派新活，busy 时根本走不到这里）。
+    失败只记日志不阻塞调度 —— 通知挂了不能让派活停摆。
+    """
+    if not pane:
+        return False
+    try:
+        r = subprocess.run(
+            [HERDR, "agent", "prompt", pane, msg],
+            capture_output=True, text=True, timeout=30,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log(f"WARN 回贴 {pane} 抛异常: {exc}")
+        return False
+    if r.returncode != 0:
+        log(f"WARN 回贴 {pane} rc={r.returncode}: {(r.stderr or r.stdout)[:120]}")
+        return False
+    return True
+
+
 # ---------- 队列 ----------
 
 def load_queue() -> list[dict]:
@@ -439,6 +463,8 @@ def main() -> int:
             task["done_at"] = t
             log(f"DONE  {task['id']}  (pane={task.get('pane')}, 耗时 {int((t - task.get('dispatched_at', t)) / 60)} 分钟)")
             state.pop(task.get("pane", ""), None)
+            # 工人对话框里能看到进展：结算时回贴一句话
+            notify_pane(task.get("pane", ""), f"✅ {task['id']} 已验收通过（done）")
 
     # 1.5) 迟到产出：非 done 状态但文件后来才出现 -> 翻回 done
     #
@@ -459,6 +485,8 @@ def main() -> int:
             task["late"] = True
             log(f"DONE(LATE) {task['id']}  原状态 {st}，产出后来才出现，翻回 done")
             state.pop(task.get("pane", ""), None)
+            # 工人对话框里能看到进展：结算时回贴一句话
+            notify_pane(task.get("pane", ""), f"✅ {task['id']} 已验收通过（done）")
 
     # 2) 超时无产出 -> 退避重试；重试耗尽才 failed
     #
@@ -599,6 +627,8 @@ def main() -> int:
             state[pane] = cand["id"]
             dispatched_now += 1
             log(f"DISPATCH {cand['id']} -> {pane}")
+            # 工人对话框里能看到新活：派发时回贴任务名
+            notify_pane(pane, f"📥 新任务 {cand['id']} 已派给你，开始干活吧")
         else:
             # 派发失败：保持 pending，下一轮重试（不吞任务）
             log(f"RETRY {cand['id']} 派发失败，保持 pending")
