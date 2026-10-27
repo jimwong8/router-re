@@ -41,6 +41,7 @@ import (
 	"github.com/jimwong/router-re/mgmtd/internal/radius"
 	"github.com/jimwong/router-re/mgmtd/internal/rbac"
 	"github.com/jimwong/router-re/mgmtd/internal/route"
+	"github.com/jimwong/router-re/mgmtd/internal/snmp"
 	"github.com/jimwong/router-re/mgmtd/internal/stats"
 	"github.com/jimwong/router-re/mgmtd/internal/system"
 	"github.com/jimwong/router-re/mgmtd/internal/traffic"
@@ -175,6 +176,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/dns/config", s.auth(s.auditWrap("dns.config.set", s.handleSetDNSConfig)))
 	s.mux.HandleFunc("POST /api/v1/dns/resolve", s.auth(s.auditWrap("dns.resolve", s.handleDNSResolve)))
 	s.mux.HandleFunc("GET /api/v1/dns/status", s.auth(s.handleGetDNSStatus))
+	s.mux.HandleFunc("GET /api/v1/upnp/config", s.auth(s.handleGetUPNPConfig))
+	s.mux.HandleFunc("POST /api/v1/upnp/config", s.auth(s.auditWrap("upnp.config.set", s.handleSetUPNPConfig)))
+	s.mux.HandleFunc("GET /api/v1/upnp/mappings", s.auth(s.handleGetUPNPMappings))
+	s.mux.HandleFunc("POST /api/v1/upnp/mappings", s.auth(s.auditWrap("upnp.mappings.add", s.handleAddUPNPMapping)))
+	s.mux.HandleFunc("DELETE /api/v1/upnp/mappings", s.auth(s.auditWrap("upnp.mappings.del", s.handleDeleteUPNPMapping)))
+	s.mux.HandleFunc("GET /api/v1/upnp/status", s.auth(s.handleGetUPNPStatus))
 	s.mux.HandleFunc("POST /api/v1/ddns/config", s.auth(s.auditWrap("ddns.config.set", s.handleSetDDNSConfig)))
 	s.mux.HandleFunc("POST /api/v1/ddns/update", s.auth(s.auditWrap("ddns.update", s.handleDDNSUpdate)))
 	s.mux.HandleFunc("GET /api/v1/ddns/ip", s.auth(s.handleGETDDNSIP))
@@ -199,6 +206,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/dhcp/server", s.auth(s.handleGetDHCPServer))
 	s.mux.HandleFunc("POST /api/v1/dhcp/server", s.auth(s.auditWrap("dhcp.server.set", s.handleSetDHCPServer)))
 	s.mux.HandleFunc("GET /api/v1/dhcp/status", s.auth(s.handleGetDHCPStatus))
+	// P6-1 SNMP 服务端
+	s.mux.HandleFunc("GET /api/v1/snmp/config", s.auth(s.handleGetSNMPConfig))
+	s.mux.HandleFunc("POST /api/v1/snmp/config", s.auth(s.auditWrap("snmp.config.set", s.handleSetSNMPConfig)))
+	s.mux.HandleFunc("GET /api/v1/snmp/status", s.auth(s.handleGetSNMPStatus))
+	s.mux.HandleFunc("POST /api/v1/snmp/query", s.auth(s.auditWrap("snmp.query", s.handlePostSNMPQuery)))
 	s.mux.HandleFunc("GET /api/v1/cloud/devices", s.auth(s.handleGetCloudDevices))
 	s.mux.HandleFunc("POST /api/v1/cloud/devices", s.auth(s.auditWrap("cloud.device.register", s.handlePostCloudDevices)))
 	s.mux.HandleFunc("POST /api/v1/cloud/devices/{id}/heartbeat", s.auth(s.auditWrap("cloud.device.heartbeat", s.handlePostCloudHeartbeat)))
@@ -256,6 +268,16 @@ func (s *Server) routes() {
 	// P4-4 接口流量实时速率与 TopN（仅本区块）
 	s.mux.HandleFunc("GET /api/v1/traffic/rates", s.auth(s.handleTrafficRates))
 	s.mux.HandleFunc("GET /api/v1/traffic/top", s.auth(s.handleTrafficTop))
+	// P6-4 远程访问 + 系统时间 + 网络唤醒（仅本区块）
+	s.mux.HandleFunc("GET /api/v1/remote/access", s.auth(s.handleGetRemoteAccess))
+	s.mux.HandleFunc("POST /api/v1/remote/access", s.auth(s.auditWrap("remote.access.set", s.handleSetRemoteAccess)))
+	s.mux.HandleFunc("GET /api/v1/remote/access/status", s.auth(s.handleRemoteAccessStatus))
+	s.mux.HandleFunc("GET /api/v1/system/time", s.auth(s.handleGetSystemTime))
+	s.mux.HandleFunc("POST /api/v1/system/time", s.auth(s.auditWrap("system.time.set", s.handleSetSystemTime)))
+	s.mux.HandleFunc("GET /api/v1/system/timezones", s.auth(s.handleListTimezones))
+	s.mux.HandleFunc("GET /api/v1/wol/targets", s.auth(s.handleGetWOLTargets))
+	s.mux.HandleFunc("POST /api/v1/wol/targets", s.auth(s.auditWrap("wol.targets.set", s.handleSetWOLTargets)))
+	s.mux.HandleFunc("POST /api/v1/wol/wake", s.auth(s.auditWrap("wol.wake", s.handleWOLWake)))
 	// P3-1 安全管控（仅本区块）
 	s.mux.HandleFunc("GET /api/v1/acl/rules", s.auth(s.handleGetACLRules))
 	s.mux.HandleFunc("POST /api/v1/acl/rules", s.auth(s.auditWrap("acl.rules.set", s.handleSetACLRules)))
@@ -272,6 +294,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/ipv6/ra", s.auth(s.handleGetIPv6RA))
 	s.mux.HandleFunc("POST /api/v1/ipv6/ra", s.auth(s.auditWrap("ipv6.ra.set", s.handleSetIPv6RA)))
 	s.mux.HandleFunc("GET /api/v1/ipv6/status", s.auth(s.handleGetIPv6Status))
+	s.mux.HandleFunc("POST /api/v1/diag/ping", s.auth(s.auditWrap("diag.ping", s.handleDiagPing)))
+	s.mux.HandleFunc("POST /api/v1/diag/traceroute", s.auth(s.auditWrap("diag.traceroute", s.handleDiagTraceroute)))
+	s.mux.HandleFunc("POST /api/v1/diag/dns", s.auth(s.auditWrap("diag.dns", s.handleDiagDNS)))
+	s.mux.HandleFunc("GET /api/v1/diag/interfaces", s.auth(s.handleDiagInterfaces))
 	s.mux.HandleFunc("GET /api/v1/ddns/status", s.auth(s.handleGetDDNSStatus))
 	// P4-2 认证计费（账号 + 套餐，仅本区块）
 	s.mux.HandleFunc("GET /api/v1/accounts", s.auth(s.handleGetAccounts))
@@ -1013,11 +1039,23 @@ var ctxKeyActor ctxKeyActorType
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
+	// auditTarget optionally overrides the audit "target" field (e.g. the
+	// host/name a diagnostic was run against) instead of the URL path.
+	auditTarget string
 }
 
 func (r *statusRecorder) WriteHeader(code int) {
 	r.status = code
 	r.ResponseWriter.WriteHeader(code)
+}
+
+// setAuditTarget is called by handlers that want the audit log to record the
+// real subject rather than the route path. The audit middleware type-asserts
+// the ResponseWriter to pick it up.
+func (r *statusRecorder) setAuditTarget(t string) {
+	if t != "" {
+		r.auditTarget = t
+	}
 }
 
 // auditWrap records one audit event for every write request, deriving the
@@ -1031,7 +1069,11 @@ func (s *Server) auditWrap(action string, h http.HandlerFunc) http.HandlerFunc {
 		if rec.status >= 400 {
 			result = "fail"
 		}
-		s.logAudit(r, action, r.URL.Path, result, fmt.Sprintf("HTTP %d", rec.status))
+		target := r.URL.Path
+		if rec.auditTarget != "" {
+			target = rec.auditTarget
+		}
+		s.logAudit(r, action, target, result, fmt.Sprintf("HTTP %d", rec.status))
 	}
 }
 
@@ -3103,4 +3145,97 @@ func (s *Server) handleGetDHCPStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, st)
+}
+
+// --- P6-1 SNMP 服务端 (仅本区块) ---
+
+// snmpStoreKey 是 SNMP Config 在 store 里的键。
+const snmpStoreKey = "snmp/config"
+
+// handleGetSNMPConfig 返回持久化的 SNMP 配置（密码已打码）。
+func (s *Server) handleGetSNMPConfig(w http.ResponseWriter, r *http.Request) {
+	raw, _ := s.store.Get("snmp", snmpStoreKey)
+	if raw == "" {
+		writeJSON(w, 200, map[string]interface{}{
+			"config":  snmp.Config{},
+			"applied": false,
+		})
+		return
+	}
+	var cfg snmp.Config
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		writeJSON(w, 500, errBody(10020, "config unmarshal error", err.Error()))
+		return
+	}
+	// 密码必须加码后返回。
+	writeJSON(w, 200, map[string]interface{}{"config": cfg.Masked(), "applied": true})
+}
+
+// handleSetSNMPConfig 校验 + 应用 SNMP 配置。
+// POST 空对象或校验失败 → 422；下发后返回 {applied, config(masked), snmpd, detail}。
+func (s *Server) handleSetSNMPConfig(w http.ResponseWriter, r *http.Request) {
+	var cfg snmp.Config
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		writeJSON(w, 422, errBody(10021, "invalid body", err.Error()))
+		return
+	}
+	if err := snmp.Validate(cfg); err != nil {
+		writeJSON(w, 422, errBody(10022, "invalid snmp config", err.Error()))
+		return
+	}
+	if s.aclApplier == nil {
+		writeJSON(w, 500, errBody(10023, "exec runner not initialized", ""))
+		return
+	}
+	confPath := snmp.DefaultConfPath
+	// 持久化原始（含密码）JSON，用于 Apply 与下次 GET。
+	b, _ := json.Marshal(cfg)
+	s.store.Set("snmp", snmpStoreKey, string(b))
+
+	detail := ""
+	applyErr := snmp.Apply(s.aclApplier, cfg, confPath)
+	if applyErr != nil {
+		detail = applyErr.Error()
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"applied": applyErr == nil,
+		"config":  cfg.Masked(),
+		// 必须用 Masked() 的副本渲染：真配置里 v3 用户带明文 AuthPass/PrivPass，
+		// 直接回给前端等于把密码写进浏览器缓存、代理日志和 DevTools 历史。
+		// 需要完整内容的人去服务器上看 /etc/snmp/snmpd.conf（权限 0600）。
+		"snmpd":  snmp.RenderSnmpd(cfg.Masked()),
+		"detail": detail,
+	})
+}
+
+// handleGetSNMPStatus 查询 snmpd 运行状态。
+func (s *Server) handleGetSNMPStatus(w http.ResponseWriter, r *http.Request) {
+	if s.aclApplier == nil {
+		writeJSON(w, 500, errBody(10024, "exec runner not initialized", ""))
+		return
+	}
+	st, err := snmp.Status(s.aclApplier)
+	if err != nil {
+		writeJSON(w, 500, errBody(10025, "snmp status error", err.Error()))
+		return
+	}
+	writeJSON(w, 200, st)
+}
+
+// handlePostSNMPQuery 实时执行 snmpwalk 查询本机。snmpwalk 未安装 → 400。
+func (s *Server) handlePostSNMPQuery(w http.ResponseWriter, r *http.Request) {
+	if s.aclApplier == nil {
+		writeJSON(w, 500, errBody(10026, "exec runner not initialized", ""))
+		return
+	}
+	out, err := snmp.QuerySystem(s.aclApplier)
+	if err != nil {
+		if err.Error() == "snmpwalk not installed" {
+			writeJSON(w, http.StatusBadRequest, errBody(10027, "snmpwalk not installed", err.Error()))
+		} else {
+			writeJSON(w, 500, errBody(10028, "snmp query failed", err.Error()))
+		}
+		return
+	}
+	writeJSON(w, 200, out)
 }

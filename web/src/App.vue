@@ -26,10 +26,14 @@
           <router-link to="/network" style="color:#eee; text-decoration:none;">端口映射/策略路由</router-link>
           <router-link to="/security" style="color:#eee; text-decoration:none;">安全管控</router-link>
           <router-link to="/dhcp" style="color:#eee; text-decoration:none;">DHCP 服务</router-link>
+          <router-link to="/snmp" style="color:#eee; text-decoration:none;">SNMP</router-link>
           <router-link to="/services" style="color:#eee; text-decoration:none;">高级服务</router-link>
           <router-link to="/ipv6" style="color:#eee; text-decoration:none;">IPv6</router-link>
+          <router-link to="/diag" style="color:#eee; text-decoration:none;">网络诊断</router-link>
+          <router-link to="/remote" style="color:#eee; text-decoration:none;">远程与系统</router-link>
           <router-link to="/accounts" style="color:#eee; text-decoration:none;">认证计费</router-link>
           <router-link to="/dns" style="color:#eee; text-decoration:none;">DNS 服务</router-link>
+          <router-link to="/upnp" style="color:#eee; text-decoration:none;">UPnP/端口自动映射</router-link>
         </nav>
       </div>
     </el-header>
