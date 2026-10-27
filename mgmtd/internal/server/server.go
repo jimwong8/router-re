@@ -332,6 +332,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/voucher/generate", s.auth(s.handleGenerateVouchers))
 	s.mux.HandleFunc("POST /api/v1/voucher/redeem", s.auth(s.handleRedeemVoucher))
 	s.mux.HandleFunc("DELETE /api/v1/voucher", s.auth(s.handleDeleteVoucher))
+	// ---- P18: 链路检测 ----
+	s.mux.HandleFunc("GET /api/v1/linkcheck/targets", s.auth(s.handleListLinkCheck))
+	s.mux.HandleFunc("POST /api/v1/linkcheck/targets", s.auth(s.handleSetLinkCheck))
+	s.mux.HandleFunc("POST /api/v1/linkcheck/probe", s.auth(s.handleProbeLink))
+	s.mux.HandleFunc("GET /api/v1/linkcheck/status", s.auth(s.handleLinkCheckStatus))
 	s.mux.HandleFunc("POST /api/v1/webadmin", s.auth(s.auditWrap("webadmin.set", s.handleSetWebAdmin)))
 	s.mux.HandleFunc("GET /api/v1/identity", s.auth(s.handleGetIdentity))
 	s.mux.HandleFunc("POST /api/v1/identity", s.auth(s.auditWrap("identity.set", s.handleSetIdentity)))
