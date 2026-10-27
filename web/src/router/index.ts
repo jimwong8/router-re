@@ -17,6 +17,9 @@ import Dpi from '../views/Dpi.vue';
 import LogCenter from '../views/LogCenter.vue';
 import Portal from '../views/Portal.vue';
 import Stats from '../views/Stats.vue';
+import Network from '../views/Network.vue';
+import Security from '../views/Security.vue';
+import Services from '../views/Services.vue';
 
 const routes = [
   { path: '/', component: Dashboard, meta: { requiresAuth: true } },
@@ -35,7 +38,10 @@ const routes = [
   { path: '/dpi', component: Dpi, meta: { requiresAuth: true } },
   { path: '/logs', component: LogCenter, meta: { requiresAuth: true } },
   { path: '/portal', component: Portal, meta: { requiresAuth: true } },
+  { path: '/services', component: Services, meta: { requiresAuth: true } },
   { path: '/stats', component: Stats, meta: { requiresAuth: true } },
+  { path: '/network', component: Network, meta: { requiresAuth: true } },
+  { path: '/security', component: Security, meta: { requiresAuth: true } },
   { path: '/login', component: Login },
   { path: '/:pathMatch(.*)*', redirect: '/login' },
 ];

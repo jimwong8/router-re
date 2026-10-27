@@ -21,6 +21,9 @@
           <router-link to="/logs" style="color:#eee; text-decoration:none;">日志中心</router-link>
           <router-link to="/portal" style="color:#eee; text-decoration:none;">上网认证</router-link>
           <router-link to="/stats" style="color:#eee; text-decoration:none;">系统监控</router-link>
+          <router-link to="/network" style="color:#eee; text-decoration:none;">端口映射/策略路由</router-link>
+          <router-link to="/security" style="color:#eee; text-decoration:none;">安全管控</router-link>
+          <router-link to="/services" style="color:#eee; text-decoration:none;">高级服务</router-link>
         </nav>
       </div>
     </el-header>

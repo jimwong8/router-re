@@ -14,12 +14,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jimwong/router-re/mgmtd/internal/acl"
 	"github.com/jimwong/router-re/mgmtd/internal/audit"
 	"github.com/jimwong/router-re/mgmtd/internal/auth"
 	"github.com/jimwong/router-re/mgmtd/internal/client"
 	"github.com/jimwong/router-re/mgmtd/internal/cloud"
 	"github.com/jimwong/router-re/mgmtd/internal/config"
 	"github.com/jimwong/router-re/mgmtd/internal/conntrack"
+	"github.com/jimwong/router-re/mgmtd/internal/ddns"
 	"github.com/jimwong/router-re/mgmtd/internal/dhcp"
 	"github.com/jimwong/router-re/mgmtd/internal/dpi"
 	"github.com/jimwong/router-re/mgmtd/internal/execx"
@@ -29,6 +31,7 @@ import (
 	"github.com/jimwong/router-re/mgmtd/internal/logcenter"
 	"github.com/jimwong/router-re/mgmtd/internal/nat"
 	"github.com/jimwong/router-re/mgmtd/internal/portal"
+	"github.com/jimwong/router-re/mgmtd/internal/portmap"
 	"github.com/jimwong/router-re/mgmtd/internal/pppoe"
 	"github.com/jimwong/router-re/mgmtd/internal/qos"
 	"github.com/jimwong/router-re/mgmtd/internal/radius"
@@ -66,6 +69,8 @@ type Server struct {
 	portalMgr *portal.Manager
 	// statsRing holds the rolling history of host samples.
 	statsRing *stats.Ring
+	// aclApplier runs nft rulesets (reuses execx; nil-safe in handlers).
+	aclApplier execx.Runner
 }
 
 func New(cfg Config) *Server {
@@ -87,6 +92,7 @@ func New(cfg Config) *Server {
 		loginLimiter: newLoginLimiter(5, time.Minute),
 		portalMgr:    portal.NewManager(),
 		statsRing:    stats.NewRing(720),
+		aclApplier:   execx.DefaultRunner{},
 	}
 	// Start the background stats collector: sample every 30s, run until
 	// process exit. Sleep inside the goroutine so it never blocks requests.
@@ -116,6 +122,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/qos/client-limits", s.auth(s.auditWrap("qos.client_limits.set", s.handleSetClientLimits)))
 	s.mux.HandleFunc("POST /api/v1/qos/limits", s.auth(s.auditWrap("qos.limits.set", s.handleSetQoSLimits)))
 	s.mux.HandleFunc("GET /api/v1/interfaces", s.auth(s.handleInterfaces))
+	s.mux.HandleFunc("GET /api/v1/ddns/config", s.auth(s.handleGetDDNSConfig))
+	s.mux.HandleFunc("POST /api/v1/ddns/config", s.auth(s.auditWrap("ddns.config.set", s.handleSetDDNSConfig)))
+	s.mux.HandleFunc("POST /api/v1/ddns/update", s.auth(s.auditWrap("ddns.update", s.handleDDNSUpdate)))
+	s.mux.HandleFunc("GET /api/v1/ddns/ip", s.auth(s.handleGETDDNSIP))
+	s.mux.HandleFunc("GET /api/v1/ntp/config", s.auth(s.handleGetNTPConfig))
+	s.mux.HandleFunc("POST /api/v1/ntp/config", s.auth(s.auditWrap("ntp.config.set", s.handleSetNTPConfig)))
+	s.mux.HandleFunc("GET /api/v1/ntp/status", s.auth(s.handleNTPStatus))
 	s.mux.HandleFunc("GET /api/v1/firewall/rules", s.auth(s.handleGetFirewallRules))
 	s.mux.HandleFunc("POST /api/v1/firewall/rules", s.auth(s.auditWrap("firewall.rules.set", s.handleSetFirewallRules)))
 	s.mux.HandleFunc("GET /api/v1/nat/rules", s.auth(s.handleGetNATRules))
@@ -173,10 +186,24 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/conntrack", s.auth(s.handleGetConntrack))
 	s.mux.HandleFunc("GET /api/v1/logs", s.auth(s.handleGetLogs))
 	s.mux.HandleFunc("GET /api/v1/logs/sources", s.auth(s.handleGetLogSources))
+	// P3-3 端口映射 + 策略路由（仅本区块）
+	s.mux.HandleFunc("GET /api/v1/portmap/rules", s.auth(s.handleGetPortmapRules))
+	s.mux.HandleFunc("POST /api/v1/portmap/rules", s.auth(s.auditWrap("portmap.apply", s.handleSetPortmapRules)))
+	s.mux.HandleFunc("DELETE /api/v1/portmap/rules/{id}", s.auth(s.auditWrap("portmap.apply", s.handleDeletePortmapRule)))
+	s.mux.HandleFunc("GET /api/v1/policyroute/rules", s.auth(s.handleGetPolicyRouteRules))
+	s.mux.HandleFunc("POST /api/v1/policyroute/rules", s.auth(s.auditWrap("policyroute.apply", s.handleSetPolicyRouteRules)))
+	s.mux.HandleFunc("DELETE /api/v1/policyroute/rules/{id}", s.auth(s.auditWrap("policyroute.apply", s.handleDeletePolicyRouteRule)))
 	// P2-1 系统监控历史与趋势（仅本区块）
 	s.mux.HandleFunc("GET /api/v1/stats/current", s.auth(s.handleStatsCurrent))
 	s.mux.HandleFunc("GET /api/v1/stats/history", s.auth(s.handleStatsHistory))
 	s.mux.HandleFunc("GET /api/v1/stats/interfaces", s.auth(s.handleStatsInterfaces))
+	// P3-1 安全管控（仅本区块）
+	s.mux.HandleFunc("GET /api/v1/acl/rules", s.auth(s.handleGetACLRules))
+	s.mux.HandleFunc("POST /api/v1/acl/rules", s.auth(s.auditWrap("acl.rules.set", s.handleSetACLRules)))
+	s.mux.HandleFunc("GET /api/v1/security/arp", s.auth(s.handleGetArp))
+	s.mux.HandleFunc("POST /api/v1/security/arp", s.auth(s.auditWrap("security.arp.set", s.handleSetArp)))
+	s.mux.HandleFunc("GET /api/v1/security/arp/neighbors", s.auth(s.handleGetNeighbors))
+	s.mux.HandleFunc("GET /api/v1/ddns/status", s.auth(s.handleGetDDNSStatus))
 }
 
 // handleLogin authenticates a fixed dev account and issues a JWT session token.
@@ -1977,4 +2004,311 @@ func (s *Server) handleStatsInterfaces(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]interface{}{
 		"interfaces": ifaces,
 	})
+}
+
+// handleGetACLRules returns the current ACL rules from store.
+func (s *Server) handleGetACLRules(w http.ResponseWriter, r *http.Request) {
+	raw, _ := s.store.Get("acl", "rules")
+	rules := []acl.Rule{}
+	if raw != "" {
+		_ = json.Unmarshal([]byte(raw), &rules)
+	}
+	writeJSON(w, 200, map[string]interface{}{"rules": rules, "count": len(rules)})
+}
+
+// handleSetACLRules validates, stores and live-applies an ACL rule set via nft.
+func (s *Server) handleSetACLRules(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Rules []acl.Rule `json:"rules"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10090, "invalid body", err.Error()))
+		return
+	}
+	if len(req.Rules) == 0 {
+		writeJSON(w, 422, errBody(10091, "empty rule set", "POST /acl/rules must carry at least one rule"))
+		return
+	}
+	if err := acl.Validate(req.Rules); err != nil {
+		writeJSON(w, 422, errBody(10092, "validation failed", err.Error()))
+		return
+	}
+	applied := false
+	var nftOut string
+	if s.aclApplier != nil {
+		if err := acl.Apply(s.aclApplier, req.Rules); err != nil {
+			writeJSON(w, 500, errBody(10093, "nft apply failed", err.Error()))
+			return
+		}
+		applied = true
+		if out, err := s.aclApplier.Run(acl.NftName, acl.NftListArgs...); err == nil {
+			nftOut = out
+		}
+	} else {
+		nftOut = acl.RenderNft(req.Rules)
+	}
+	b, _ := json.Marshal(req.Rules)
+	_ = s.store.Set("acl", "rules", string(b))
+	writeJSON(w, 200, map[string]interface{}{
+		"applied": applied,
+		"rules":   req.Rules,
+		"nft":     nftOut,
+	})
+}
+
+// handleGetArp returns the configured ARP-guard interface (read-only).
+func (s *Server) handleGetArp(w http.ResponseWriter, r *http.Request) {
+	raw, _ := s.store.Get("security", "arp")
+	var cfg struct {
+		Iface string `json:"iface"`
+	}
+	if raw != "" {
+		_ = json.Unmarshal([]byte(raw), &cfg)
+	}
+	writeJSON(w, 200, cfg)
+}
+
+// handleSetArp applies ARP anti-spoof sysctls for the requested interface.
+func (s *Server) handleSetArp(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Iface string `json:"iface"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10094, "invalid body", err.Error()))
+		return
+	}
+	if strings.TrimSpace(req.Iface) == "" {
+		writeJSON(w, 400, errBody(10095, "iface required", ""))
+		return
+	}
+	if s.aclApplier == nil {
+		writeJSON(w, 200, map[string]interface{}{"applied": false, "iface": req.Iface, "sysctls": nil})
+		return
+	}
+	if err := acl.ApplyArpGuard(s.aclApplier, req.Iface); err != nil {
+		writeJSON(w, 500, errBody(10096, "arp guard failed", err.Error()))
+		return
+	}
+	sysctls := map[string]string{
+		"net.ipv4.conf." + req.Iface + ".arp_ignore":   "1",
+		"net.ipv4.conf." + req.Iface + ".arp_announce": "2",
+	}
+	b, _ := json.Marshal(struct {
+		Iface   string            `json:"iface"`
+		Sysctls map[string]string `json:"sysctls"`
+	}{req.Iface, sysctls})
+	_ = s.store.Set("security", "arp", string(b))
+	writeJSON(w, 200, map[string]interface{}{
+		"applied": true,
+		"iface":   req.Iface,
+		"sysctls": sysctls,
+	})
+}
+
+// handleGetNeighbors returns the current neighbor (ARP) table.
+func (s *Server) handleGetNeighbors(w http.ResponseWriter, r *http.Request) {
+	if s.aclApplier == nil {
+		writeJSON(w, 503, errBody(10097, "no runner", ""))
+		return
+	}
+	rows, err := acl.StaticBindings(s.aclApplier)
+	if err != nil {
+		writeJSON(w, 500, errBody(10098, "neighbor read failed", err.Error()))
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"neighbors": rows,
+		"count":     len(rows),
+	})
+}
+
+func (s *Server) storeJSON(section, option string, v interface{}) {
+	b, _ := json.Marshal(v)
+	_ = s.store.Set(section, option, string(b))
+}
+
+func (s *Server) loadJSON(section, option string, dst interface{}) bool {
+	raw, _ := s.store.Get(section, option)
+	if raw == "" {
+		return false
+	}
+	return json.Unmarshal([]byte(raw), dst) == nil
+}
+
+// --- P3-3 端口映射 (portmap 包，幂等删除表重建) ---
+
+func (s *Server) handleGetPortmapRules(w http.ResponseWriter, r *http.Request) {
+	var rules []portmap.Rule
+	s.loadJSON("portmap", "rules", &rules)
+	nft := ""
+	if s.aclApplier != nil {
+		if out, err := s.aclApplier.Run("nft", "list", "table", "inet", "router_portmap"); err == nil {
+			nft = out
+		}
+	}
+	writeJSON(w, 200, map[string]interface{}{"rules": rules, "nft": nft})
+}
+
+func (s *Server) handleSetPortmapRules(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Rules []portmap.Rule `json:"rules"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10110, "invalid body", err.Error()))
+		return
+	}
+	if len(req.Rules) == 0 {
+		writeJSON(w, 422, errBody(10114, "empty rule set", "POST /portmap/rules must carry at least one rule"))
+		return
+	}
+	if err := portmap.Validate(req.Rules); err != nil {
+		writeJSON(w, 422, errBody(10111, "validation failed", err.Error()))
+		return
+	}
+	applied := false
+	nftOut := portmap.RenderNft(req.Rules)
+	if s.aclApplier != nil {
+		if err := portmap.Apply(s.aclApplier, req.Rules); err != nil {
+			writeJSON(w, 500, errBody(10112, "nft apply failed", err.Error()))
+			return
+		}
+		applied = true
+		nftOut, _ = s.aclApplier.Run("nft", "list", "table", "inet", "router_portmap")
+	}
+	s.storeJSON("portmap", "rules", req.Rules)
+	writeJSON(w, 200, map[string]interface{}{"applied": applied, "rules": req.Rules, "nft": nftOut})
+}
+
+func (s *Server) handleDeletePortmapRule(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		writeJSON(w, 400, errBody(10113, "bad rule id", idStr))
+		return
+	}
+	var rules []portmap.Rule
+	if !s.loadJSON("portmap", "rules", &rules) {
+		writeJSON(w, 200, map[string]interface{}{"deleted": false, "rules": []portmap.Rule{}})
+		return
+	}
+	filtered := rules[:0]
+	for _, rr := range rules {
+		if rr.ID != id {
+			filtered = append(filtered, rr)
+		}
+	}
+	if len(filtered) == len(rules) {
+		writeJSON(w, 200, map[string]interface{}{"deleted": false, "rules": rules})
+		return
+	}
+	applied := false
+	if s.aclApplier != nil && portmap.Validate(filtered) == nil {
+		if err := portmap.Apply(s.aclApplier, filtered); err == nil {
+			applied = true
+		}
+	}
+	s.storeJSON("portmap", "rules", filtered)
+	writeJSON(w, 200, map[string]interface{}{"deleted": true, "applied": applied, "rules": filtered})
+}
+
+// --- P3-3 策略路由 (portmap.Policy) ---
+
+func (s *Server) handleGetPolicyRouteRules(w http.ResponseWriter, r *http.Request) {
+	var ps []portmap.Policy
+	s.loadJSON("policyroute", "rules", &ps)
+	rules := []map[string]string{}
+	if s.aclApplier != nil {
+		if out, err := s.aclApplier.Run("ip", "-j", "rule", "show"); err == nil {
+			var raw []map[string]interface{}
+			if json.Unmarshal([]byte(out), &raw) == nil {
+				for _, m := range raw {
+					row := make(map[string]string)
+					for k, v := range m {
+						row[k] = fmt.Sprintf("%v", v)
+					}
+					rules = append(rules, row)
+				}
+			}
+		}
+	}
+	writeJSON(w, 200, map[string]interface{}{"rules": ps, "live": rules})
+}
+
+func (s *Server) handleSetPolicyRouteRules(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Policies    []portmap.Policy `json:"policies"`
+		TableIfaces map[int]string   `json:"table_ifaces"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10120, "invalid body", err.Error()))
+		return
+	}
+	if len(req.Policies) == 0 {
+		writeJSON(w, 422, errBody(10124, "empty rule set", "POST /policyroute/rules must carry at least one policy"))
+		return
+	}
+	if err := portmap.ValidatePolicy(req.Policies); err != nil {
+		writeJSON(w, 422, errBody(10121, "validation failed", err.Error()))
+		return
+	}
+	if req.TableIfaces == nil {
+		req.TableIfaces = map[int]string{}
+	}
+	applied := false
+	if s.aclApplier != nil {
+		if err := portmap.ApplyPolicy(s.aclApplier, req.Policies, req.TableIfaces); err != nil {
+			writeJSON(w, 500, errBody(10122, "policy apply failed", err.Error()))
+			return
+		}
+		applied = true
+	}
+	s.storeJSON("policyroute", "rules", req.Policies)
+	writeJSON(w, 200, map[string]interface{}{"applied": applied, "policies": req.Policies})
+}
+
+func (s *Server) handleDeletePolicyRouteRule(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		writeJSON(w, 400, errBody(10123, "bad policy id", idStr))
+		return
+	}
+	var ps []portmap.Policy
+	if !s.loadJSON("policyroute", "rules", &ps) {
+		writeJSON(w, 200, map[string]interface{}{"deleted": false, "policies": []portmap.Policy{}})
+		return
+	}
+	filtered := ps[:0]
+	for _, p := range ps {
+		if p.ID != id {
+			filtered = append(filtered, p)
+		}
+	}
+	if len(filtered) == len(ps) {
+		writeJSON(w, 200, map[string]interface{}{"deleted": false, "policies": ps})
+		return
+	}
+	applied := false
+	if s.aclApplier != nil && portmap.ValidatePolicy(filtered) == nil {
+		if err := portmap.ApplyPolicy(s.aclApplier, filtered, map[int]string{}); err == nil {
+			applied = true
+		}
+	}
+	s.storeJSON("policyroute", "rules", filtered)
+	writeJSON(w, 200, map[string]interface{}{"deleted": true, "applied": applied, "policies": filtered})
+}
+
+// --- P3-3 DDN s 状态 (ddns.Status) ---
+
+func (s *Server) handleGetDDNSStatus(w http.ResponseWriter, r *http.Request) {
+	if s.aclApplier == nil {
+		writeJSON(w, 503, errBody(10130, "no runner", ""))
+		return
+	}
+	status, err := ddns.Status(s.aclApplier)
+	if err != nil {
+		writeJSON(w, 500, errBody(10131, "ddns status failed", err.Error()))
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{"status": status})
 }
