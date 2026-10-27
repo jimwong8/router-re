@@ -26,31 +26,46 @@ type Voucher struct {
 var errBadVoucher = fmt.Errorf("卡号或卡密错误")
 
 // Validate 校验卡密。小写 code 自动转大写。
-func Validate(v *Voucher) error {
-	code := strings.ToUpper(strings.TrimSpace(v.Code))
-	v.Code = code
+func Validate(v interface{}) error {
+	var ptr *Voucher
+	var val Voucher
+	switch t := v.(type) {
+	case *Voucher:
+		ptr = t
+		val = *t
+	case Voucher:
+		val = t
+	default:
+		return fmt.Errorf("Validate expects Voucher or *Voucher, got %T", v)
+	}
+	code := strings.ToUpper(strings.TrimSpace(val.Code))
+	val.Code = code
 	if len(code) < 6 || len(code) > 32 {
 		return fmt.Errorf("code length must be 6-32, got %d", len(code))
 	}
 	for _, c := range code {
 		if !(c >= 'A' && c <= 'Z') && !(c >= '0' && c <= '9') {
-			return fmt.Errorf("code must contain only [A-Z0-9], got %q", v.Code)
+			return fmt.Errorf("code must contain only [A-Z0-9], got %q", val.Code)
 		}
 	}
-	if len(v.Password) < 6 || len(v.Password) > 32 {
-		return fmt.Errorf("password length must be 6-32, got %d", len(v.Password))
+	if len(val.Password) < 6 || len(val.Password) > 32 {
+		return fmt.Errorf("password length must be 6-32, got %d", len(val.Password))
 	}
-	if v.Minutes != 0 && (v.Minutes < 1 || v.Minutes > 525600) {
-		return fmt.Errorf("minutes must be 0 or 1-525600, got %d", v.Minutes)
+	if val.Minutes != 0 && (val.Minutes < 1 || val.Minutes > 525600) {
+		return fmt.Errorf("minutes must be 0 or 1-525600, got %d", val.Minutes)
 	}
-	if v.TrafficMB < 0 {
+	if val.TrafficMB < 0 {
 		return fmt.Errorf("traffic_mb must be >= 0")
 	}
-	if v.DeviceLimit < 1 || v.DeviceLimit > 10 {
-		return fmt.Errorf("device_limit must be 1-10, got %d", v.DeviceLimit)
+	if val.DeviceLimit < 1 || val.DeviceLimit > 10 {
+		return fmt.Errorf("device_limit must be 1-10, got %d", val.DeviceLimit)
 	}
-	if v.ExpiresAt != 0 && v.ExpiresAt <= v.CreatedAt {
+	if val.ExpiresAt != 0 && val.ExpiresAt <= val.CreatedAt {
 		return fmt.Errorf("expires_at must be 0 or > created_at")
+	}
+	// 归一化写回调用方（如果传的是指针）
+	if ptr != nil {
+		ptr.Code = code
 	}
 	return nil
 }

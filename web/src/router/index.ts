@@ -46,6 +46,8 @@ import CertManage from '../views/CertManage.vue';
 import OnlineUsers from '../views/OnlineUsers.vue';
 import Services from '../views/Services.vue';
 import NetworkTools from '../views/NetworkTools.vue';
+import VpnClient from '../views/VpnClient.vue';
+import SecurityPlus from '../views/SecurityPlus.vue';
 import Quota from '../views/Quota.vue';
 
 const routes = [
@@ -95,6 +97,8 @@ const routes = [
   { path: '/online-users', component: OnlineUsers, meta: { requiresAuth: true } },
   { path: '/services', component: Services, meta: { requiresAuth: true } },
   { path: '/network-tools', component: NetworkTools, meta: { requiresAuth: true } },
+  { path: '/vpn-client', component: VpnClient, meta: { requiresAuth: true } },
+  { path: '/security-plus', component: SecurityPlus, meta: { requiresAuth: true } },
   { path: '/quota', component: Quota, meta: { requiresAuth: true } },
   { path: '/login', component: Login },
   { path: '/:pathMatch(.*)*', redirect: '/login' },

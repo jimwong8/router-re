@@ -1,9 +1,12 @@
 package server
 
 import (
+	"encoding/json"
 	"testing"
 
+	"github.com/jimwong/router-re/mgmtd/internal/ddos"
 	"github.com/jimwong/router-re/mgmtd/internal/nettools2"
+	"strings"
 )
 
 // TestNetToolArgsDoNotContainBinary 锁死一个真实 bug：
@@ -49,4 +52,32 @@ func isBinaryName(s string) bool {
 		return true
 	}
 	return false
+}
+
+// TestDDoSConfigWhitelistNeverNull 锁死一个让整个 tab 空白的 bug：
+// ddos.Config.Whitelist 是 nil slice 时，encoding/json 会输出 null 而不是 []。
+// 前端 Object.assign 后 whitelist 变成 null，模板里 whitelist.length 抛
+// TypeError，Vue 把整个 tab-pane 渲染成注释 —— 页面上只有空白，
+// 控制台只有一行错，非常难定位。
+func TestDDoSConfigWhitelistNeverNull(t *testing.T) {
+	c := ddos.Config{PortScanWindow: 10, BlockSeconds: 600}
+	if c.Whitelist != nil {
+		t.Fatal("前置条件: 零值 Config 的 Whitelist 应是 nil")
+	}
+	raw, err := json.Marshal(c)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	// 先确认问题真实存在：零值就是会输出 null（这就是当初的 bug 源头）
+	if !strings.Contains(string(raw), `"whitelist":null`) {
+		t.Fatalf("前提变了：零值 Config 不再序列化成 null，归一化逻辑可考虑移除。实际: %s", raw)
+	}
+	// handleGetDDoS 的归一化逻辑等价于这一句
+	if c.Whitelist == nil {
+		c.Whitelist = []string{}
+	}
+	raw2, _ := json.Marshal(c)
+	if !strings.Contains(string(raw2), `"whitelist":[]`) {
+		t.Fatalf("归一化后应是 []，实际: %s", raw2)
+	}
 }

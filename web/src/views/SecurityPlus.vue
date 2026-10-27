@@ -304,7 +304,14 @@ async function loadDDoS() {
     const res = await api.get('/api/v1/security/ddos');
     const d = res.data || {};
     ddosSource.value = d.source || '';
-    if (d.config) Object.assign(cfg, d.config);
+    if (d.config) {
+      // 防御：后端历史版本可能把 nil slice 序列化成 null，
+      // 直接 Object.assign 会用 null 覆盖掉初始的 []，模板里 .length 立刻崩，
+      // 而症状是整个 tab 空白 —— 极难定位。数组字段一律兜底成 []。
+      const c = { ...d.config };
+      if (!Array.isArray(c.whitelist)) c.whitelist = [];
+      Object.assign(cfg, c);
+    }
   } catch (e: any) {
     showError(e, '加载 DDoS 配置失败');
   }

@@ -169,14 +169,19 @@ func (s *Server) handleKillProcess(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetDDoS(w http.ResponseWriter, r *http.Request) {
 	cfg, err := s.loadDDoS()
+	src := "config store"
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"config": ddos.Config{PortScanWindow: 10, BlockSeconds: 600},
-			"source": "defaults (no config saved yet)",
-		})
-		return
+		cfg = ddos.Config{PortScanWindow: 10, BlockSeconds: 600}
+		src = "defaults (no config saved yet)"
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"config": cfg, "source": "config store"})
+	// nil slice 会序列化成 JSON 的 null，而不是 []。前端 Object.assign 之后
+	// 拿到 whitelist:null，模板里 whitelist.length 直接抛 TypeError，
+	// 整个 tab-pane 渲染失败（页面上只看到空白，控制台才有一行错）。
+	// API 契约要求数组字段永远是数组。
+	if cfg.Whitelist == nil {
+		cfg.Whitelist = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"config": cfg, "source": src})
 }
 
 func (s *Server) handleSetDDoS(w http.ResponseWriter, r *http.Request) {
