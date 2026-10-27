@@ -48,6 +48,8 @@ import Services from '../views/Services.vue';
 import NetworkTools from '../views/NetworkTools.vue';
 import VpnClient from '../views/VpnClient.vue';
 import SecurityPlus from '../views/SecurityPlus.vue';
+import Voucher from '../views/Voucher.vue';
+import Ddns from '../views/Ddns.vue';
 import Quota from '../views/Quota.vue';
 
 const routes = [
@@ -99,6 +101,8 @@ const routes = [
   { path: '/network-tools', component: NetworkTools, meta: { requiresAuth: true } },
   { path: '/vpn-client', component: VpnClient, meta: { requiresAuth: true } },
   { path: '/security-plus', component: SecurityPlus, meta: { requiresAuth: true } },
+  { path: '/voucher', component: Voucher, meta: { requiresAuth: true } },
+  { path: '/ddns', component: Ddns, meta: { requiresAuth: true } },
   { path: '/quota', component: Quota, meta: { requiresAuth: true } },
   { path: '/login', component: Login },
   { path: '/:pathMatch(.*)*', redirect: '/login' },

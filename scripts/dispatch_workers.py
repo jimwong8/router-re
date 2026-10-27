@@ -66,8 +66,35 @@ STALE_MINUTES = float(os.environ.get("STALE_MINUTES", "20"))  # 派发后多久�
 HERDR = shutil.which("herdr") or str(Path.home() / ".local/bin/herdr")
 
 # 终端里的忙/闲标记。与 watch_workers.py 保持一致。
-BUSY_MARKERS = ["esc interrupt", "Working", "Preparing", "Thinking", "Running"]
-IDLE_MARKERS = ["ctrl+p commands", "Type / to browse"]
+# 判忙闲的标记。这些字符串来自实测的终端尾部文本，不是猜的：
+#
+#   busy（真的在干活）
+#     "esc interrupt"                 带 ☤ 前缀，等待可打断
+#     "⏳ waiting on <model>"           上游慢，还在等第一个 chunk
+#     "Working / Preparing / Thinking"
+#     "☤ ❯ type to redirect this turn" 这一行在输出过程中出现
+#
+#   idle（可以派活）
+#     "Type / to browse commands"      无历史时的空提示
+#     "Ctrl+P for the palette"
+#     "❯ Explain this error and how..." 有历史时的空提示（实测 pP 停在这里）
+#
+# 顺序很关键：先判 busy 再判 idle，因为忙的时候也可能出现 ❯ 提示行。
+BUSY_MARKERS = [
+    "esc interrupt",
+    "⏳ waiting on",
+    "waiting for the first stream chunk",
+    "working", "preparing", "thinking",
+    "type to redirect this turn",
+]
+IDLE_MARKERS = [
+    "type / to browse commands",
+    "ctrl+p commands",          # OpenCode 状态栏的空闲写法（实测 pM）
+    "ctrl+p for the palette",
+    "❯ explain this error",
+    "❯ ask anything",
+    "❯ type a message",
+]
 
 
 def now() -> float:
@@ -139,9 +166,12 @@ def pane_state(pane: str) -> str:
         return "unknown"
     if not out.strip():
         return "unknown"
-    if any(m in out for m in BUSY_MARKERS):
+    # 大小写不敏感：同一个 TUI 在不同场景下会写 "Ctrl+P" / "ctrl+p"，
+    # 区分大小写会让工人被误判成 unknown 从而永远领不到活。
+    low = out.lower()
+    if any(m.lower() in low for m in BUSY_MARKERS):
         return "busy"
-    if any(m in out for m in IDLE_MARKERS):
+    if any(m.lower() in low for m in IDLE_MARKERS):
         return "idle"
     return "unknown"
 
