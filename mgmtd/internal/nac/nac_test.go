@@ -1,6 +1,7 @@
 package nac
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -153,5 +154,58 @@ func TestNeighborsParsesStateArray(t *testing.T) {
 	}
 	if got[0].MAC != "bc:24:11:76:6f:e2" || got[0].IP != "10.100.1.168" {
 		t.Fatalf("field mapping wrong: %+v", got[0])
+	}
+}
+
+// mapRunner 按 "命令 参数" 返回不同输出，用来模拟 BusyBox 的 -j 失败。
+type mapRunner struct {
+	outs map[string]string
+	errs map[string]error
+}
+
+func (m *mapRunner) Run(name string, args ...string) (string, error) {
+	k := name
+	for _, a := range args {
+		k += " " + a
+	}
+	if e, ok := m.errs[k]; ok {
+		return m.outs[k], e
+	}
+	return m.outs[k], nil
+}
+func (m *mapRunner) RunWithInput(input, name string, args ...string) (string, error) {
+	return m.Run(name, args...)
+}
+
+// TestNeighborsFromTextBusyBox 锁死真机兼容性：
+// OpenWrt 的 BusyBox ip（v1.36.1）不支持 `-j`，`ip -j neigh` 只打印 usage 并返回 1。
+// 没有文本 fallback，真机上的邻居表永远是空的 —— 而"空列表"会被误读成
+// "网络里没有设备"，比报错更具误导性。
+func TestNeighborsFromTextBusyBox(t *testing.T) {
+	r := &mapRunner{
+		outs: map[string]string{
+			"ip -j neigh show": "BusyBox v1.36.1 (2026-07-24 07:21:50 UTC) multi-call binary.\n\nUsage: ip [OPTIONS] address|route|link|neigh|rule",
+			"ip neigh show":    "10.100.1.1 dev br-lan lladdr aa:bb:cc:dd:ee:ff REACHABLE\n10.100.1.50 dev br-lan FAILED\n",
+		},
+		errs: map[string]error{
+			"ip -j neigh show": fmt.Errorf("exit status 1"),
+		},
+	}
+	devs, err := Neighbors(r)
+	if err != nil {
+		t.Fatalf("BusyBox 环境应走文本 fallback 而不是报错: %v", err)
+	}
+	if len(devs) != 2 {
+		t.Fatalf("应解析出 2 条邻居，got %d: %+v", len(devs), devs)
+	}
+	if devs[0].IP != "10.100.1.1" || devs[0].MAC != "aa:bb:cc:dd:ee:ff" || devs[0].Iface != "br-lan" {
+		t.Fatalf("第一条解析错误: %+v", devs[0])
+	}
+	if devs[0].State != "REACHABLE" {
+		t.Fatalf("状态解析错误: %q", devs[0].State)
+	}
+	// FAILED 行没有 lladdr：MAC 为空但设备必须出现（"有设备但不可达"是有用信息）
+	if devs[1].IP != "10.100.1.50" || devs[1].MAC != "" || devs[1].State != "FAILED" {
+		t.Fatalf("FAILED 行解析错误（MAC 应为空但设备要保留）: %+v", devs[1])
 	}
 }

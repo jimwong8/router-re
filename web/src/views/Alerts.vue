@@ -29,8 +29,8 @@
         </el-table-column>
         <el-table-column prop="cooldown" label="冷却(秒)" width="90" />
         <el-table-column label="启用" width="70">
-                  <template #default="{ row }"><el-switch v-model="row.enabled" size="small" /></template>
-                </el-table-column>
+          <template #default="{ row }"><el-switch v-model="row.enabled" size="small" /></template>
+        </el-table-column>
         <el-table-column label="操作" width="80">
           <template #default="{ $index }">
             <el-button link type="danger" size="small" @click="removeRule($index)">删除</el-button>

@@ -16,6 +16,9 @@ type Device struct {
 	IP     string `json:"ip"`
 	Policy string `json:"policy"` // allow | deny | quarantine
 	Note   string `json:"note"`
+	// 以下两个字段来自邻居表回读，配置侧的 Device 里为空（omitempty）
+	Iface string `json:"iface,omitempty"`
+	State string `json:"state,omitempty"`
 }
 
 // Config holds MAC access-control mode and devices.
@@ -126,8 +129,11 @@ func ApplyNAC(r execx.Runner, c Config) error {
 // Neighbors reads the neighbor (ARP/ND) table as JSON.
 func Neighbors(r execx.Runner) ([]Device, error) {
 	out, err := r.Run("ip", "-j", "neigh", "show")
-	if err != nil {
-		return nil, err
+	if err != nil || strings.Contains(out, "BusyBox") || strings.HasPrefix(strings.TrimSpace(out), "Usage:") {
+		// OpenWrt 的 BusyBox ip 不支持 -j（实测 v1.36.1 会打印 usage 并返回 1）。
+		// 退回文本解析，否则整个邻居表在真机上就是空的 —— 而空列表会让人以为
+		// "网络里没有设备"，比报错更误导。
+		return neighborsFromText(r)
 	}
 	out = strings.TrimSpace(out)
 	if out == "" || out == "[]" {
@@ -154,6 +160,52 @@ func Neighbors(r execx.Runner) ([]Device, error) {
 			Note:   strings.Join(e.State, ","),
 			Policy: "",
 		})
+	}
+	return res, nil
+}
+
+// neighborsFromText 解析 `ip neigh show` 的纯文本输出。
+//
+// 为什么要这个：OpenWrt 的 BusyBox ip（v1.36.1）不支持 `-j`，`ip -j neigh`
+// 只打印 usage 并返回 1。没有这个 fallback，真机上的邻居表永远是空的。
+//
+// 真实输出格式（每行一条）：
+//
+//	10.100.1.1 dev br-lan lladdr aa:bb:cc:dd:ee:ff REACHABLE
+//	10.100.1.50 dev br-lan FAILED
+//	10.100.1.60 dev br-lan lladdr 11:22:33:44:55:66 STALE
+//
+// 注意 FAILED/INCOMPLETE 这类行**没有 lladdr**，MAC 为空但设备仍要出现
+// （这恰恰是"有设备但不可达"，是有用的信息）。
+func neighborsFromText(r execx.Runner) ([]Device, error) {
+	out, err := r.Run("ip", "neigh", "show")
+	if err != nil {
+		return nil, fmt.Errorf("ip neigh show: %w", err)
+	}
+	res := []Device{}
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.Fields(line)
+		if len(f) < 3 {
+			continue
+		}
+		d := Device{IP: f[0]}
+		// 字段顺序不固定（lladdr/dev 谁先都可能），逐段扫
+		for i := 1; i < len(f)-1; i++ {
+			switch f[i] {
+			case "dev":
+				d.Iface = f[i+1]
+			case "lladdr":
+				d.MAC = f[i+1]
+			}
+		}
+		// 最后一个全大写单词通常是状态
+		last := f[len(f)-1]
+		if last == strings.ToUpper(last) && !strings.Contains(last, ":") {
+			d.State = last
+		}
+		if d.IP != "" {
+			res = append(res, d)
+		}
 	}
 	return res, nil
 }

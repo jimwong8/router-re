@@ -35,7 +35,13 @@ define Package/router-re
   CATEGORY:=Network
   TITLE:=router-re configuration management daemon
   URL:=https://github.com/jimwong/router-re
-  DEPENDS:=
+  # ip-full: BusyBox 的 ip 不支持 `-j`（JSON）和 `-br`（brief），
+  #   而 mgmtd 的路由/邻居/VLAN 回读全部依赖这两个选项。实测在 24.10.8
+  #   的 BusyBox v1.36.1 上 `ip -j route` 直接打印 usage，接口返回空。
+  # nftables: 防火墙/ACL/NAT 下发。
+  # conntrack-tools: 在线用户断开（conntrack -D -s <ip>）。
+  # kmod-nf-conntrack-netlink: 上面那条命令需要的内核模块。
+  DEPENDS:=+ip-full +nftables +conntrack-tools +kmod-nf-conntrack-netlink
 endef
 
 define Package/router-re/description
