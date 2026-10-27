@@ -307,6 +307,20 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/threat/fetch", s.auth(s.auditWrap("threat.fetch", s.handleThreatFetch)))
 	s.mux.HandleFunc("GET /api/v1/threat/stats", s.auth(s.handleThreatStats))
 	// P8-4 应用限速与连接配额（仅本区块）
+	// P9：IPv6 ND/PD、端口镜像、PPPoE 多拨、流量计费
+	s.mux.HandleFunc("GET /api/v1/ipv6/nd", s.auth(s.handleGetIPv6ND))
+	s.mux.HandleFunc("POST /api/v1/ipv6/nd", s.auth(s.auditWrap("ipv6.nd.set", s.handleSetIPv6ND)))
+	s.mux.HandleFunc("GET /api/v1/ipv6/pd", s.auth(s.handleGetIPv6PD))
+	s.mux.HandleFunc("POST /api/v1/ipv6/pd", s.auth(s.auditWrap("ipv6.pd.set", s.handleSetIPv6PD)))
+	s.mux.HandleFunc("GET /api/v1/mirror", s.auth(s.handleGetMirror))
+	s.mux.HandleFunc("POST /api/v1/mirror", s.auth(s.auditWrap("mirror.set", s.handleSetMirror)))
+	// 注意：/api/v1/pppoe/sessions 已经是「服务端」（别人拨进来）的会话列表，
+	// 这里是「客户端多拨」（本机拨出去），语义不同必须用不同路径。
+	s.mux.HandleFunc("GET /api/v1/pppoe/multidial", s.auth(s.handleGetMultiDial))
+	s.mux.HandleFunc("POST /api/v1/pppoe/multidial", s.auth(s.auditWrap("pppoe.multidial.set", s.handleSetMultiDial)))
+	s.mux.HandleFunc("GET /api/v1/accounting/status", s.auth(s.handleAccountingStatus))
+	s.mux.HandleFunc("GET /api/v1/accounting/report", s.auth(s.handleAccountingReport))
+
 	s.mux.HandleFunc("GET /api/v1/htb/config", s.auth(s.handleGetHTBConfig))
 	s.mux.HandleFunc("POST /api/v1/htb/config", s.auth(s.auditWrap("htb.config.set", s.handleSetHTBConfig)))
 	s.mux.HandleFunc("POST /api/v1/htb/apply", s.auth(s.auditWrap("htb.apply", s.handleHTBApply)))
