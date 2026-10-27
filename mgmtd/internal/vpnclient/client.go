@@ -21,7 +21,7 @@ type Peer struct {
 
 // Config 是 WireGuard 客户端配置。
 type Config struct {
-	Interface  string `json:"interface"`   // wg0..wg99
+	Interface  string `json:"interface"` // wg0..wg99
 	PrivateKey string `json:"private_key"`
 	ListenPort int    `json:"listen_port"`
 	Peers      []Peer `json:"peers"`
@@ -168,12 +168,12 @@ func RenderCommands(c Config) [][]string {
 
 // PeerStatus 是 wg show 解析出的对端状态。
 type PeerStatus struct {
-	PublicKey      string   `json:"public_key"`
-	Endpoint       string   `json:"endpoint"`
-	AllowedIPs     []string `json:"allowed_ips"`
-	LatestHandshake int64   `json:"latest_handshake"` // unix 秒，0=从未
-	RxBytes        int64    `json:"rx_bytes"`
-	TxBytes        int64    `json:"tx_bytes"`
+	PublicKey       string   `json:"public_key"`
+	Endpoint        string   `json:"endpoint"`
+	AllowedIPs      []string `json:"allowed_ips"`
+	LatestHandshake int64    `json:"latest_handshake"` // unix 秒，0=从未
+	RxBytes         int64    `json:"rx_bytes"`
+	TxBytes         int64    `json:"tx_bytes"`
 }
 
 // ParseWGShow 解析 `wg show <iface>` 输出。

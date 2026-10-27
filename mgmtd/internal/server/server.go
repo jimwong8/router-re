@@ -321,6 +321,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/diagnostics/ping", s.auth(s.handlePing))
 	s.mux.HandleFunc("POST /api/v1/diagnostics/traceroute", s.auth(s.handleTraceroute))
 	s.mux.HandleFunc("POST /api/v1/diagnostics/portprobe", s.auth(s.handlePortProbe))
+	// ---- P16: WireGuard 客户端 / DDNS ----
+	s.mux.HandleFunc("GET /api/v1/vpn/client", s.auth(s.handleGetVPNClient))
+	s.mux.HandleFunc("POST /api/v1/vpn/client", s.auth(s.handleSetVPNClient))
+	s.mux.HandleFunc("GET /api/v1/ddns/records", s.auth(s.handleListDDNS))
+	s.mux.HandleFunc("POST /api/v1/ddns/records", s.auth(s.handleSetDDNS))
+	s.mux.HandleFunc("GET /api/v1/ddns/check", s.auth(s.handleDDNSCheck))
 	s.mux.HandleFunc("POST /api/v1/webadmin", s.auth(s.auditWrap("webadmin.set", s.handleSetWebAdmin)))
 	s.mux.HandleFunc("GET /api/v1/identity", s.auth(s.handleGetIdentity))
 	s.mux.HandleFunc("POST /api/v1/identity", s.auth(s.auditWrap("identity.set", s.handleSetIdentity)))
