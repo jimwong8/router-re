@@ -52,7 +52,7 @@
               <el-pagination
                 v-model:current-page="svcPage"
                 :page-size="svcLimit"
-                :total="svcHasMore ? svcPage * svcLimit + 1 : svcPage * svcLimit"
+                :total="svcTotal"
                 :disabled="svcLoading"
                 layout="prev, pager, next, total"
                 @current-change="onSvcPageChange"

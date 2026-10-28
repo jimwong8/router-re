@@ -11,6 +11,11 @@ import subprocess
 import sys
 import time
 import urllib.request
+from pathlib import Path
+
+# 行数判据三份验收脚本共用（见 ui_judge.py）
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import ui_judge  # noqa: E402
 
 API = "http://127.0.0.1:9090"
 WEB = "http://127.0.0.1:4173"
@@ -105,21 +110,15 @@ def main():
         expect, err = api_count(token, api)
         page.goto(WEB + path, wait_until="load")
         page.wait_for_timeout(3500)
-        rows = page.evaluate("""() => {
-          const panes = Array.from(document.querySelectorAll('.el-tab-pane'));
-          let scope = document;
-          if (panes.length) {
-            const vis = panes.find(p => getComputedStyle(p).display !== 'none');
-            if (vis) scope = vis;
-          }
-          return scope.querySelectorAll('table tbody tr').length;
-        }""")
+        probe = page.evaluate(ui_judge.PROBE_JS)
+        rows = probe["rows"]
+        has_pager = probe["has_pager"]
         checked += 1
         if expect is None:
             mark = "SKIP"
             skips_note = f"接口取数失败: {err}"
         else:
-            ok = (rows > 0 and rows >= expect * 0.8) or (expect == 0 and rows >= min_rows)
+            ok, _tag = ui_judge.judge(rows, expect, has_pager, min_rows)
             mark = "OK" if ok else "FAIL"
             if ok:
                 oks += 1
@@ -134,15 +133,9 @@ def main():
         expect2, err2 = api_count(token, api2)
         page.goto(WEB + path2, wait_until="load")
         page.wait_for_timeout(3500)
-        rows2 = page.evaluate("""() => {
-          const panes = Array.from(document.querySelectorAll('.el-tab-pane'));
-          let scope = document;
-          if (panes.length) {
-            const vis = panes.find(p => getComputedStyle(p).display !== 'none');
-            if (vis) scope = vis;
-          }
-          return scope.querySelectorAll('table tbody tr').length;
-        }""")
+        probe2 = page.evaluate(ui_judge.PROBE_JS)
+        rows2 = probe2["rows"]
+        has_pager2 = probe2["has_pager"]
         body_text = page.inner_text("body") or ""
         has_byte_stat = ("字节统计" in body_text) or ("acct" in body_text.lower())
         checked += 1
@@ -150,7 +143,7 @@ def main():
             mark2 = "SKIP"
             note2 = f"接口取数失败: {err2}"
         else:
-            ok2 = (rows2 > 0 and rows2 >= expect2 * 0.8) or (expect2 == 0 and rows2 >= 0)
+            ok2, _tag2 = ui_judge.judge(rows2, expect2, has_pager2, 0)
             if not has_byte_stat:
                 ok2 = False
             mark2 = "OK" if ok2 else "FAIL"

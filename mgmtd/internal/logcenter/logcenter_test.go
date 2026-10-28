@@ -1,6 +1,8 @@
 package logcenter
 
 import (
+	"os/exec"
+	"strings"
 	"testing"
 )
 
@@ -64,6 +66,54 @@ func TestQueryNoPanic(t *testing.T) {
 		entries = []LogEntry{}
 	}
 	// 不应 panic；entries 可能为空
+}
+
+// TestQueryGrepFindsBeyondWindow 断言 grep 能搜到 -n 窗口之外的老日志。
+// 构造：取最近 5 条（无 grep），挑一条较老条目中最新条目不含的词 term；
+// 再用 limit=1 + term 去 grep。若 grep 走 journalctl 自己的 --grep 过滤，
+// 返回含 term 的条目且不是最新条目（证明搜到窗口外老日志）。
+func TestQueryGrepFindsBeyondWindow(t *testing.T) {
+	if _, err := exec.LookPath("journalctl"); err != nil {
+		t.Skip("journalctl not available")
+	}
+	base, err := Query(QueryOpts{Limit: 5})
+	if err != nil {
+		t.Fatalf("Query base: %v", err)
+	}
+	if len(base) < 2 {
+		t.Skip("need at least 2 journal entries")
+	}
+	newest := base[0]
+	older := base[len(base)-1]
+
+	var term string
+	for _, w := range strings.Fields(older.Message) {
+		w = strings.Trim(w, ".,;:!?()[]{}\"'")
+		if len(w) < 4 {
+			continue
+		}
+		if !strings.Contains(newest.Message, w) {
+			term = w
+			break
+		}
+	}
+	if term == "" {
+		t.Skip("no distinguishing term between newest and older entry")
+	}
+
+	got, err := Query(QueryOpts{Limit: 1, Grep: term})
+	if err != nil {
+		t.Fatalf("Query grep: %v", err)
+	}
+	if len(got) == 0 {
+		t.Fatalf("grep for %q returned 0 entries (beyond-window search failed)", term)
+	}
+	if !strings.Contains(got[0].Message, term) {
+		t.Errorf("returned entry does not contain grep term %q", term)
+	}
+	if got[0].Message == newest.Message && got[0].TS == newest.TS {
+		t.Errorf("grep returned newest entry only; did not search beyond 1-entry window")
+	}
 }
 
 func TestSourcesNoPanic(t *testing.T) {

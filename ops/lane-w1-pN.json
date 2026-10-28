@@ -1,8 +1,8 @@
 {
   "pane": "w1:pN",
-  "updated": 1793195841.2251694,
+  "updated": 1793197273.1524193,
   "pid": 3061120,
-  "state": "idle",
-  "task": null,
-  "elapsed_min": 1.1
+  "state": "busy",
+  "task": "p74-go-staticcheck-vet",
+  "elapsed_min": 0.4
 }

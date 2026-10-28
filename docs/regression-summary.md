@@ -1,23 +1,23 @@
 # Regression Summary
 
-- Generated: 2026-10-28 21:50:20
+- Generated: 2026-10-28 22:01:50
 - Base: http://127.0.0.1:9090
 - Total modules: 9
-- PASS: 6 / FAIL: 3 / SKIP: 0
+- PASS: 7 / FAIL: 2 / SKIP: 0
 
 ## Module Results
 
 | # | Module | Status | Duration |
 |---|--------|--------|----------|
 | 1 | e2e_test | PASS | — |
-| 2 | smoke_new_routes | PASS | 1732ms |
-| 3 | roundtrip_test | PASS | 569ms |
-| 4 | portal_flow_test | PASS | 574ms |
-| 5 | linkcheck_ddns_test | PASS | 3316ms |
-| 6 | go_test | PASS | 20334ms |
-| 7 | ui_acceptance | FAIL(rc=1) | 6900ms |
-| 8 | ui_acceptance_ext | FAIL(rc=1) | 365ms |
-| 9 | ui_acceptance_terminals | FAIL(rc=1) | 292ms |
+| 2 | smoke_new_routes | PASS | 1615ms |
+| 3 | roundtrip_test | PASS | 588ms |
+| 4 | portal_flow_test | PASS | 509ms |
+| 5 | linkcheck_ddns_test | PASS | 3148ms |
+| 6 | go_test | FAIL(rc=1) | 715ms |
+| 7 | ui_acceptance | PASS | 33076ms |
+| 8 | ui_acceptance_ext | FAIL(rc=1) | 92945ms |
+| 9 | ui_acceptance_terminals | PASS | 13042ms |
 
 ## Details (tail of each log)
 
@@ -26,7 +26,7 @@
 ```
 OK     200      0.01s /api/v1/diag/interfaces 
 OK     200      0.00s /api/v1/nac/config 
-OK     200      0.00s /api/v1/nac/neighbors 
+OK     200      0.01s /api/v1/nac/neighbors 
 OK     200      0.00s /api/v1/nac/connlimits (空: limits)
 OK     200      0.03s /api/v1/nac/top-connections 
 OK     200      0.00s /api/v1/lb/config 
@@ -41,7 +41,7 @@ OK     200      0.00s /api/v1/ips/rules
 OK     200      0.00s /api/v1/ips/stats 
 OK     200      0.00s /api/v1/ips/blocklist 
 ------------------------------------------------------------------------------
-通过 138 / 空数据 19 / 失败 0
+通过 139 / 空数据 19 / 失败 0
 
 E2E: PASS
 ```
@@ -93,10 +93,10 @@ PASS policy/timeschedule→timeschedule: write=200 read=200 verified=True
 
 ```
 PASS 1. 选/保存 portal 模板 — GET templates 200 (count=4); POST template 200 saved=true id=roundtrip
-PASS 2. voucher/generate 测试卡 — HTTP 200 generated=1 code=KVHC2JXZ8F
+PASS 2. voucher/generate 测试卡 — HTTP 200 generated=1 code=GNFSG7JMZ9
 SKIP 3. portal/login 用卡登录 — 路由未注册 (mgmtd 无 /api/v1/portal/login；门户认证走 /portal/auth 表单，非 mgmtd REST API) probe=GET=404 POST=404 HTTP 404
 SKIP 4. portal/status 查会话 — 路由未注册 (mgmtd 无 /api/v1/portal/status) probe=GET=404 POST=404 HTTP 404
-PASS 5. voucher list/verify 确认已用 — redeem HTTP 200 ok; list HTTP 200; card KVHC2JXZ8F used=True
+PASS 5. voucher list/verify 确认已用 — redeem HTTP 200 ok; list HTTP 200; card GNFSG7JMZ9 used=True
 SKIP 6. portal/logout 登出+status消失 — 路由未注册 (mgmtd 无 /api/v1/portal/logout) probe=GET=404 POST=404 HTTP 404
 
 汇总: 6 步 / PASS 3 / FAIL 0 / SKIP 3
@@ -115,14 +115,13 @@ PASS 5. 清理 (DELETE 端点): target 已删=是 / record 已删=是
 SUMMARY: PASS=5 FAIL=0 SKIP=0
 ```
 
-### go_test — PASS
+### go_test — FAIL(rc=1)
 
 ```
-ok  	github.com/jimwong/router-re/mgmtd/internal/radius	(cached)
 ok  	github.com/jimwong/router-re/mgmtd/internal/rbac	(cached)
 ok  	github.com/jimwong/router-re/mgmtd/internal/remote	(cached)
 ok  	github.com/jimwong/router-re/mgmtd/internal/route	(cached)
-ok  	github.com/jimwong/router-re/mgmtd/internal/server	14.172s
+ok  	github.com/jimwong/router-re/mgmtd/internal/server	(cached)
 ok  	github.com/jimwong/router-re/mgmtd/internal/snmp	(cached)
 ok  	github.com/jimwong/router-re/mgmtd/internal/stats	(cached)
 ok  	github.com/jimwong/router-re/mgmtd/internal/sysctl	(cached)
@@ -138,77 +137,59 @@ ok  	github.com/jimwong/router-re/mgmtd/internal/wan	(cached)
 ok  	github.com/jimwong/router-re/mgmtd/internal/webadmin	(cached)
 ok  	github.com/jimwong/router-re/mgmtd/internal/webfilter	(cached)
 ok  	github.com/jimwong/router-re/mgmtd/internal/wireless	(cached)
+FAIL
 ```
 
-### ui_acceptance — FAIL(rc=1)
+### ui_acceptance — PASS
 
 ```
-  FAIL /services          接口  525 条 -> 页面    0 行   systemd 单元列表
-  SKIP /online-users      接口取数失败: <urlopen error [Errno 111] Connection refused>
-  SKIP /routing-policy    接口取数失败: <urlopen error [Errno 111] Connection refused>
-  SKIP /cert              接口取数失败: <urlopen error [Errno 111] Connection refused>
-  SKIP /alerts            接口取数失败: <urlopen error [Errno 111] Connection refused>
-  SKIP /voucher           接口取数失败: <urlopen error [Errno 111] Connection refused>
-  SKIP /ddns              接口取数失败: <urlopen error [Errno 111] Connection refused>
-  SKIP /vpn-client        接口取数失败: <urlopen error [Errno 111] Connection refused>
-  SKIP /security-plus     接口取数失败: <urlopen error [Errno 111] Connection refused>
+  OK   /services          接口  525 条 -> 页面   50 行   systemd 单元列表 [分页]
+  OK   /online-users      接口   19 条 -> 页面   21 行   在线会话
+  OK   /routing-policy    接口    1 条 -> 页面    2 行   策略路由规则(可为空)
+  SKIP /cert              接口取数失败: 没有可识别的列表字段: detail,exists,path
+  OK   /alerts            接口    1 条 -> 页面    1 行   告警规则(可为空)
+  OK   /voucher           接口   30 条 -> 页面   30 行   卡密列表(可能为空)
+  OK   /ddns              接口    0 条 -> 页面    0 行   DDNS 记录(可为空)
+  OK   /vpn-client        接口    0 条 -> 页面    0 行   VPN 客户端 peers(可为空)
+  OK   /security-plus     接口    1 条 -> 页面    2 行   时间段策略 rules(可为空)
   SKIP /network-tools     接口取数失败: 无取数接口
   SKIP /network-advanced  接口取数失败: 无取数接口
 
-❌ 1/1 个页面渲染与接口不一致
-   /services: 接口 525 条，页面只有 0 行
-
-常见原因: 前端读了后端没返回的字段名（表格空）、字段名拼错（显示 NaN）、
-          el-tabs 之外的选择器作用域不对。
+✅ UI 验收通过（8 个页面，渲染行数与接口一致）
 ```
 
 ### ui_acceptance_ext — FAIL(rc=1)
 
 ```
-    token = login()
-  File "/home/jimwong/projects/router-re/scripts/ui_acceptance_ext.py", line 78, in login
-    with urllib.request.urlopen(req, timeout=20) as r:
-         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
-  File "/usr/lib/python3.13/urllib/request.py", line 189, in urlopen
-    return opener.open(url, data, timeout)
-           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
-  File "/usr/lib/python3.13/urllib/request.py", line 489, in open
-    response = self._open(req, data)
-  File "/usr/lib/python3.13/urllib/request.py", line 506, in _open
-    result = self._call_chain(self.handle_open, protocol, protocol +
-                              '_open', req)
-  File "/usr/lib/python3.13/urllib/request.py", line 466, in _call_chain
-    result = func(*args)
-  File "/usr/lib/python3.13/urllib/request.py", line 1348, in http_open
-    return self.do_open(http.client.HTTPConnection, req)
-           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/lib/python3.13/urllib/request.py", line 1322, in do_open
-    raise URLError(err)
-urllib.error.URLError: <urlopen error [Errno 111] Connection refused>
+  OK   /ipv6              接口    4 条 -> 页面    8 行   IPv6 地址(可为空)
+  OK   /l7                接口    0 条 -> 页面    0 行   L7 规则(可为空)
+  OK   /logs              接口  100 条 -> 页面  100 行   日志条目(可为空)
+  OK   /voucher           接口   30 条 -> 页面   30 行   卡密列表(可为空)
+  SKIP /nac               SKIP: NAC 多表格分页 (devices/limits/top/neighbors)，接口 neighbors=45 非可见表，无法准确比对
+  SKIP /network           SKIP: portmap/rules.rules=None(主机无 NAT 规则)
+  OK   /pppoe             接口    0 条 -> 页面    0 行   PPPoE 会话(可为空)
+  OK   /qos               接口    0 条 -> 页面    0 行   QoS 限速(可为空)
+  SKIP /remote            接口取数失败: 没有可识别的列表字段: access,warnings
+  OK   /security          接口   10 条 -> 页面   34 行   接口流量(ACL 表格取 acl/rules、主体表格取 stats/interfaces)
+  OK   /threat            接口    0 条 -> 页面    0 行   威胁列表(可为空)
+  OK   /upnp              接口    0 条 -> 页面    1 行   UPnP 映射(可为空)
+  OK   /users             接口    1 条 -> 页面    1 行   用户列表
+  OK   /wireless          接口    0 条 -> 页面    0 行   Wi-Fi SSID(可为空)
+  SKIP /static-route      接口取数失败: 没有可识别的列表字段: commands,routes
+  OK   /wan               接口    2 条 -> 页面   10 行   SKIP: wan/links links=None(主机无多WAN)
+  SKIP /dhcp-server       接口取数失败: 没有可识别的列表字段: applied,config
+
+❌ 1/24 个页面渲染与接口不一致
+报告已写 docs/ui-coverage-extended.md
 ```
 
-### ui_acceptance_terminals — FAIL(rc=1)
+### ui_acceptance_terminals — PASS
 
 ```
-    token = login()
-  File "/home/jimwong/projects/router-re/scripts/ui_acceptance_terminals.py", line 62, in login
-    with urllib.request.urlopen(req, timeout=20) as r:
-         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
-  File "/usr/lib/python3.13/urllib/request.py", line 189, in urlopen
-    return opener.open(url, data, timeout)
-           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
-  File "/usr/lib/python3.13/urllib/request.py", line 489, in open
-    response = self._open(req, data)
-  File "/usr/lib/python3.13/urllib/request.py", line 506, in _open
-    result = self._call_chain(self.handle_open, protocol, protocol +
-                              '_open', req)
-  File "/usr/lib/python3.13/urllib/request.py", line 466, in _call_chain
-    result = func(*args)
-  File "/usr/lib/python3.13/urllib/request.py", line 1348, in http_open
-    return self.do_open(http.client.HTTPConnection, req)
-           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/lib/python3.13/urllib/request.py", line 1322, in do_open
-    raise URLError(err)
-urllib.error.URLError: <urlopen error [Errno 111] Connection refused>
+  OK   /terminals       接口   20 条 -> 页面   20 行   终端列表
+  OK   /online-users    接口   19 条 -> 页面   20 行   字节统计块=存在
+
+✅ terminals 验收通过（2 个页面 OK，0 个 FAIL）
+报告已写 docs/ui-terminals-acceptance.md
 ```
 

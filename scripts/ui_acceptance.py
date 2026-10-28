@@ -14,6 +14,11 @@
 import json
 import sys
 import urllib.request
+from pathlib import Path
+
+# 行数判据三份验收脚本共用（见 ui_judge.py 顶部注释：各抄一份必然会走散）
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import ui_judge  # noqa: E402
 
 API = "http://127.0.0.1:9090"
 WEB = "http://127.0.0.1:4173"
@@ -93,42 +98,17 @@ def main():
                 continue
             page.goto(WEB + path, wait_until="load")
             page.wait_for_timeout(3500)
-            # el-tabs 会把所有 pane 都放在 DOM 里，只数可见的那个
-            rows = page.evaluate("""() => {
-              const panes = Array.from(document.querySelectorAll('.el-tab-pane'));
-              let scope = document;
-              if (panes.length) {
-                const vis = panes.find(p => getComputedStyle(p).display !== 'none');
-                if (vis) scope = vis;
-              }
-              return scope.querySelectorAll('table tbody tr').length;
-            }""")
+            # el-tabs 会把所有 pane 都放在 DOM 里，只数可见的那个；
+            # 顺手探一下有没有分页控件（判据在 ui_judge 里用）。
+            probe = page.evaluate(ui_judge.PROBE_JS)
+            rows = probe["rows"]
+            has_pager = probe["has_pager"]
             checked += 1
-            # 判据要抓的是"接口有数据、页面却空着"这个真症状。
-            # el-table 的合计行/展开行会让行数与接口条数有 ±1 的出入，
-            # 那不算 bug；但接口 500 条而页面 0 行一定是 bug。
-            #
-            # 分页例外：前端按页取数（limit=50）时，页面只该渲染当页的几十行，
-            # 拿"渲染行数 >= 接口总数 * 0.8"去卡会得出假 FAIL（实测 /services
-            # 接口 525 条、当页 50 行，被判不一致——其实分页是对的）。
-            # 页面里有 el-pagination 就说明它自己管分页，此时只要求当页非空。
-            has_pager = page.evaluate("""() => {
-              const panes = Array.from(document.querySelectorAll('.el-tab-pane'));
-              let scope = document;
-              if (panes.length) {
-                const vis = panes.find(p => getComputedStyle(p).display !== 'none');
-                if (vis) scope = vis;
-              }
-              return !!scope.querySelector('.el-pagination, .el-pager, button.el-pagination');
-            }""")
-            if expect and expect > 0:
-                if has_pager and rows > 0:
-                    ok = True
-                    desc = (desc + " [分页]").strip()
-                else:
-                    ok = rows > 0 and rows >= expect * 0.8
-            else:
-                ok = rows >= min_rows
+            # 判据统一在 scripts/ui_judge.py：三份验收脚本共用一份，避免分页这类
+            # 规则改了其中一份、另外两份还在用旧判据（实测就是这么对不上的）。
+            ok, tag = ui_judge.judge(rows, expect, has_pager, min_rows)
+            if tag:
+                desc = (desc + tag).strip()
             mark = "OK  " if ok else "FAIL"
             print(f"  {mark} {path:<18} 接口 {expect:>4} 条 -> 页面 {rows:>4} 行   {desc}")
             if not ok:

@@ -1,8 +1,8 @@
 {
   "pane": "w1:pQ",
-  "updated": 1793195843.2898417,
+  "updated": 1793197273.3166842,
   "pid": 3061175,
-  "state": "idle",
-  "task": null,
-  "elapsed_min": 2.2
+  "state": "busy",
+  "task": "p75-backup-restore-test",
+  "elapsed_min": 0.4
 }

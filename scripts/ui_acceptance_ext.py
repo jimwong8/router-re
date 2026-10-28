@@ -14,6 +14,10 @@ import json
 import os
 import sys
 import urllib.request
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import ui_judge  # noqa: E402
 
 API = "http://127.0.0.1:9090"
 WEB = "http://127.0.0.1:4173"
@@ -151,20 +155,13 @@ def main():
                 continue
             page.goto(WEB + path, wait_until="load")
             page.wait_for_timeout(3500)
-            rows = page.evaluate("""() => {
-              const panes = Array.from(document.querySelectorAll('.el-tab-pane'));
-              let scope = document;
-              if (panes.length) {
-                const vis = panes.find(p => getComputedStyle(p).display !== 'none');
-                if (vis) scope = vis;
-              }
-              return scope.querySelectorAll('table tbody tr').length;
-            }""")
+            probe = page.evaluate(ui_judge.PROBE_JS)
+            rows = probe["rows"]
+            has_pager = probe["has_pager"]
             checked += 1
-            if expect and expect > 0:
-                ok = rows > 0 and rows >= expect * 0.8
-            else:
-                ok = rows >= min_rows
+            ok, tag = ui_judge.judge(rows, expect, has_pager, min_rows)
+            if tag:
+                desc = (desc + tag).strip()
             mark = "OK  " if ok else "FAIL"
             if ok: oks += 1
             else: failures.append((path, expect, rows))
