@@ -1,6 +1,6 @@
 # 用户旅程端到端测试报告
 
-> 生成: 2026-10-28 22:31:38
+> 生成: 2026-10-28 23:14:40
 
 - J1-portmap: 5 PASS / 0 FAIL / 0 SKIP  (全通)
 - J2-timesched: 6 PASS / 0 FAIL / 0 SKIP  (全通)
@@ -21,7 +21,7 @@
 | 9 | J2-timesched | 4 GET 确认存在 | PASS | HTTP 200 present=True |
 | 10 | J2-timesched | 5 DELETE 规则 | PASS | HTTP 200 deleted=True |
 | 11 | J2-timesched | 6 GET 确认消失 | PASS | HTTP 200 gone=True |
-| 12 | J3-voucher | 1 生成 60min voucher | PASS | HTTP 200 code=BE42ZAHK |
+| 12 | J3-voucher | 1 生成 60min voucher | PASS | HTTP 200 code=KEKKBGYN |
 | 13 | J3-voucher | 2 portal/authorize MAC | PASS | HTTP 200 |
 | 14 | J3-voucher | 3 GET portal/clients 确认在线 | PASS | HTTP 200 online=True count=1 |
 | 15 | J3-voucher | 4 revoke MAC | PASS | HTTP 200 revoked=True |
@@ -109,7 +109,7 @@ table inet timesched {
 - 结果: **PASS** — HTTP 200 present=True
 
 ```
-{"count": 1, "now": "2026-10-28 22:31:38 Wed", "rules": [{"id": "journey2", "name": "child-bedtime", "days": [0, 1, 2, 3, 4, 5, 6], "start_min": 1260, "end_min": 1439, "targets"...
+{"count": 1, "now": "2026-10-28 23:14:40 Wed", "rules": [{"id": "journey2", "name": "child-bedtime", "days": [0, 1, 2, 3, 4, 5, 6], "start_min": 1260, "end_min": 1439, "targets"...
 ```
 
 ## 10. [J2-timesched] 5 DELETE 规则
@@ -125,15 +125,15 @@ table inet timesched {
 - 结果: **PASS** — HTTP 200 gone=True
 
 ```
-{"count": 0, "now": "2026-10-28 22:31:38 Wed", "rules": [], "timezone": "Asia/Shanghai"}
+{"count": 0, "now": "2026-10-28 23:14:40 Wed", "rules": [], "timezone": "Asia/Shanghai"}
 ```
 
 ## 12. [J3-voucher] 1 生成 60min voucher
 
-- 结果: **PASS** — HTTP 200 code=BE42ZAHK
+- 结果: **PASS** — HTTP 200 code=KEKKBGYN
 
 ```
-{"generated": 1, "note": "卡密明文只返回这一次，请立即保存；之后查询只能看到打码版本", "vouchers": [{"code": "BE42ZAHK", "password": "Q89PGGDK", "minutes": 60, "traffic_mb": 0, "device_limit": 1, "created_a...
+{"generated": 1, "note": "卡密明文只返回这一次，请立即保存；之后查询只能看到打码版本", "vouchers": [{"code": "KEKKBGYN", "password": "MB2YL6GP", "minutes": 60, "traffic_mb": 0, "device_limit": 1, "created_a...
 ```
 
 ## 13. [J3-voucher] 2 portal/authorize MAC
@@ -141,7 +141,7 @@ table inet timesched {
 - 结果: **PASS** — HTTP 200
 
 ```
-{"applied": true, "client": {"mac": "aa:bb:cc:dd:ee:ff", "ip": "192.168.1.200", "authorized": true, "authorized_at": 1793197898, "expires_at": 1793201498}, "nft": "table inet po...
+{"applied": true, "client": {"mac": "aa:bb:cc:dd:ee:ff", "ip": "192.168.1.200", "authorized": true, "authorized_at": 1793200480, "expires_at": 1793204080}, "nft": "table inet po...
 ```
 
 ## 14. [J3-voucher] 3 GET portal/clients 确认在线
@@ -149,7 +149,7 @@ table inet timesched {
 - 结果: **PASS** — HTTP 200 online=True count=1
 
 ```
-{"clients": [{"mac": "aa:bb:cc:dd:ee:ff", "ip": "192.168.1.200", "authorized": true, "authorized_at": 1793197898, "expires_at": 1793201498}]}
+{"clients": [{"mac": "aa:bb:cc:dd:ee:ff", "ip": "192.168.1.200", "authorized": true, "authorized_at": 1793200480, "expires_at": 1793204080}]}
 ```
 
 ## 15. [J3-voucher] 4 revoke MAC

@@ -13,6 +13,12 @@ package config
 type Store interface {
 	Get(section, option string) (string, error)
 	Set(section, option, value string) error
+	// Unset 删除单个 (section, option)。
+	//
+	// 为什么需要它：Set 只能写值，写空串和"键不存在"在下层实现里无法区分
+	// （FileStore 的 Get 对缺失键返回 ""），于是"按索引持久化的列表"没法
+	// 截断——见 server.handleSetFirewallRules 的幽灵规则 bug。
+	Unset(section, option string) error
 	Snapshot() (string, error)
 	Rollback(snap string) error
 	Commit() error

@@ -85,6 +85,14 @@ func (f *FileStore) writeLocked() error {
 }
 
 // Snapshot records the current state and returns an identifier for it.
+// Unset 删除单个 (section, option)。键不存在时是 no-op。
+func (f *FileStore) Unset(section, option string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.data, key(section, option))
+	return f.writeLocked()
+}
+
 func (f *FileStore) Snapshot() (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

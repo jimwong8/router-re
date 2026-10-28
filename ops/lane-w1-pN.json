@@ -1,8 +1,8 @@
 {
   "pane": "w1:pN",
-  "updated": 1793200012.9107885,
+  "updated": 1793200663.3455296,
   "pid": 3061120,
   "state": "idle",
-  "task": "p78-concurrent-write-race",
-  "elapsed_min": 11.9
+  "task": "p80-web-ui-browser-smoke",
+  "elapsed_min": 6.6
 }

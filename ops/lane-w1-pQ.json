@@ -1,8 +1,8 @@
 {
   "pane": "w1:pQ",
-  "updated": 1793200013.259973,
+  "updated": 1793200661.9398298,
   "pid": 3061175,
-  "state": "idle",
-  "task": "p79-error-code-audit",
-  "elapsed_min": 11.4
+  "state": "busy",
+  "task": "p81-log-flood-recovery",
+  "elapsed_min": 1.7
 }

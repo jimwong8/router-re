@@ -623,6 +623,33 @@ func (s *Server) handleSetDHCPConfig(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// maxIndexedIndex 返回 section 中以 firstField 为标志、编号 0..n 里最后一个存在的索引。
+//
+// 索引式持久化（firewall/nat/wan 都是 0.chain、1.chain…）有个共同的坑：
+// 写入时只覆盖 0..len-1，旧的高位索引不清除，于是 GET 端的
+// `for i:=0;;i++ { if 空 {break} }` 会把已经删掉的条目继续报出来。
+// 实测：提交 3 条防火墙规则后再提交 1 条，GET 仍返回 3 条——删掉的 80/443
+// 成了幽灵规则，重启后若按 store 重放还会真的复活。
+func (s *Server) maxIndexedIndex(section, firstField string, limit int) int {
+	last := -1
+	for i := 0; i < limit; i++ {
+		if v, err := s.store.Get(section, itoa(i)+"."+firstField); err == nil && v != "" {
+			last = i
+		}
+	}
+	return last
+}
+
+// unsetIndexedFrom 删除 section 中 [from, to] 区间内每条记录的所有字段。
+// to 取写入前的最大索引，传 -1 表示无需清理。
+func (s *Server) unsetIndexedFrom(section string, from, to int, fields ...string) {
+	for i := from; i <= to; i++ {
+		for _, f := range fields {
+			_ = s.store.Unset(section, itoa(i)+"."+f)
+		}
+	}
+}
+
 // handleGetFirewallRules returns the current firewall rules as rendered nftables.
 func (s *Server) handleGetFirewallRules(w http.ResponseWriter, r *http.Request) {
 	var rules []firewall.Rule
@@ -669,7 +696,9 @@ func (s *Server) handleSetFirewallRules(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, 500, errBody(10011, "firewall apply failed", err.Error()))
 		return
 	}
-	// Persist to store
+	// Persist to store。先记下旧的最大索引：覆盖写 0..len-1 之后要把更高的
+	// 清掉，否则被删掉的规则会留在 store 里，GET 照旧报出来（幽灵规则）。
+	oldMax := s.maxIndexedIndex("firewall", "chain", 2048)
 	for i, rule := range req.Rules {
 		key := itoa(i)
 		s.store.Set("firewall", key+".chain", rule.Chain)
@@ -679,6 +708,8 @@ func (s *Server) handleSetFirewallRules(w http.ResponseWriter, r *http.Request) 
 		s.store.Set("firewall", key+".dport", rule.DPort)
 		s.store.Set("firewall", key+".action", rule.Action)
 	}
+	s.unsetIndexedFrom("firewall", len(req.Rules), oldMax,
+		"chain", "src", "dst", "proto", "dport", "action")
 	s.logAudit(r, "firewall.rules.set", fmt.Sprintf("%d rules", len(req.Rules)), "ok", "")
 	writeJSON(w, 200, map[string]interface{}{
 		"rules": req.Rules,
@@ -721,6 +752,7 @@ func (s *Server) handleSetNATRules(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
 		return
 	}
+	oldMax := s.maxIndexedIndex("nat", "type", 2048)
 	for i, rule := range req.Rules {
 		key := itoa(i)
 		s.store.Set("nat", key+".type", rule.Type)
@@ -731,6 +763,8 @@ func (s *Server) handleSetNATRules(w http.ResponseWriter, r *http.Request) {
 		s.store.Set("nat", key+".dstport", rule.DstPort)
 		s.store.Set("nat", key+".toport", rule.ToPort)
 	}
+	s.unsetIndexedFrom("nat", len(req.Rules), oldMax,
+		"type", "interface", "proto", "srcport", "dstaddr", "dstport", "toport")
 	writeJSON(w, 200, map[string]interface{}{
 		"rules": req.Rules,
 		"nft":   nat.RenderNftables(req.Rules),
@@ -797,6 +831,7 @@ func (s *Server) handleSetWANLinks(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	oldMax := s.maxIndexedIndex("wan", "name", 2048)
 	for i, l := range req.Links {
 		key := itoa(i)
 		s.store.Set("wan", key+".name", l.Name)
@@ -806,6 +841,8 @@ func (s *Server) handleSetWANLinks(w http.ResponseWriter, r *http.Request) {
 		s.store.Set("wan", key+".table", itoa(l.Table))
 		s.store.Set("wan", key+".health_target", l.HealthTarget)
 	}
+	s.unsetIndexedFrom("wan", len(req.Links), oldMax,
+		"name", "interface", "gateway", "weight", "table", "health_target")
 	// 真实执行：用 Applier 通过 execx 实际下发策略路由规则。
 	applier := &wan.Applier{R: execx.DefaultRunner{}}
 	if err := applier.Apply(req.Links); err != nil {

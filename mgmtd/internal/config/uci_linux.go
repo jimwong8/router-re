@@ -74,6 +74,20 @@ func (u *UCIStore) Set(section, option, value string) error {
 	return err
 }
 
+// Unset 用 `uci delete` 删除单个 option。键不存在时 uci 返回非零，视为已删除。
+func (u *UCIStore) Unset(section, option string) error {
+	if section == "" || option == "" {
+		return errors.New("uci: section and option must not be empty")
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if _, err := u.run("delete", section+"."+option); err != nil {
+		// 目标本来就不存在时 uci 报 Entry not found，等价于已达目的。
+		return nil
+	}
+	return nil
+}
+
 // Snapshot 通过 `uci export` 导出全部配置到临时文件，返回该文件路径作为快照标识符。
 func (u *UCIStore) Snapshot() (string, error) {
 	u.mu.Lock()

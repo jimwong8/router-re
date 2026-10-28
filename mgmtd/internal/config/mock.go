@@ -56,6 +56,14 @@ func (m *MockStore) Set(section, option, value string) error {
 	return nil
 }
 
+// Unset 删除单个 (section, option)。
+func (m *MockStore) Unset(section, option string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.data, key(section, option))
+	return nil
+}
+
 // Snapshot 保存当前配置的副本，返回快照标识符。
 func (m *MockStore) Snapshot() (string, error) {
 	m.mu.Lock()

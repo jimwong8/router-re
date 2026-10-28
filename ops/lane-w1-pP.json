@@ -1,8 +1,8 @@
 {
   "pane": "w1:pP",
-  "updated": 1793200015.044576,
+  "updated": 1793200662.4059098,
   "pid": 3061209,
-  "state": "idle",
-  "task": null,
-  "elapsed_min": 1.1
+  "state": "busy",
+  "task": "p82-nft-diff-golden",
+  "elapsed_min": 1.7
 }
