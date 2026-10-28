@@ -81,7 +81,7 @@ add("2. GET /api/v1/logs/rotate policy",
     short(body))
 
 # 3. POST /api/v1/logs/rotate confirm=true
-log_path = "/tmp/router-re-logflood.log"
+log_path = "/home/jimwong/router-re-logflood.log"
 try:
     with open(log_path, "w") as f:
         f.write("flood test line\n" * 100)
@@ -94,7 +94,7 @@ st, body = call("POST", "/api/v1/logs/rotate", token=token,
 rotate_ok = (st in (200, 201, 202, 204) and isinstance(body, dict) and body.get("applied") is True)
 du_out = ""
 try:
-    du_out = subprocess.check_output(["du", "-sh", "/tmp"], text=True, timeout=10).strip()
+    du_out = subprocess.check_output(["df", "-h", "/"], text=True, timeout=10).strip().splitlines()[-1]
 except Exception as e:
     du_out = "du error: " + str(e)
 disk_ok = True

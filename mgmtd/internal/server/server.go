@@ -1263,8 +1263,38 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		// Put the authenticated actor into context for audit logging.
 		ctx := context.WithValue(r.Context(), ctxKeyActor, sub)
+		// 角色鉴权。
+		//
+		// 这里以前只验 token、不验角色，于是 rbac.Can 写了策略、也有单测，却从没
+		// 被任何请求走到过——单测全绿，生产零校验。实测：viewer 账号 POST
+		// /firewall/rules 返回 200，能改防火墙（只有 /users 那几个端点自己单独
+		// 查了 role）。「只读角色」根本不只读，等于提权。
+		if !s.roleAllows(sub, r.Method, r.URL.Path) {
+			s.logAudit(r, "authz.deny", sub, "fail", r.Method+" "+r.URL.Path)
+			writeJSON(w, 403, errBody(10006, "forbidden", "当前角色无权执行该操作"))
+			return
+		}
 		next(w, r.WithContext(ctx))
 	}
+}
+
+// roleAllows 判定 actor 是否有权执行 method+path。
+//
+// 内置管理员（环境变量配置的那个）恒为 admin，保证单管理员部署和首次登录不被
+// 破坏；其余账号查 RBAC 表，查不到（用户已删/被停用）则拒绝。无 RBAC 管理器时
+// 放行，保持旧部署行为。
+func (s *Server) roleAllows(actor, method, path string) bool {
+	if actor == s.cfg.AdminUser {
+		return true
+	}
+	if s.rbacMgr == nil {
+		return true
+	}
+	role, ok := s.rbacMgr.RoleOf(actor)
+	if !ok {
+		return false
+	}
+	return rbac.Can(role, method, path)
 }
 
 // ctxKeyActor is the context key for the authenticated actor.

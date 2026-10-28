@@ -1,8 +1,8 @@
 {
   "pane": "w1:pN",
-  "updated": 1793200663.3455296,
+  "updated": 1793201143.2367759,
   "pid": 3061120,
   "state": "idle",
-  "task": "p80-web-ui-browser-smoke",
-  "elapsed_min": 6.6
+  "task": "p85-dns-failover-recovery",
+  "elapsed_min": 3.2
 }
