@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -60,6 +61,40 @@ def verify_one(task_id: str) -> tuple[str, int, str]:
         return task_id, 124, "验证超时 600s"
 
 
+def reconcile_missing(age_seconds: float = 60.0) -> int:
+    """把「done 但没验证、也不在验证队列里」的任务捡回来。
+
+    为什么需要：旧路径（dispatch_workers watchdog）标 done 时不会 push_verify，
+    实测 p67 在 21:39 被 watchdog 误跑那一轮标成 done，之后就一直躺在
+    status=done / verified=None，没人审也没人发现。lane 是主路径之后这种任务
+    只可能来自兜底路径或历史遗留，所以定时捞一次最省事。
+    """
+    queued = set()
+    if ql.VERIFY_QUEUE.exists():
+        for line in ql.VERIFY_QUEUE.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                queued.add(json.loads(line).get("id"))
+            except json.JSONDecodeError:
+                continue
+
+    now = time.time()
+    picked = 0
+    for t in ql.read_queue():
+        if t.get("status") != "done" or t.get("verified"):
+            continue
+        if t["id"] in queued:
+            continue
+        if now - (t.get("done_at") or 0) < age_seconds:
+            continue        # 刚完成，lane 可能正在 push，别抢
+        ql.push_verify(t["id"])
+        log(f"RECONCILE {t['id']} done 但未验证，补进验证队列")
+        picked += 1
+    return picked
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--once", action="store_true", help="处理完当前队列就退出")
@@ -86,6 +121,9 @@ def main() -> int:
                 if args.once:
                     log("队列已空，--once 退出")
                     return 0
+                # 空闲时顺手把孤儿任务（done 但没验证）捡回队列
+                if reconcile_missing():
+                    continue
                 time.sleep(IDLE_SLEEP)
                 continue
 

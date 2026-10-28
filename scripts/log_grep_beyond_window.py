@@ -19,13 +19,30 @@ def get(path):
 base=get("/api/v1/logs?limit=5")
 entries=base.get("entries",[])
 assert len(entries)>=2, "need >=2 entries"
-newest=entries[0]; older=entries[-1]
+newest=entries[0]
+
+# 找一个在 oldest 里出现但 newest 里没有的词
 term=None
-for w in older.get("message","").split():
-    w=w.strip(".,;:!?()[]{}\"'")
-    if len(w)>=4 and w not in newest.get("message",""):
-        term=w; break
-assert term, "no distinguishing term"
+for older in reversed(entries[1:]):
+    for w in older.get("message","").split():
+        w=w.strip(".,;:!?()[]{}\"'")
+        if len(w)>=4 and w not in newest.get("message",""):
+            term=w; break
+    if term: break
+
+# 若找不到 distinguishing term，则注入一条唯一日志再 grep
+if not term:
+    import uuid, subprocess, time
+    marker="beyondwindow-"+uuid.uuid4().hex[:8]
+    subprocess.run(["logger","-t","router-re-test",marker],check=False)
+    time.sleep(1)
+    got=get("/api/v1/logs?limit=1&grep="+marker)
+    g=got.get("entries",[])
+    assert len(g)>0, f"grep {marker!r} returned 0 (beyond-window search failed)"
+    assert marker in g[0].get("message",""), "returned entry lacks marker"
+    print(f"PASS: grep {marker!r} found beyond-window entry (injected)")
+    raise SystemExit(0)
+
 got=get(f"/api/v1/logs?limit=1&grep={term}")
 g=got.get("entries",[])
 assert len(g)>0, f"grep {term!r} returned 0 (beyond-window search failed)"

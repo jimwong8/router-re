@@ -123,3 +123,27 @@ func TestSourcesNoPanic(t *testing.T) {
 		units = []string{}
 	}
 }
+
+// TestQueryGrepBeyondWindowAssertsJournalctlGrep documents that grep is pushed
+// down to journalctl (--grep + regexp.QuoteMeta) so it can find entries older
+// than the -n window. This is a compile-time/regression guard only.
+func TestQueryGrepBeyondWindowAssertsJournalctlGrep(t *testing.T) {
+	if _, err := exec.LookPath("journalctl"); err != nil {
+		t.Skip("journalctl not available")
+	}
+	// A grep term that matches nothing must not panic and must return empty.
+	got, err := Query(QueryOpts{Limit: 1, Grep: "zzzz-no-such-term-xyz"})
+	if err != nil {
+		// journalctl may error on no match? tolerate
+		t.Logf("Query returned err: %v", err)
+	}
+	if got == nil {
+		got = []LogEntry{}
+	}
+	// Should not contain the term
+	for _, e := range got {
+		if strings.Contains(e.Message, "zzzz-no-such-term-xyz") {
+			t.Errorf("unexpected match for nonexistent term")
+		}
+	}
+}

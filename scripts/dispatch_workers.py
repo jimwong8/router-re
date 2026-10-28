@@ -629,6 +629,14 @@ def main() -> int:
             task["done_at"] = t
             task["late"] = True
             log(f"DONE(LATE) {task['id']}  原状态 {st}，产出后来才出现，翻回 done")
+            # watchdog 路径也必须入验证队列：实测 p67 被这条路标成 done 后
+            # 永远没人审（verified=None 一直挂着），靠 verify_loop 的
+            # reconcile 兜底才发现。这里直接推，别让兜底成为唯一保障。
+            try:
+                import queue_lib as _ql
+                _ql.push_verify(task["id"])
+            except Exception as _e:  # noqa: BLE001
+                log(f"WARN 推验证队列失败 {task['id']}: {type(_e).__name__}")
             state.pop(task.get("pane", ""), None)
             # 工人对话框里能看到进展：结算时回贴一句话
             notify_pane(task.get("pane", ""), f"✅ {task['id']} 已验收通过（done）")
