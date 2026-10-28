@@ -37,18 +37,28 @@ declare -a STATUSES=()
 declare -a DURATIONS=()
 declare -a OUTPUTS=()
 
+# 工作区指纹：文件列表 + mtime。用来判断"这次运行期间有没有人在改代码"。
+dirty_fingerprint() {
+    git status --porcelain 2>/dev/null | while read -r st f; do
+        [ -f "$f" ] && printf "%s %s\n" "$f" "$(stat -c %Y "$f" 2>/dev/null)"
+    done | sort | md5sum | cut -d' ' -f1
+}
+
 run_module() {
     # $1 = name, $2... = command
     local name="$1"; shift
     local logfile="$TMPDIR_RUN/${name}.log"
     echo ""
     echo "===== [regression] RUN: $name ====="
+    local fp_before fp_after
+    fp_before=$(dirty_fingerprint)
     local t0
     t0=$(date +%s%N)
     "$@" >"$logfile" 2>&1
     local rc=$?
     local t1
     t1=$(date +%s%N)
+    fp_after=$(dirty_fingerprint)
     local dur_ms=$(( (t1 - t0) / 1000000 ))
     NAMES+=("$name")
     DURATIONS+=("${dur_ms}ms")
@@ -56,6 +66,12 @@ run_module() {
     if [ "$rc" -eq 0 ]; then
         STATUSES+=("PASS")
         echo "[regression] $name → PASS (${dur_ms}ms)"
+    elif [ "$fp_before" != "$fp_after" ]; then
+        # 运行期间有人改了工作区 → 这个红大概率是"编译到一半"，不是真 bug。
+        # 实测三次：go_test 715ms / 12870ms 两次 FAIL，几分钟后同一命令全绿。
+        # 记成 UNSTABLE 而不是 FAIL：不掩盖，也不谎报成代码坏了。
+        STATUSES+=("UNSTABLE(rc=$rc)")
+        echo "[regression] $name → UNSTABLE (rc=$rc, ${dur_ms}ms) — 运行期间工作区被修改，结果不可信"
     else
         STATUSES+=("FAIL(rc=$rc)")
         echo "[regression] $name → FAIL (rc=$rc, ${dur_ms}ms)"
@@ -154,11 +170,12 @@ else
 fi
 
 # ---------- 汇总 ----------
-PASS_COUNT=0; FAIL_COUNT=0; SKIP_COUNT=0
+PASS_COUNT=0; FAIL_COUNT=0; SKIP_COUNT=0; UNSTABLE_COUNT=0
 for s in "${STATUSES[@]}"; do
     case "$s" in
         PASS) PASS_COUNT=$((PASS_COUNT+1)) ;;
         SKIP) SKIP_COUNT=$((SKIP_COUNT+1)) ;;
+        UNSTABLE*) UNSTABLE_COUNT=$((UNSTABLE_COUNT+1)) ;;
         *)    FAIL_COUNT=$((FAIL_COUNT+1)) ;;
     esac
 done
@@ -181,7 +198,10 @@ done
         git status --porcelain 2>/dev/null | grep -v '^?? ' | head -10 | sed 's/^/  > /'
     fi
     echo "- Total modules: ${#NAMES[@]}"
-    echo "- PASS: $PASS_COUNT / FAIL: $FAIL_COUNT / SKIP: $SKIP_COUNT"
+    echo "- PASS: $PASS_COUNT / FAIL: $FAIL_COUNT / SKIP: $SKIP_COUNT / UNSTABLE: $UNSTABLE_COUNT"
+    if [ "$UNSTABLE_COUNT" -gt 0 ]; then
+        echo "- ⚠ 有 $UNSTABLE_COUNT 个模块在运行期间工作区被修改，结果不可信（大概率是工人编译到一半），不算代码缺陷"
+    fi
     echo ""
     echo "## Module Results"
     echo ""
@@ -216,8 +236,13 @@ echo ""
 # 清理
 rm -rf "$TMPDIR_RUN"
 
-# 退出码：有 FAIL 则非 0
+# 退出码：1=有确定失败，2=没失败但有不可信结果（跑的时候有人在改代码）。
+# 分开是为了不把"不知道"混进"通过"——UNSTABLE 若也 exit 0，真回归就可能在
+# 一次编译中途的噪声里被放过。
 if [ "$FAIL_COUNT" -gt 0 ]; then
     exit 1
+fi
+if [ "$UNSTABLE_COUNT" -gt 0 ]; then
+    exit 2
 fi
 exit 0
