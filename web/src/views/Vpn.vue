@@ -82,8 +82,8 @@ async function generateKeypair() {
   try {
     const res = await api.post('/api/v1/vpn/wireguard/keypair', {});
     const kp: KeypairResp = res.data;
-    publicKey.value = kp.public_key || kp.public_key || kp.publicKey || '';
-    privateKey.value = kp.private_key || kp.privateKey || kp.private_key || '';
+    publicKey.value = kp.public_key || '';
+    privateKey.value = kp.private_key || '';
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.message || e.message);
   }

@@ -13,7 +13,7 @@
       </el-row>
       <el-row :gutter="12" style="margin-bottom: 12px;">
         <el-col :span="6" v-for="(cnt, mt) in stats.by_type || {}" :key="mt">
-          <el-card shadow="never" class="stat"><div class="n">{{ cnt }}</div><div class="t">{{ typeLabel(mt) }}</div></el-card>
+          <el-card shadow="never" class="stat"><div class="n">{{ cnt }}</div><div class="t">{{ typeLabel(String(mt)) }}</div></el-card>
         </el-col>
       </el-row>
 

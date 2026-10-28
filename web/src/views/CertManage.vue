@@ -34,7 +34,7 @@
           style="margin-bottom:12px"
         />
 
-        <el-descriptions :column="2" border size="small">
+        <el-descriptions v-if="info" :column="2" border size="small">
           <el-descriptions-item label="Subject">{{ info.subject }}</el-descriptions-item>
           <el-descriptions-item label="Issuer">{{ info.issuer }}</el-descriptions-item>
           <el-descriptions-item label="生效时间">{{ fmtTime(info.not_before) }}</el-descriptions-item>

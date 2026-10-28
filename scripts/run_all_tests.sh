@@ -133,6 +133,10 @@ run_module "rbac_e2e" env BASE="$BASE" python3 scripts/rbac_e2e.py
 
 # ---------- 6. Go 单测 ----------
 run_module "go_test" bash -c "cd mgmtd && CGO_ENABLED=1 go test ./... 2>&1"
+# 类型检查是独立的一道门：`npm run build` 用的是 esbuild，**不做类型检查**。
+# 实测它放过过：Services 被 import 两次、/services 路由注册两次（vue-tsc 报
+# TS2300）；Vpn.vue 访问 res.publicKey 而接口是 public_key（TS2551，运行时空值）。
+run_module "vue_typecheck" bash -c "cd web && npx vue-tsc --noEmit 2>&1"
 
 # ---------- 7. UI acceptance (需要 vite preview 4173) ----------
 UI_PORT="${UI_PORT:-4173}"
