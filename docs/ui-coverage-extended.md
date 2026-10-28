@@ -7,7 +7,7 @@
 | 路由 | 结果 | 接口预期条数 | 页面渲染行数 | 说明 |
 |------|------|--------------|--------------|------|
 | `/services` | OK   | 527 | 50 | systemd 单元列表 (units) [分页] |
-| `/online-users` | OK   | 25 | 27 | 在线会话 |
+| `/online-users` | OK   | 16 | 24 | 在线会话 |
 | `/routing-policy` | OK   | 1 | 2 | 策略路由规则(可为空) |
 | `/cert` | SKIP | - | - | SKIP: 证书接口返回对象/{exists,path} 非列表 | 没有可识别的列表字段: detail,exists,path |
 | `/alerts` | OK   | 1 | 1 | 告警规则(可为空) |
@@ -16,23 +16,23 @@
 | `/accounts` | OK   | 2 | 2 | 账号列表(可为空) |
 | `/audit` | OK   | 100 | 100 | 审计事件 |
 | `/clients` | OK   | 24 | 24 | 客户端列表 |
-| `/cloud` | OK   | 1 | 1 | 云设备(可为空) |
+| `/cloud` | OK   | 0 | 0 | 云设备(可为空) |
 | `/diag` | OK   | 11 | 11 | 接口诊断列表 |
 | `/dhcp` | OK   | 0 | 1 | DHCP 租约(可为空) |
 | `/dpi-flow` | OK   | 0 | 0 | DPI 流量(可为空) |
 | `/dpi` | OK   | 0 | 0 | DPI 标记(可为空) |
 | `/interfaces` | SKIP | - | - | 接口配置(configs=空或 None 时 SKIP) | 没有可识别的列表字段: configs |
-| `/ipv6` | OK   | 5 | 9 | IPv6 地址(可为空) |
+| `/ipv6` | OK   | 4 | 8 | IPv6 地址(可为空) |
 | `/l7` | OK   | 0 | 0 | L7 规则(可为空) |
 | `/logs` | OK   | 100 | 100 | 日志条目(可为空) |
-| `/voucher` | OK   | 52 | 52 | 卡密列表(可为空) |
+| `/voucher` | OK   | 56 | 56 | 卡密列表(可为空) |
 | `/nac` | SKIP | - | - | SKIP: NAC 多表格分页 (devices/limits/top/neighbors)，接口 neighbors=45 非可见表，无法准确比对 |
 | `/network` | SKIP | - | - | SKIP: portmap/rules.rules=None(主机无 NAT 规则) |
 | `/pppoe` | OK   | 0 | 0 | PPPoE 会话(可为空) |
 | `/qos` | OK   | 0 | 0 | QoS 限速(可为空) |
 | `/remote` | SKIP | - | - | 远程访问(可为空) | 没有可识别的列表字段: access,warnings |
-| `/security` | OK   | 11 | 37 | 接口流量(ACL 表格取 acl/rules、主体表格取 stats/interfaces) |
-| `/threat` | OK   | 2 | 2 | 威胁列表(可为空) |
+| `/security` | OK   | 11 | 38 | 接口流量(ACL 表格取 acl/rules、主体表格取 stats/interfaces) |
+| `/threat` | OK   | 0 | 0 | 威胁列表(可为空) |
 | `/upnp` | OK   | 0 | 1 | UPnP 映射(可为空) |
 | `/users` | OK   | 3 | 3 | 用户列表 |
 | `/wireless` | OK   | 0 | 0 | Wi-Fi SSID(可为空) |

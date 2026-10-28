@@ -1,6 +1,6 @@
 # p92-threat-batch: 威胁情报端点测试
 
-生成时间: 2026-10-29 01:28:36
+生成时间: 2026-10-29 04:52:23
 
 目标: mgmtd @ http://127.0.0.1:9090（root 运行，admin 登录取 Bearer）。全部真实 HTTP 调用。
 
@@ -46,7 +46,7 @@ fetch 无需 SKIP：外部源可换成临时本机 feed；另验 SSRF 防护（f
 ### POST threat/fetch (本机127.0.0.1 feed)
 
 - **状态**: PASS
-- **详情**: HTTP 200, added=2 source='http://127.0.0.1:46515/p92feed' (期望 200/added=2, 未外联)
+- **详情**: HTTP 200, added=2 source='http://127.0.0.1:42545/p92feed' (期望 200/added=2, 未外联)
 
 ### POST threat/fetch SSRF 防护
 
@@ -74,7 +74,7 @@ fetch 无需 SKIP：外部源可换成临时本机 feed；另验 SSRF 防护（f
 **POST threat/block**
 
 ```
-{"added":true,"entry":{"ip":"192.0.2.90","reason":"p92test","source":"manual","created_at":1793208515,"expires_at":1793208815,"hits":0}}
+{"added":true,"entry":{"ip":"192.0.2.90","reason":"p92test","source":"manual","created_at":1793220742,"expires_at":1793221042,"hits":0}}
 
 ```
 **block 后 GET threat/stats**
@@ -98,7 +98,7 @@ fetch 无需 SKIP：外部源可换成临时本机 feed；另验 SSRF 防护（f
 **POST threat/fetch (本机 feed)**
 
 ```
-{"added":2,"skipped":0,"source":"http://127.0.0.1:46515/p92feed"}
+{"added":2,"skipped":0,"source":"http://127.0.0.1:42545/p92feed"}
 
 ```
 **fetch SSRF 防护 (file:// 被拒)**

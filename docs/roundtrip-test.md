@@ -1,6 +1,6 @@
 # 写端点 Round-trip 测试报告
 
-> 生成: 2026-10-29 01:47:22  BASE=http://127.0.0.1:9090
+> 生成: 2026-10-29 04:46:31  BASE=http://127.0.0.1:9090
 
 **汇总**: 测了 5 个写端点 / PASS 5 / FAIL 0
 
@@ -36,12 +36,12 @@
   "note": "卡密明文只返回这一次，请立即保存；之后查询只能看到打码版本",
   "vouchers": [
     {
-      "code": "6HZGMWXSFU",
-      "password": "SEGEHEWZNW",
+      "code": "R2E73FS2UD",
+      "password": "57TKKHTF7K",
       "minutes": 30,
       "traffic_mb": 0,
       "device_limit": 1,
-      "created_at": 1793209642,
+      "created_at": 1793220391,
       "expires_at": 0,
       "used_at": 0,
       "used": false,
@@ -57,9 +57,9 @@
 
 ```json
 {
-  "count": 51,
-  "unused": 29,
-  "used": 22,
+  "count": 55,
+  "unused": 31,
+  "used": 24,
   "vouchers": [
     {
       "code": "R4VTY4YKNE",
@@ -758,7 +758,7 @@
       "used_at": 1793209327,
       "used": true,
       "note": "p47 roundtrip",
-      "remaining_min": 25,
+      "remaining_min": 0,
       "expired": false
     },
     {
@@ -768,6 +768,62 @@
       "traffic_mb": 0,
       "device_limit": 1,
       "created_at": 1793209642,
+      "expires_at": 0,
+      "used_at": 0,
+      "used": false,
+      "note": "roundtrip-test",
+      "remaining_min": 30,
+      "expired": false
+    },
+    {
+      "code": "63CG2WXV7V",
+      "password": "TC******V8",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793209647,
+      "expires_at": 0,
+      "used_at": 1793209647,
+      "used": true,
+      "note": "p47 roundtrip",
+      "remaining_min": 0,
+      "expired": false
+    },
+    {
+      "code": "NUPPFLB7XG",
+      "password": "49******TV",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793210403,
+      "expires_at": 0,
+      "used_at": 0,
+      "used": false,
+      "note": "roundtrip-test",
+      "remaining_min": 30,
+      "expired": false
+    },
+    {
+      "code": "VW644ARUWB",
+      "password": "PP******ZX",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793210408,
+      "expires_at": 0,
+      "used_at": 1793210408,
+      "used": true,
+      "note": "p47 roundtrip",
+      "remaining_min": 0,
+      "expired": false
+    },
+    {
+      "code": "R2E73FS2UD",
+      "password": "57******7K",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793220391,
       "expires_at": 0,
       "used_at": 0,
       "used": false,
@@ -1099,7 +1155,7 @@
 {
   "applied": true,
   "count": 1,
-  "nft": "table inet timesched {\n\tchain forward {\n\t\ttype filter hook forward priority filter; policy accept;\n\t\t# active rule: rt-rule-1\n\t}\n}\n",
+  "nft": "table inet timesched {\n\tchain forward {\n\t\ttype filter hook forward priority filter; policy accept;\n\t\t# no active rules\n\t}\n}\n",
   "output": ""
 }
 ```
@@ -1111,7 +1167,7 @@
 ```json
 {
   "count": 1,
-  "now": "2026-10-29 01:47:22 Thu",
+  "now": "2026-10-29 04:46:31 Thu",
   "rules": [
     {
       "id": "rt-rule-1",
@@ -1131,7 +1187,7 @@
       "action": "ratelimit",
       "rate_kbps": 1000,
       "enabled": true,
-      "active_now": true
+      "active_now": false
     }
   ],
   "timezone": "Asia/Shanghai"

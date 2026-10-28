@@ -1,5 +1,10 @@
 # iKuai vs router-re 功能全面对比报告
 
+> ⚠️ 过期提示（2026-10-29）：本文档中 router-re 侧的「❌未实现」结论多处已过期
+> （IPv6/静态路由/DHCP 静态绑定/DDNS/WireGuard 客户端/无线 SSID/authportal/terminals/acct 字节统计
+> 均已在代码中实现并经 9090 真实 HTTP 验证，见 docs/remaining-work.md「已清零」表）。
+> router-re 能力判定以 remaining-work.md 为准，本文档仅保留 iKuai 侧基线参考价值。
+
 > 日期：2026-10-27
 > iKuai 基线：iKuaiOS 3.7.26（免费版，2026-09-16）/ 4.0.x 企业版
 > 功能地图来源：iKuai 官方功能列表 + ikuai-mcp-server（248 工具/9 模块，IK-Q3000 4.0.313 实机核对）
