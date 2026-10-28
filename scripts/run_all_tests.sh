@@ -110,6 +110,10 @@ sleep 65
 
 # ---------- 5. linkcheck_ddns_test.py ----------
 run_module "linkcheck_ddns_test" env BASE="$BASE" python3 scripts/linkcheck_ddns_test.py
+# 角色鉴权必须有端到端回归：rbac.Can 的策略单测曾经全绿，但中间件根本没调它，
+# viewer 能直接改防火墙。单测证明不了"接线"，只有从 HTTP 打一遍才行。
+run_module "rbac_e2e" env BASE="$BASE" python3 scripts/rbac_e2e.py
+
 
 # ---------- 6. Go 单测 ----------
 run_module "go_test" bash -c "cd mgmtd && CGO_ENABLED=1 go test ./... 2>&1"
@@ -165,6 +169,17 @@ done
     echo ""
     echo "- Generated: $(date '+%Y-%m-%d %H:%M:%S')"
     echo "- Base: $BASE"
+    # 跑在哪个提交、带多少未提交改动，必须写进报告。
+    # 并行开发时工人正在改文件，go_test 会因为编译到一半而假失败（实测 715ms FAIL，
+    # 十分钟后同一命令 RC=0）。不标出来，看报告的人没法判断这次的红是真 bug 还是噪声。
+    echo "- Commit: $(git rev-parse --short HEAD 2>/dev/null || echo unknown)$(git diff --quiet 2>/dev/null && echo ' (clean)' || echo ' (+未提交改动)')"
+    _dirty=$(git status --porcelain 2>/dev/null | grep -v '^?? ' | wc -l)
+    echo "- 未提交改动: ${_dirty} 个文件"
+    if [ "${_dirty:-0}" -gt 0 ]; then
+        echo ""
+        echo "  > 注意：以下文件在本次回归运行时处于未提交状态，相关模块的结果只代表当时的工作区快照："
+        git status --porcelain 2>/dev/null | grep -v '^?? ' | head -10 | sed 's/^/  > /'
+    fi
     echo "- Total modules: ${#NAMES[@]}"
     echo "- PASS: $PASS_COUNT / FAIL: $FAIL_COUNT / SKIP: $SKIP_COUNT"
     echo ""
