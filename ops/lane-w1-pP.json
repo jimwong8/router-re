@@ -1,8 +1,8 @@
 {
   "pane": "w1:pP",
-  "updated": 1793204532.9497077,
+  "updated": 1793207392.7322702,
   "pid": 3061209,
   "state": "idle",
-  "task": null,
-  "elapsed_min": 2.0
+  "task": "p91-uncovered-batch3",
+  "elapsed_min": 25.4
 }
