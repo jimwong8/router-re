@@ -1,8 +1,8 @@
 {
   "pane": "w1:pQ",
-  "updated": 1793210184.2386963,
+  "updated": 1793220894.3724337,
   "pid": 3061175,
   "state": "idle",
-  "task": "p93-qos-batch",
-  "elapsed_min": 17.8
+  "task": null,
+  "elapsed_min": 10.1
 }

@@ -1,8 +1,8 @@
 {
   "pane": "w1:pN",
-  "updated": 1793210183.8590014,
+  "updated": 1793220895.826063,
   "pid": 3061120,
-  "state": "idle",
-  "task": "p94-misc-batch",
-  "elapsed_min": 16.9
+  "state": "busy",
+  "task": "p97-rmw-audit",
+  "elapsed_min": 1.0
 }
