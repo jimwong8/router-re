@@ -166,6 +166,14 @@ def extract_for_review(p: Path, limit: int = MAX_FILE_CHARS,
             for i, line in enumerate(lines):
                 if kw in line:
                     spans.append((max(0, i - 8), min(len(lines), i + 60)))
+                    # 关键词常常是路由字符串（"PUT /api/v1/users/{username}"），
+                    # 命中的那一行只是注册处，真正的实现可能在几千行之外。
+                    # 实测 p81：审查者只看到路由行就判「handleUpdateUser 未实现」，
+                    # 而它就在同文件 3411 行。沿路由把被引用的 handler 一起带上。
+                    for h in re.findall(r"s\.(handle[A-Za-z0-9_]+)", line):
+                        span = _function_span(lines, h)
+                        if span:
+                            spans.append(span)
                     break
         if spans:
             spans.sort()

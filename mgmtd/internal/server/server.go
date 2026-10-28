@@ -487,6 +487,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/users", s.auth(s.auditWrap("user.create", s.handleCreateUser)))
 	s.mux.HandleFunc("DELETE /api/v1/users/{username}", s.auth(s.auditWrap("user.delete", s.handleDeleteUser)))
 	s.mux.HandleFunc("POST /api/v1/users/{username}/password", s.auth(s.auditWrap("user.password", s.handleSetUserPassword)))
+	s.mux.HandleFunc("PUT /api/v1/users/{username}", s.auth(s.auditWrap("user.update", s.handleUpdateUser)))
 	// P7-1 IPS 入侵防御（仅本区块）
 	s.mux.HandleFunc("GET /api/v1/ips/rules", s.auth(s.handleGetIPSRules))
 	s.mux.HandleFunc("POST /api/v1/ips/rules", s.auth(s.auditWrap("ips.rules.set", s.handleSetIPSRules)))
@@ -3405,7 +3406,53 @@ func (s *Server) handleSetUserPassword(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]interface{}{"changed": name})
 }
 
-// --- P5-1 DHCP 服务端补强 (仅本区块) ---
+// handleUpdateUser updates a user's role and/or enabled flag.
+// Body: {"role":"operator","enabled":false} (both optional, only provided fields changed).
+func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
+	if s.requireAdmin(w, r) == "" {
+		return
+	}
+	name := r.PathValue("username")
+	if name == "" {
+		writeJSON(w, 400, errBody(10221, "missing username", ""))
+		return
+	}
+	existing, ok := s.rbacMgr.Get(name)
+	if !ok {
+		writeJSON(w, 404, errBody(10222, "user not found", name))
+		return
+	}
+	var req struct {
+		Role    *rbac.Role `json:"role"`
+		Enabled *bool      `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10223, "invalid body", err.Error()))
+		return
+	}
+	// Apply only provided fields
+	if req.Role != nil {
+		if !rbac.ValidRole(*req.Role) {
+			writeJSON(w, 422, errBody(10224, "invalid role", "role must be admin/operator/viewer"))
+			return
+		}
+		existing.Role = *req.Role
+	}
+	if req.Enabled != nil {
+		existing.Enabled = *req.Enabled
+	}
+	if err := s.rbacMgr.Update(existing); err != nil {
+		if strings.Contains(err.Error(), "last admin") {
+			writeJSON(w, 409, errBody(10225, "cannot demote/disable last admin", err.Error()))
+			return
+		}
+		writeJSON(w, 422, errBody(10226, "update failed", err.Error()))
+		return
+	}
+	// Do NOT echo PasswordHash back.
+	updated, _ := s.rbacMgr.Get(name)
+	writeJSON(w, 200, map[string]interface{}{"user": updated})
+}
 
 // dhcpServerStoreKey 是 ServerConfig 在 store 里的键。
 const dhcpServerStoreKey = "dhcp/server"
