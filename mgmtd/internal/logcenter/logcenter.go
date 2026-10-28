@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -90,8 +91,20 @@ func queryJournalctl(o QueryOpts) ([]LogEntry, error) {
 		args = append(args, "--case-sensitive", "--grep", regexp.QuoteMeta(o.Grep))
 	}
 	cmd := exec.Command("journalctl", args...)
+	// stdout 和 err 分开取：journalctl 在**没有任何匹配**时退出码是 1（实测
+	// `journalctl -n 1 --grep zzzz-nope` → rc=1，stdout 空）。旧代码把非零退出
+	// 一律当故障 return nil, err，于是「搜不到」被上层当成 journalctl 不可用，
+	// 降级去读 /var/log/syslog，再因为容器里没有该文件而报
+	// "journalctl and syslog both unavailable" —— 一次合法的空结果被放大成 500。
 	out, err := cmd.Output()
 	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && len(out) == 0 {
+			// 无匹配（退出码 1）就是空结果；真正的失败（127 找不到命令等）仍要上报。
+			if exitErr.ExitCode() == 1 {
+				return []LogEntry{}, nil
+			}
+		}
 		return nil, err
 	}
 	var entries []LogEntry

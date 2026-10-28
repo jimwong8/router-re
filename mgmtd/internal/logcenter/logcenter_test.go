@@ -2,6 +2,7 @@ package logcenter
 
 import (
 	"os/exec"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -76,30 +77,45 @@ func TestQueryGrepFindsBeyondWindow(t *testing.T) {
 	if _, err := exec.LookPath("journalctl"); err != nil {
 		t.Skip("journalctl not available")
 	}
-	base, err := Query(QueryOpts{Limit: 5})
+	// 窗口要开得够宽再从**老的一端**挑区分词。
+	// 只看最近 5 条时，机器空闲期那几条几乎同质（同一服务的模板行），
+	// 找不到区分性词就 Skip —— 实测这条用例一直 Skip，等于 beyond-window
+	// 断言从没真正跑过。取 400 条并从最老的往前找，稳定能挑到。
+	base, err := Query(QueryOpts{Limit: 400})
 	if err != nil {
 		t.Fatalf("Query base: %v", err)
 	}
-	if len(base) < 2 {
-		t.Skip("need at least 2 journal entries")
+	if len(base) < 20 {
+		t.Skipf("journal 条目太少（%d 条），无法构造 beyond-window 场景", len(base))
 	}
-	newest := base[0]
-	older := base[len(base)-1]
 
-	var term string
-	for _, w := range strings.Fields(older.Message) {
-		w = strings.Trim(w, ".,;:!?()[]{}\"'")
-		if len(w) < 4 {
-			continue
+	newest := base[0]
+	newestWindow := base[:5]
+	inWindow := func(e LogEntry) bool {
+		for _, n := range newestWindow {
+			if n.Message == e.Message && n.TS == e.TS {
+				return true
+			}
 		}
-		if !strings.Contains(newest.Message, w) {
-			term = w
+		return false
+	}
+
+	tokenRe := regexp.MustCompile(`[A-Za-z0-9_./:-]{6,}`)
+	var term, source string
+	for i := len(base) - 1; i >= 10 && term == ""; i-- {
+		msg := base[i].Message
+		for _, w := range tokenRe.FindAllString(msg, 8) {
+			if strings.Contains(newest.Message, w) {
+				continue
+			}
+			term, source = w, msg
 			break
 		}
 	}
 	if term == "" {
-		t.Skip("no distinguishing term between newest and older entry")
+		t.Skip("整窗都找不到与最新条目不同的词，跳过（环境太安静）")
 	}
+	t.Logf("区分词 %q 来自老条目: %s", term, truncate(source, 80))
 
 	got, err := Query(QueryOpts{Limit: 1, Grep: term})
 	if err != nil {
@@ -111,9 +127,19 @@ func TestQueryGrepFindsBeyondWindow(t *testing.T) {
 	if !strings.Contains(got[0].Message, term) {
 		t.Errorf("returned entry does not contain grep term %q", term)
 	}
-	if got[0].Message == newest.Message && got[0].TS == newest.TS {
-		t.Errorf("grep returned newest entry only; did not search beyond 1-entry window")
+	// 核心断言：取 limit=1 时窗口里只有最新那条，若 --grep 没下推到 journalctl，
+	// 就只会在最新条目里找，找不到 term 而返回空。返回了含 term 的非窗口条目，
+	// 才证明 grep 真的搜到了 -n 窗口之外。
+	if inWindow(got[0]) {
+		t.Errorf("grep 返回的是窗口内条目，未能证明搜到窗口外老日志")
 	}
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
 
 func TestSourcesNoPanic(t *testing.T) {
@@ -127,20 +153,23 @@ func TestSourcesNoPanic(t *testing.T) {
 // TestQueryGrepBeyondWindowAssertsJournalctlGrep documents that grep is pushed
 // down to journalctl (--grep + regexp.QuoteMeta) so it can find entries older
 // than the -n window. This is a compile-time/regression guard only.
-func TestQueryGrepBeyondWindowAssertsJournalctlGrep(t *testing.T) {
+// 搜不存在的词必须返回**空结果且不报错**。
+//
+// 这是 journalctl 的一个坑：无匹配时退出码是 1（不是 0），而旧实现把非零退出
+// 一律当故障，于是「搜不到」被放大成 "journalctl and syslog both unavailable"
+// 上抛成 500。原来的这条用例只检查「没匹配到不该出现的词」，即使 Query 直接
+// 报错也照样 PASS，等于什么都没验。
+func TestQueryGrepNoMatchReturnsEmpty(t *testing.T) {
 	if _, err := exec.LookPath("journalctl"); err != nil {
 		t.Skip("journalctl not available")
 	}
-	// A grep term that matches nothing must not panic and must return empty.
 	got, err := Query(QueryOpts{Limit: 1, Grep: "zzzz-no-such-term-xyz"})
 	if err != nil {
-		// journalctl may error on no match? tolerate
-		t.Logf("Query returned err: %v", err)
+		t.Fatalf("无匹配不该报错，实际: %v", err)
 	}
-	if got == nil {
-		got = []LogEntry{}
+	if len(got) != 0 {
+		t.Fatalf("无匹配应返回空，实际 %d 条", len(got))
 	}
-	// Should not contain the term
 	for _, e := range got {
 		if strings.Contains(e.Message, "zzzz-no-such-term-xyz") {
 			t.Errorf("unexpected match for nonexistent term")

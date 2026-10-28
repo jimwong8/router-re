@@ -1,8 +1,8 @@
 {
   "pane": "w1:pN",
-  "updated": 1793198722.488641,
+  "updated": 1793200012.9107885,
   "pid": 3061120,
   "state": "idle",
-  "task": "p77-ipv6-real-e2e",
-  "elapsed_min": 22.1
+  "task": "p78-concurrent-write-race",
+  "elapsed_min": 11.9
 }
