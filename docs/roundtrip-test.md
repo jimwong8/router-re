@@ -1,6 +1,6 @@
 # 写端点 Round-trip 测试报告
 
-> 生成: 2026-10-29 01:02:15  BASE=http://127.0.0.1:9090
+> 生成: 2026-10-29 01:16:17  BASE=http://127.0.0.1:9090
 
 **汇总**: 测了 5 个写端点 / PASS 5 / FAIL 0
 
@@ -36,12 +36,12 @@
   "note": "卡密明文只返回这一次，请立即保存；之后查询只能看到打码版本",
   "vouchers": [
     {
-      "code": "XKT67NKPS2",
-      "password": "MMLD4HAAVT",
+      "code": "5RLJ69NWMQ",
+      "password": "GMHXB4M4PE",
       "minutes": 30,
       "traffic_mb": 0,
       "device_limit": 1,
-      "created_at": 1793206935,
+      "created_at": 1793207777,
       "expires_at": 0,
       "used_at": 0,
       "used": false,
@@ -57,9 +57,9 @@
 
 ```json
 {
-  "count": 41,
-  "unused": 22,
-  "used": 19,
+  "count": 47,
+  "unused": 27,
+  "used": 20,
   "vouchers": [
     {
       "code": "R4VTY4YKNE",
@@ -618,7 +618,7 @@
       "used_at": 1793206509,
       "used": true,
       "note": "p47 roundtrip",
-      "remaining_min": 23,
+      "remaining_min": 9,
       "expired": false
     },
     {
@@ -628,6 +628,90 @@
       "traffic_mb": 0,
       "device_limit": 1,
       "created_at": 1793206935,
+      "expires_at": 0,
+      "used_at": 0,
+      "used": false,
+      "note": "roundtrip-test",
+      "remaining_min": 30,
+      "expired": false
+    },
+    {
+      "code": "24BJJ2B3ML",
+      "password": "4Q******ZT",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793206941,
+      "expires_at": 0,
+      "used_at": 1793206941,
+      "used": true,
+      "note": "p47 roundtrip",
+      "remaining_min": 17,
+      "expired": false
+    },
+    {
+      "code": "6JC9ZHQFTA",
+      "password": "D6******6P",
+      "minutes": 60,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793207528,
+      "expires_at": 0,
+      "used_at": 0,
+      "used": false,
+      "note": "",
+      "remaining_min": 60,
+      "expired": false
+    },
+    {
+      "code": "F5T9UMMWWW",
+      "password": "88******UP",
+      "minutes": 60,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793207528,
+      "expires_at": 0,
+      "used_at": 0,
+      "used": false,
+      "note": "",
+      "remaining_min": 60,
+      "expired": false
+    },
+    {
+      "code": "LCQY74QWAZ",
+      "password": "ZE******3R",
+      "minutes": 60,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793207594,
+      "expires_at": 0,
+      "used_at": 0,
+      "used": false,
+      "note": "",
+      "remaining_min": 60,
+      "expired": false
+    },
+    {
+      "code": "M9Q846LWU8",
+      "password": "K8******D4",
+      "minutes": 60,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793207594,
+      "expires_at": 0,
+      "used_at": 0,
+      "used": false,
+      "note": "",
+      "remaining_min": 60,
+      "expired": false
+    },
+    {
+      "code": "5RLJ69NWMQ",
+      "password": "GM******PE",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793207777,
       "expires_at": 0,
       "used_at": 0,
       "used": false,
@@ -971,7 +1055,7 @@
 ```json
 {
   "count": 1,
-  "now": "2026-10-29 01:02:15 Thu",
+  "now": "2026-10-29 01:16:17 Thu",
   "rules": [
     {
       "id": "rt-rule-1",
