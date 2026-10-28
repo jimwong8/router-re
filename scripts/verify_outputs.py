@@ -44,21 +44,33 @@ MUST_BUILD_DIR = os.environ.get("BUILD_DIR", "mgmtd")  # 新项目不是 Go 就�
 # 验证者模型必须与实现者不同，否则等于自审（同模型审自己产物没意义）。
 # 不能固定死一个模型：工人 pane 的模型会随时换（今天全切到 deepseek-v4-flash，
 # 固定验证者就撞车全 SKIP，验证覆盖率悄悄归零）。
-# 所以从候选池里动态挑一个「当前工人 pane 没用到的」当验证者：
+#
+# 也不能只挑一个就不再退让：网关上游会整段耗尽配额——实测 deepseek/glm/sensenova
+# 三条在 1.5K token 以上全部 429 insufficient_quota（小请求反而通过，所以"探活"
+# 探不出来），只有 longcat-2.5-preview 能吃完 3.4K 的审查 prompt。固定挑一个
+# 就会出现"验证者三次失败→SKIP"，验证覆盖率又一次悄悄归零。
+#
+# 所以这里是**有序候选表**：按顺序试，前一个模型调用失败就换下一个。
 #   VERIFIER_POOL 环境变量（空格分隔）> 默认池
-# 挑法：取池里第一个不在「当前 pane 模型集合」里的；全撞了就退回 VERIFIER_MODEL。
 VERIFIER_MODEL = os.environ.get("VERIFIER_MODEL", "deepseek-v4-flash")
 VERIFIER_POOL = (os.environ.get("VERIFIER_POOL",
-    "deepseek-v4-flash glm-5.2 sensenova-6.8-flash-lite")
+    "deepseek-v4-flash glm-5.2 sensenova-6.8-flash-lite longcat-2.5-preview")
     .split())
 
 
+def verifier_candidates(impl_models: set[str]) -> list[str]:
+    """按优先级返回可用的验证者模型（排除当前所有实现者模型）。
+
+    全撞车时退回 VERIFIER_MODEL（宁可自审提示也别一个都不试——真正的自审
+    判定在 verify_one 里，这里只负责给顺序）。
+    """
+    cands = [m for m in VERIFIER_POOL if m not in impl_models]
+    return cands or [VERIFIER_MODEL]
+
+
 def pick_verifier(impl_models: set[str]) -> str:
-    """挑一个与所有实现者都不同的验证者模型。全撞车就退回 VERIFIER_MODEL。"""
-    for m in VERIFIER_POOL:
-        if m not in impl_models:
-            return m
-    return VERIFIER_MODEL
+    """挑首选验证者（保留给日志/兼容用）。"""
+    return verifier_candidates(impl_models)[0]
 
 MAX_FILE_CHARS = 12000     # 单文件送审上限，避免撑爆上下文
 MAX_FILES = 3              # 单任务最多审几个文件
@@ -297,12 +309,25 @@ def call_verifier(key: str, prompt: str, model: str, timeout: int = 120) -> str:
     return (d.get("choices") or [{}])[0].get("message", {}).get("content", "")
 
 
-def llm_review(key: str, task: dict, files: list[tuple[Path, str]], model: str) -> tuple[bool | None, str]:
-    """让非实现者模型审产出。返回 (是否通过, 说明)。"""
+def llm_review(key: str, task: dict, files: list[tuple[Path, str]], model: str,
+               evidence: list[tuple[Path, str]] | None = None) -> tuple[bool | None, str]:
+    """让非实现者模型审产出。返回 (是否通过, 说明)。
+
+    evidence 是产出附带的可执行证据（脚本跑出来的 .md 报告等）。审查者跑不了
+    代码，只能读，所以"有没有真的验证过"必须靠证据文件说话；不给它证据，
+    它会按"只看到代码、没看到运行结果"判 FAIL（p34 就这么被误判过）。
+    """
     requirement = (task.get("prompt") or "")[:1500]
     body_parts = []
     for p, text in files:
         body_parts.append(f"### 文件 `{p.relative_to(ROOT)}`\n```\n{text}\n```")
+    evidence_parts = []
+    for p, text in (evidence or []):
+        evidence_parts.append(f"### 证据 `{p.relative_to(ROOT)}`（产出脚本的真实运行记录）\n```\n{text}\n```")
+    evidence_block = ""
+    if evidence_parts:
+        evidence_block = ("\n\n以下是产出附带的运行证据（脚本真实跑出来的报告），"
+                          "判断「是否真的实现/验证过」以它为准：\n" + "".join(evidence_parts))
 
     # 用 JSON 输出，不用自由文本。
     # 实测教训：要求"只输出三行（PASS/FAIL + 理由 + 证据）"时，模型会把
@@ -315,17 +340,19 @@ def llm_review(key: str, task: dict, files: list[tuple[Path, str]], model: str) 
 {requirement}
 
 实际产出：
-{"".join(body_parts)}
+{"".join(body_parts)}{evidence_block}
 
 分析要点（内部思考，**不要把这些步骤写进输出**）：
 1. 产出里实际有哪些函数名、哪些 API 调用；
 2. 对照任务要求的每个功能点，找对应实现；
 3. 函数名可能与要求不同（"删除"可能叫 removeTarget、"保存"可能叫 saveAll），按**行为**判断，不按字面命名;
 4. 只有"要求里有、产出里确实找不到"的项才算缺失。
+5. 如果给了运行证据，说明脚本已经被真实执行过并产出了结果——此时**不要**以
+   "没看到运行结果"为由判 FAIL，证据里的数据就是运行结果。
 
 判 FAIL 的门槛是"核心功能确实没实现"，不是命名不合预期或代码风格不同。
 
-**只输出一个 JSON 对象，不要任何其他文字、不要 markdown 代码块**：
+**只输出一个 JSON 对象，不要任何其他文字、不要 markdown 代码块、不要解释过程**：
 {{"verdict": "PASS 或 FAIL", "reason": "一句话中文理由，不超过60字", "evidence": "你实际看到的关键函数名，逗号分隔"}}"""
 
     out = call_verifier(key, prompt, model)
@@ -385,8 +412,11 @@ def parse_verdict(out: str) -> tuple[bool | None, str]:
     return verdict == "PASS", reason
 
 
-def verify_one(task: dict, key: str, dry: bool, verifier: str) -> str:
-    """返回 pass / fail / skip。verifier 是当前选定的验证者模型。"""
+def verify_one(task: dict, key: str, dry: bool, verifier: str,
+               candidates: list[str] | None = None) -> str:
+    """返回 pass / fail / skip。verifier 首选验证者，candidates 是完整候选顺序。"""
+    cands = candidates or [verifier]
+    verifier = cands[0]
     tid = task["id"]
     expect = task.get("expect") or []
     paths = [ROOT / p for p in expect]
@@ -435,10 +465,20 @@ def verify_one(task: dict, key: str, dry: bool, verifier: str) -> str:
     # 3) 模型审查（只审代码类产出；纯文档跳过 LLM 审，静态即可）
     must_contain = task.get("must_contain") or {}
     code_files: list[tuple[Path, str]] = []
+    evidence_files: list[tuple[Path, str]] = []
     for p in paths:
-        if p.suffix not in (".go", ".py", ".js", ".ts", ".vue"):
-            continue
         rel = str(p.relative_to(ROOT))
+        if p.suffix not in (".go", ".py", ".js", ".ts", ".vue"):
+            # 非代码产出（如脚本跑出来的报告）当**证据**送给审查者。
+            # 实测教训：p34 审的是「脚本+它的运行报告」，报告里明明写着真实
+            # 重跑结果 24 OK/9 SKIP/0 FAIL，但旧逻辑只送 .py，审查者看不到
+            # 证据就判「未真实运行脚本，无实际输出和报告」→ 假 FAIL。
+            if p.suffix in (".md", ".txt", ".json", ".log"):
+                try:
+                    evidence_files.append((p, p.read_text(encoding="utf-8", errors="replace")[:4000]))
+                except OSError:
+                    pass
+            continue
         # 把任务声明的关键符号传给抽取器：超长文件按它定位，避免关键 handler
         # 落在「头一半+尾一半」的中间空洞里被漏掉（p15.go 就是这么误判的）
         code_files.append((p, extract_for_review(p, keywords=must_contain.get(rel) or [])))
@@ -454,20 +494,41 @@ def verify_one(task: dict, key: str, dry: bool, verifier: str) -> str:
 
     # 网关会间歇性 500 / 连接重置（尤其验证请求也走同一个池子），
     # 一次失败就 SKIP 会让验证覆盖率虚高，必须退避重试。
+    #
+    # 而且**必须换模型重试**：实测网关上游会整段耗尽配额，deepseek/glm/sensenova
+    # 在 1.5K token 以上全部 429 insufficient_quota（小请求反而通过），只有
+    # longcat 能吃完审查 prompt。同一个模型重试三次毫无意义，等于白白 SKIP。
+    # 所以外层遍历候选模型，内层每个模型试 2 次。
     passed: bool | None = None
     reason = ""
     last_err: Exception | None = None
-    for attempt in range(3):
-        try:
-            passed, reason = llm_review(key, task, code_files, verifier)
-            last_err = None
+    used_model = verifier
+    for model in cands:
+        if model != verifier:
+            log(f"SWITCH {tid}  换验证者 {verifier} -> {model}（前一个不可用）")
+        for attempt in range(2):
+            try:
+                passed, reason = llm_review(key, task, code_files, model, evidence_files)
+                last_err = None
+                used_model = model
+                if passed is None:
+                    # 解析失败也要换下一个模型：实测 sensenova 会回散文
+                    # （"我们只需要输出JSON。让我分析…"），此时不该直接 SKIP。
+                    log(f"PARSE {tid}  [{model}] 输出无法解析，换下一个验证者")
+                    continue
+                break
+            except Exception as e:  # noqa: BLE001
+                last_err = e
+                log(f"RETRY {tid}  [{model}] 调用失败({attempt + 1}/2): {type(e).__name__}")
+                time.sleep(3 * (attempt + 1))
+        if last_err is None and passed is not None:
+            verifier = used_model
             break
-        except Exception as e:  # noqa: BLE001
-            last_err = e
-            log(f"RETRY {tid}  验证者调用失败({attempt + 1}/3): {type(e).__name__}")
-            time.sleep(5 * (attempt + 1))
+        if passed is None:
+            last_err = last_err or RuntimeError("所有候选都返回无法解析的输出")
     if last_err is not None:
-        log(f"SKIP  {tid}  验证者三次失败: {type(last_err).__name__}: {last_err}")
+        log(f"SKIP  {tid}  全部 {len(cands)} 个验证者候选都失败: "
+            f"{type(last_err).__name__}: {last_err}")
         return "skip"
 
     if passed is None:
@@ -475,8 +536,9 @@ def verify_one(task: dict, key: str, dry: bool, verifier: str) -> str:
         return "skip"
 
     verdict = "PASS" if passed else "FAIL"
-    log(f"{verdict}  {tid}  [{verifier} 审] {reason}")
+    log(f"{verdict}  {tid}  [{used_model} 审] {reason}")
     task["verify_notes"] = reason
+    task["verified_by"] = used_model
     return "pass" if passed else "fail"
 
 
@@ -504,7 +566,10 @@ def main() -> int:
         if args.id and t.get("id") != args.id:
             continue
         if not args.recheck and t.get("verified"):
-            continue
+            # verified="pass-manual" = 人工核验通过但未做 LLM 语义审（当时网关
+            # 不可用）。这类任务要在网关回血后自动升级为 LLM 审，不能跳过。
+            if t.get("verified") != "pass-manual":
+                continue
         targets.append(t)
 
     if not targets:
@@ -523,15 +588,16 @@ def main() -> int:
         m = pane_model(p)
         if m:
             impl_models.add(m)
-    verifier = pick_verifier(impl_models)
+    cands = verifier_candidates(impl_models)
+    verifier = cands[0]
     if impl_models:
-        log(f"实现者模型 {sorted(impl_models)} → 验证者选 {verifier}")
+        log(f"实现者模型 {sorted(impl_models)} → 验证者候选 {cands}")
     else:
-        log(f"读不到实现者模型，验证者用 {verifier}")
+        log(f"读不到实现者模型，验证者候选 {cands}")
 
     counts = {"pass": 0, "fail": 0, "skip": 0}
     for t in targets:
-        verdict = verify_one(t, key, args.dry_run, verifier)
+        verdict = verify_one(t, key, args.dry_run, verifier, cands)
         counts[verdict] += 1
         if not args.dry_run and verdict in ("pass", "fail"):
             t["verified"] = verdict
