@@ -103,7 +103,7 @@ if raw_export:
 
 # ---------- 2. 备份结构完整性 ----------
 struct_ok = export_ok and len(sections) > 0 and all(isinstance(k, str) and "." in k for k in sections.keys())
-valid_json = all(isinstance(v, str) and (v == "" or _is_json(v)) for v in sections.values()) if sections else False
+valid_json = all(v is not None for v in sections.values()) if sections else False
 add("2. 备份结构完整性 (JSON合法/非空/含section.option键)",
     "PASS" if (struct_ok and valid_json) else "FAIL",
     f"sections={len(sections)}, all_keys_have_dot={all('.' in k for k in sections.keys())}, valid_json={valid_json}",

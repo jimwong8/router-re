@@ -79,9 +79,15 @@ step(J,"3 POST apply+save", "PASS" if applied else "FAIL", f"HTTP {st2} applied=
 st3,body3,ev3=call("GET","/api/v1/policy/timeschedule",token=token)
 present = isinstance(body3,dict) and any(r.get("id")=="journey2" or r.get("name")=="child-bedtime" for r in body3.get("rules",[]))
 step(J,"4 GET 确认存在", "PASS" if present else "FAIL", f"HTTP {st3} present={present}", short(body3))
-# 删除：timeschedule 无 DELETE 端点
-step(J,"5 删除 (无 DELETE 端点)", "SKIP", "timeschedule 仅支持 POST 全量替换/禁用，无 DELETE", "N/A")
-step(J,"6 确认消失 (无法)", "SKIP", "无 DELETE 端点，无法确认消失", "N/A")
+# 4. 删除
+st4,body4,ev4=call("DELETE",f"/api/v1/policy/timeschedule/journey2",token=token)
+deleted4 = isinstance(body4,dict) and body4.get("deleted") is True
+step(J,"5 DELETE 规则", "PASS" if deleted4 else "FAIL", f"HTTP {st4} deleted={body4.get('deleted') if isinstance(body4,dict) else body4}", short(body4))
+# 6. GET 确认消失
+st5,body5,ev5=call("GET","/api/v1/policy/timeschedule",token=token)
+gone5 = isinstance(body5,dict) and not any(r.get("id")=="journey2" or r.get("name")=="child-bedtime" for r in body5.get("rules",[]))
+step(J,"6 GET 确认消失", "PASS" if gone5 else "FAIL", f"HTTP {st5} gone={gone5}", short(body5))
+# (no cleanup needed — rule already deleted)
 
 # ========== 旅程3：访客网络 ==========
 J="J3-voucher"

@@ -79,6 +79,33 @@ MAX_FILE_CHARS = 12000     # 单文件送审上限，避免撑爆上下文
 MAX_FILES = 3              # 单任务最多审几个文件
 
 
+def _function_span(lines: list[str], name: str, max_lines: int = 120) -> tuple[int, int] | None:
+    """在 Go/JS 源码里按函数名找到**整个函数体**的行范围。
+
+    为什么不能只用固定窗口：`i-8 .. i+60` 必然把同文件相邻的函数一起带进去，
+    审查者分不清哪段属于目标函数，就会拿别人的错误码/字段名判目标函数不合规
+    （p50 连续两次误判都是这个原因）。
+
+    只做括号配平，不引 parser：送审用，够准就行，错了也只是回到固定窗口。
+    """
+    pat = re.compile(r"^\s*(?:func\s+(?:\([^)]*\)\s*)?|(?:export\s+)?(?:async\s+)?function\s+)"
+                     + re.escape(name) + r"\s*\(")
+    arrow = re.compile(r"^\s*(?:const|let|var)\s+" + re.escape(name) + r"\s*=")
+    for i, line in enumerate(lines):
+        if not (pat.search(line) or arrow.search(line)):
+            continue
+        depth = 0
+        started = False
+        for j in range(i, min(len(lines), i + max_lines)):
+            depth += lines[j].count("{") - lines[j].count("}")
+            if "{" in lines[j]:
+                started = True
+            if started and depth <= 0:
+                return (i, j + 1)
+        return (i, min(len(lines), i + max_lines))
+    return None
+
+
 def extract_for_review(p: Path, limit: int = MAX_FILE_CHARS,
                        keywords: list[str] | None = None) -> str:
     """按文件类型抽取送审内容。
@@ -90,19 +117,52 @@ def extract_for_review(p: Path, limit: int = MAX_FILE_CHARS,
     3. p15.go（456 行 / 15,321 字符）关键 handler 在 243/264 行，正好落在
        「头一半 + 尾一半」的中间空洞里 → 判「函数列表无 handleGetTimeSchedule」，还是误判。
 
-    所以策略是：能全文就给全文；超长时**优先按 keywords（任务的 must_contain）
-    定位关键代码周围的窗口**，而不是盲目截头截尾。
+    所以策略是：关键词命中函数名时**只送那几个函数体**；否则能全文就给全文；
+    超长时按 keywords 定位窗口，而不是盲目截头截尾。
     """
     text = p.read_text(encoding="utf-8", errors="replace")
+    lines = text.split("\n")
+
+    # 策略 0（最高优先）：关键词是函数名 → 只送函数体，不论文件多小。
+    #
+    # 为什么小文件也要切：p16.go 只有 9KB，整份送进去，里面十个 handler 各自的
+    # 错误码混在一起，审查者看到 10480/10481 就判"delete handler 没用 10482/10483"
+    # —— 连续两次误判同一个任务。**"文件不长"不等于"审查者分得清"**。
+    if keywords:
+        fn_spans = [s for s in (_function_span(lines, kw) for kw in keywords) if s]
+        if fn_spans:
+            fn_spans.sort()
+            out, used = [], 0
+            header = f"// {p.name}（仅送审指定函数，同文件其它函数未提供）\n"
+            out.append(header)
+            used += len(header)
+            for lo, hi in fn_spans:
+                chunk = "\n".join(lines[lo:hi])
+                if used + len(chunk) > limit:
+                    chunk = chunk[: max(0, limit - used)]
+                if chunk:
+                    out.append(f"// --- 第 {lo + 1}-{hi} 行 ---\n{chunk}")
+                    used += len(chunk)
+                if used >= limit:
+                    break
+            return "\n".join(out)
+
     if len(text) <= limit:
         return text
 
-    lines = text.split("\n")
-
-    # 策略 A：用任务声明的关键符号定位，取每个符号附近一整段函数体
+    # 策略 A：用任务声明的关键符号定位。
+    #
+    # 优先按**函数名精确切片**：`window = i-8 .. i+60` 会把同文件里相邻的
+    # 其它 handler 一起送进去，审查者分不清哪段属于这个函数 —— 实测 p50 被
+    # 判「用了 10480/10481 而不是 10482/10483」，其实那是同文件另一个 handler
+    # 的错误码，delete handler 用的正是 10482/10483。切片能根治这类误判。
     if keywords:
         spans: list[tuple[int, int]] = []
         for kw in keywords:
+            fn_span = _function_span(lines, kw)
+            if fn_span:
+                spans.append(fn_span)
+                continue
             for i, line in enumerate(lines):
                 if kw in line:
                     spans.append((max(0, i - 8), min(len(lines), i + 60)))
@@ -487,6 +547,17 @@ def verify_one(task: dict, key: str, dry: bool, verifier: str,
         code_files.append((p, extract_for_review(p, keywords=must_contain.get(rel) or [])))
     code_files = code_files[:MAX_FILES]
     if not code_files:
+        # 区分"真的是文档任务"和"只声明了一个哨兵文件"。
+        # 后者（expect 只有 .pXX-done 这类标记）等于没有任何可审产出：既没有
+        # 代码也没有报告，直接判 pass 就是免检。实测 p50/p74 都栽在这条上，日志
+        # 写着"静态检查通过（未做语义审）"却计入 pass。
+        # 这种情况给 skip 而不是 pass —— skip 会在汇总里显形，pass 不会。
+        real_outputs = [p for p in paths if not p.name.startswith(".")]
+        if not real_outputs:
+            log(f"SKIP  {tid}  expect 里只有哨兵文件，没有可审产出（不能算通过）")
+            task["verify_notes"] = ("任务只声明了标记文件，没有代码/报告可审；"
+                                    "请给任务补 expect 指向真实产出，或人工核验后标 pass-manual")
+            return "skip"
         log(f"PASS  {tid}  文档类产出，静态检查通过（未做语义审）")
         task["verify_notes"] = "文档：静态通过"
         return "pass"

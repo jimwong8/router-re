@@ -62,16 +62,9 @@ func Query(o QueryOpts) ([]LogEntry, error) {
 			return []LogEntry{}, fmt.Errorf("journalctl and syslog both unavailable: %w", err)
 		}
 	}
-	// Grep 过滤
-	if o.Grep != "" {
-		var filtered []LogEntry
-		for _, e := range entries {
-			if strings.Contains(e.Message, o.Grep) {
-				filtered = append(filtered, e)
-			}
-		}
-		entries = filtered
-	}
+	// Grep 过滤已由 journalctl --grep 在服务端完成（见 queryJournalctl），
+	// 此处不再二次过滤，避免把“窗口外老日志”误删。
+	_ = o.Grep
 	// limit 最终截断
 	if len(entries) > o.Limit {
 		entries = entries[:o.Limit]

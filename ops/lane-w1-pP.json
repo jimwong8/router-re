@@ -1,8 +1,8 @@
 {
   "pane": "w1:pP",
-  "updated": 1793197568.34524,
+  "updated": 1793198333.4127307,
   "pid": 3061209,
-  "state": "busy",
-  "task": "p76-user-journey-test",
-  "elapsed_min": 4.4
+  "state": "idle",
+  "task": null,
+  "elapsed_min": 1.1
 }

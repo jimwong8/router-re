@@ -121,6 +121,26 @@ def lint_task(t: dict) -> list[str]:
                         f"{tid}: must_contain 的 {needle!r} 在 {path} 里**本来就有** —— "
                         f"挡不住空壳（工人不做也算达标），换一个改动后才出现的独特字符串")
 
+    # 7) prompt 要求证据，但 expect 里没有证据文件
+    #
+    # prompt 写「用真实浏览器验证 / 加单测 / 产出报告」，而 expect 只列了实现文件时，
+    # 验收永远是"只有代码、没有任何证明"——审查者据此判 FAIL，工人被返工 3 次还是
+    # 同一句理由（p65/p66 都卡死在这），因为工人**再修也补不到证据要求的位置**。
+    # 证据文件必须写进 expect，才会进审查视野。
+    prompt = t.get("prompt") or ""
+    evidence_words = ("浏览器验证", "截图", "报告", "单测", "断言", "真实运行", "真跑")
+    if any(w in prompt for w in evidence_words):
+        exts = (".md", ".txt", ".json", ".log")
+        is_test = ("_test.go", "test_", "_test.py")
+        has_evidence = any(
+            e.endswith(exts) or any(k in e for k in is_test)
+            for e in (t.get("expect") or [])
+        )
+        if not has_evidence:
+            problems.append(
+                f"{tid}: prompt 要求证据（验证/报告/单测），但 expect 里没有任何证据文件 —— "
+                f"审查者只会看到代码然后判「没有真实运行证据」，工人修多少次都过不了")
+
     return problems
 
 

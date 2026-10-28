@@ -324,6 +324,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/security/ddos", s.auth(s.handleSetDDoS))
 	s.mux.HandleFunc("GET /api/v1/policy/timeschedule", s.auth(s.handleGetTimeSchedule))
 	s.mux.HandleFunc("POST /api/v1/policy/timeschedule", s.auth(s.handleSetTimeSchedule))
+	s.mux.HandleFunc("DELETE /api/v1/policy/timeschedule/{id}", s.auth(s.auditWrap("timeschedule.delete", s.handleDeleteTimeSchedule)))
 	s.mux.HandleFunc("POST /api/v1/diagnostics/ping", s.auth(s.handlePing))
 	s.mux.HandleFunc("POST /api/v1/diagnostics/traceroute", s.auth(s.handleTraceroute))
 	s.mux.HandleFunc("POST /api/v1/diagnostics/portprobe", s.auth(s.handlePortProbe))

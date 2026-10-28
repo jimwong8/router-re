@@ -1,8 +1,8 @@
 {
   "pane": "w1:pQ",
-  "updated": 1793197570.8051152,
+  "updated": 1793198333.6527476,
   "pid": 3061175,
   "state": "busy",
-  "task": "p75-backup-restore-test",
-  "elapsed_min": 5.3
+  "task": "p66-logs-grep-scope-fix",
+  "elapsed_min": 2.1
 }

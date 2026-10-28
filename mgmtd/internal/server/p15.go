@@ -339,6 +339,30 @@ func (s *Server) handleSetTimeSchedule(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// handleDeleteTimeSchedule deletes a time-schedule rule by id.
+func (s *Server) handleDeleteTimeSchedule(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	rules := s.loadTimeRules()
+	filtered := make([]timesched.Rule, 0, len(rules))
+	removed := false
+	for _, ru := range rules {
+		if ru.ID == id {
+			removed = true
+			continue
+		}
+		filtered = append(filtered, ru)
+	}
+	if !removed {
+		writeJSON(w, 200, map[string]interface{}{"deleted": false, "rules": rules})
+		return
+	}
+	if err := s.saveTimeRules(filtered); err != nil {
+		writeJSON(w, 500, errBody(10405, "save failed", err.Error()))
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{"deleted": true, "rules": filtered})
+}
+
 func (s *Server) loadTimeRules() []timesched.Rule {
 	raw, err := s.store.Get("timesched", "rules")
 	if err != nil {
