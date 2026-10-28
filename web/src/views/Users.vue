@@ -86,6 +86,29 @@
       </template>
     </el-dialog>
 
+    <!-- 编辑用户对话框 -->
+    <el-dialog title="编辑用户" :visible="editDialogVisible" @close="editDialogVisible = false">
+      <el-form :model="editForm">
+        <el-form-item label="用户名" label-width="80px">
+          <el-input v-model="editForm.username" disabled />
+        </el-form-item>
+        <el-form-item label="角色" label-width="80px">
+          <el-select v-model="editForm.role" style="width:100%">
+            <el-option label="admin" value="admin" />
+            <el-option label="operator" value="operator" />
+            <el-option label="viewer" value="viewer" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="启用" label-width="80px">
+          <el-switch v-model="editForm.enabled" active-text="启用" inactive-text="停用" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="saveEdit">保存</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 改密对话框 -->
     <el-dialog title="修改密码" :visible="pwDialogVisible" @close="pwDialogVisible = false">
       <el-form :model="pwForm">
@@ -127,6 +150,9 @@ const changeTarget = ref('');
 const currentUser = localStorage.getItem('router_user') || '';
 const form = ref({ username: '', password: '', role: 'viewer' });
 const pwForm = ref({ password: '', confirm: '' });
+const editDialogVisible = ref(false);
+const savingEdit = ref(false);
+const editForm = ref({ username: '', role: 'viewer', enabled: true });
 
 const roleTag = (role: string) => {
   if (role === 'admin') return 'danger';
@@ -173,6 +199,28 @@ function openChangePassword(name: string) {
   changeTarget.value = name;
   pwForm.value = { password: '', confirm: '' };
   pwDialogVisible.value = true;
+}
+
+function openEdit(row: User) {
+  editForm.value = { username: row.username, role: row.role, enabled: row.enabled };
+  editDialogVisible.value = true;
+}
+
+async function saveEdit() {
+  const body = { role: editForm.value.role, enabled: editForm.value.enabled };
+  saving.value = true;
+  try {
+    await api.put(`/api/v1/users/${encodeURIComponent(editForm.value.username)}`, body);
+    ElMessage.success('用户已更新');
+    editDialogVisible.value = false;
+    await loadUsers();
+  } catch (e: any) {
+    const data = e?.response?.data;
+    const detail = data?.detail ? `（${data.detail}）` : '';
+    ElMessage.error(`${data?.message || e.message || '更新失败'}${detail}`);
+  } finally {
+    saving.value = false;
+  }
 }
 
 async function changePwConfirm() {
