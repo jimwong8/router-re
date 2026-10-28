@@ -293,6 +293,72 @@ with tempfile.TemporaryDirectory() as td:
     check("herdr 失联时不误判孤儿", h1["status"] == "dispatched", f"实际 {h1['status']}")
     check("日志有跳过抢回 WARN", "跳过孤儿抢回" in buf.getvalue())
 
+print("\n=== 场景 19: expect 空 + verify_cmd 通过 -> 视同产出已出现 ===")
+with tempfile.TemporaryDirectory() as td:
+    td = Path(td)
+    d.QUEUE, d.STATE, d.LOG = td/"tasks.jsonl", td/".state.json", td/"dispatch.log"
+    d.QUEUE.write_text(json.dumps({"id":"ops1","status":"dispatched","pane":"w1:pN",
+        "prompt":"x","dispatched_at":_t.time()-60,"expect":[],
+        "verify_cmd":"true"})+"\n", encoding="utf-8")
+    d.PANES_RAW = ["w1:pN"]
+    d.resolve_panes = lambda: ["w1:pN"]
+    d.live_pane_ids = lambda: set(["w1:pN"])
+    d.MAX_PER_ROUND = 1
+    d.pane_state = lambda p: "idle"
+    d.context_pct = lambda p: 10.0
+    d.reset_context = lambda p: True
+    d.dispatch = lambda p, prompt: True
+    orig_root = d.ROOT
+    d.ROOT = td  # verify_cmd 在临时目录跑
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        d.main()
+    d.ROOT = orig_root
+    final = [json.loads(l) for l in d.QUEUE.read_text().splitlines() if l.strip()]
+    check("verify_cmd 通过则标 done", final[0]["status"] == "done", f"实际 {final[0]['status']}")
+
+print("\n=== 场景 20: expect 空 + verify_cmd 失败 -> 不标 done 等重试 ===")
+with tempfile.TemporaryDirectory() as td:
+    td = Path(td)
+    d.QUEUE, d.STATE, d.LOG = td/"tasks.jsonl", td/".state.json", td/"dispatch.log"
+    # busy 态避免 RELEASE 分支干扰，60 秒远小于默认硬预算
+    d.QUEUE.write_text(json.dumps({"id":"ops2","status":"dispatched","pane":"w1:pN",
+        "prompt":"x","dispatched_at":_t.time()-60,"expect":[],
+        "verify_cmd":"false"})+"\n", encoding="utf-8")
+    d.PANES_RAW = ["w1:pN"]
+    d.resolve_panes = lambda: ["w1:pN"]
+    d.live_pane_ids = lambda: set(["w1:pN"])
+    d.MAX_PER_ROUND = 1
+    d.pane_state = lambda p: "busy"
+    d.context_pct = lambda p: 10.0
+    d.reset_context = lambda p: True
+    d.dispatch = lambda p, prompt: True
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        d.main()
+    final = [json.loads(l) for l in d.QUEUE.read_text().splitlines() if l.strip()]
+    check("verify_cmd 失败不标 done", final[0]["status"] == "dispatched", f"实际 {final[0]['status']}")
+
+print("\n=== 场景 21: expect 空 + 无 verify_cmd -> 永不标 done（等 RELEASE）===")
+with tempfile.TemporaryDirectory() as td:
+    td = Path(td)
+    d.QUEUE, d.STATE, d.LOG = td/"tasks.jsonl", td/".state.json", td/"dispatch.log"
+    d.QUEUE.write_text(json.dumps({"id":"ops3","status":"dispatched","pane":"w1:pN",
+        "prompt":"x","dispatched_at":_t.time()-60,"expect":[]})+"\n", encoding="utf-8")
+    d.PANES_RAW = ["w1:pN"]
+    d.resolve_panes = lambda: ["w1:pN"]
+    d.live_pane_ids = lambda: set(["w1:pN"])
+    d.MAX_PER_ROUND = 1
+    d.pane_state = lambda p: "busy"
+    d.context_pct = lambda p: 10.0
+    d.reset_context = lambda p: True
+    d.dispatch = lambda p, prompt: True
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        d.main()
+    final = [json.loads(l) for l in d.QUEUE.read_text().splitlines() if l.strip()]
+    check("无 verify_cmd 不标 done", final[0]["status"] == "dispatched", f"实际 {final[0]['status']}")
+
 print("\n=== 汇总 ===")
 if FAILED:
     print(f"  {len(FAILED)} 项失败: {FAILED}")

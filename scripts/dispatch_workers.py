@@ -449,10 +449,29 @@ def produced(task: dict) -> bool:
     2. min_lines   —— {"path": 行数}，挡住空壳（一个 200 行的 handler 不可能 3 行写完）
     3. must_contain —— {path: [必须出现的字符串]}，比行数精确
     4. must_build  —— 跑一次 go build，挡住写不出来的代码
+    5. verify_cmd  —— 运维类任务（expect 空）的可执行验收：跑一个命令，rc=0 算干完
+
+    第 5 条为什么必要：p29-rebuild-retest 这类"重建二进制+起服务+跑回归"的
+    任务没有产出文件可查，expect 只能留空。老逻辑 `if not expect: return False`
+    让调度器永远不认为它干完，只能靠时间 RELEASE——明明做完了也被误判"没干完"
+    重派一次。verify_cmd 给这类任务一个可判定的"做完了"信号。
     """
     expect = task.get("expect") or []
     if not expect:
-        return False
+        cmd = task.get("verify_cmd")
+        if not cmd:
+            return False
+        try:
+            r = subprocess.run(cmd, shell=True, cwd=ROOT,
+                               capture_output=True, text=True, timeout=180)
+        except subprocess.TimeoutExpired:
+            log(f"WAIT  {task['id']}: verify_cmd 超时")
+            return False
+        if r.returncode != 0:
+            log(f"WAIT  {task['id']}: verify_cmd rc={r.returncode} "
+                f"{(r.stderr or r.stdout or '')[:120]}")
+            return False
+        return True
     if not all((ROOT / p).exists() for p in expect):
         return False
 

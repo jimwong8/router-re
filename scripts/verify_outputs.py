@@ -41,9 +41,24 @@ GATEWAY = os.environ.get("GATEWAY_URL", "http://10.100.1.17:8085/v1/chat/complet
 HERDR = shutil.which("herdr") or str(Path.home() / ".local/bin/herdr")
 MUST_BUILD_DIR = os.environ.get("BUILD_DIR", "mgmtd")  # 新项目不是 Go 就改这里
 
-# 验证者模型必须与实现者不同，否则等于自审。
-# 工人主力是 beam-free（opencode-zen 免费层），所以验证者默认用 deepseek-v4-flash。
+# 验证者模型必须与实现者不同，否则等于自审（同模型审自己产物没意义）。
+# 不能固定死一个模型：工人 pane 的模型会随时换（今天全切到 deepseek-v4-flash，
+# 固定验证者就撞车全 SKIP，验证覆盖率悄悄归零）。
+# 所以从候选池里动态挑一个「当前工人 pane 没用到的」当验证者：
+#   VERIFIER_POOL 环境变量（空格分隔）> 默认池
+# 挑法：取池里第一个不在「当前 pane 模型集合」里的；全撞了就退回 VERIFIER_MODEL。
 VERIFIER_MODEL = os.environ.get("VERIFIER_MODEL", "deepseek-v4-flash")
+VERIFIER_POOL = (os.environ.get("VERIFIER_POOL",
+    "deepseek-v4-flash glm-5.2 sensenova-6.8-flash-lite")
+    .split())
+
+
+def pick_verifier(impl_models: set[str]) -> str:
+    """挑一个与所有实现者都不同的验证者模型。全撞车就退回 VERIFIER_MODEL。"""
+    for m in VERIFIER_POOL:
+        if m not in impl_models:
+            return m
+    return VERIFIER_MODEL
 
 MAX_FILE_CHARS = 12000     # 单文件送审上限，避免撑爆上下文
 MAX_FILES = 3              # 单任务最多审几个文件
@@ -266,9 +281,9 @@ def build_check() -> tuple[bool, str]:
         return False, "build 超时 240s"
 
 
-def call_verifier(key: str, prompt: str, timeout: int = 120) -> str:
+def call_verifier(key: str, prompt: str, model: str, timeout: int = 120) -> str:
     body = json.dumps({
-        "model": VERIFIER_MODEL,
+        "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": 1000,
         "temperature": 0,
@@ -282,7 +297,7 @@ def call_verifier(key: str, prompt: str, timeout: int = 120) -> str:
     return (d.get("choices") or [{}])[0].get("message", {}).get("content", "")
 
 
-def llm_review(key: str, task: dict, files: list[tuple[Path, str]]) -> tuple[bool | None, str]:
+def llm_review(key: str, task: dict, files: list[tuple[Path, str]], model: str) -> tuple[bool | None, str]:
     """让非实现者模型审产出。返回 (是否通过, 说明)。"""
     requirement = (task.get("prompt") or "")[:1500]
     body_parts = []
@@ -313,7 +328,7 @@ def llm_review(key: str, task: dict, files: list[tuple[Path, str]]) -> tuple[boo
 **只输出一个 JSON 对象，不要任何其他文字、不要 markdown 代码块**：
 {{"verdict": "PASS 或 FAIL", "reason": "一句话中文理由，不超过60字", "evidence": "你实际看到的关键函数名，逗号分隔"}}"""
 
-    out = call_verifier(key, prompt)
+    out = call_verifier(key, prompt, model)
     return parse_verdict(out)
 
 
@@ -370,8 +385,8 @@ def parse_verdict(out: str) -> tuple[bool | None, str]:
     return verdict == "PASS", reason
 
 
-def verify_one(task: dict, key: str, dry: bool) -> str:
-    """返回 pass / fail / skip。"""
+def verify_one(task: dict, key: str, dry: bool, verifier: str) -> str:
+    """返回 pass / fail / skip。verifier 是当前选定的验证者模型。"""
     tid = task["id"]
     expect = task.get("expect") or []
     paths = [ROOT / p for p in expect]
@@ -380,12 +395,24 @@ def verify_one(task: dict, key: str, dry: bool) -> str:
         log(f"FAIL  {tid}  产出文件缺失: {', '.join(missing)}")
         return "fail"
 
+    # expect 空 = 运维类任务（verify_cmd 验收）：约定与 produced() 一致，
+    # verify_cmd 跑过 rc=0 才能 done，而 done 的前提就是 verify_cmd 已过，
+    # 所以这里直接 pass。没有 verify_cmd 也没有 expect 的任务调度器根本
+    # 不会标 done，流不到这里——真流到了说明是手工改的，判 skip 警示。
+    if not expect:
+        if task.get("verify_cmd"):
+            log(f"PASS  {tid}  运维类任务，verify_cmd 已过（调度器结算时执行）")
+            task["verify_notes"] = "运维：verify_cmd 通过"
+            return "pass"
+        log(f"SKIP  {tid}  无 expect 也无 verify_cmd，无法验证")
+        return "skip"
+
     # 断言验证者与实现者不同。
     # 实现者模型从 pane 尾部状态栏实时读（☤ <model>），不写死映射 ——
     # pane 的模型会换（如下午 pM 从 beam-free 切到 deepseek），写死的表一过期
     # 就会把"异模型审"误判成自审而 SKIP，等于验证 coverage 悄悄归零。
     impl_model = pane_model(task.get("pane", ""))
-    if impl_model and impl_model == VERIFIER_MODEL:
+    if impl_model and impl_model == verifier:
         log(f"SKIP  {tid}  验证者与实现者同为 {impl_model}，等于自审，跳过")
         return "skip"
 
@@ -422,7 +449,7 @@ def verify_one(task: dict, key: str, dry: bool) -> str:
         return "pass"
 
     if dry:
-        log(f"DRY   {tid}  将送审 {len(code_files)} 个代码文件给 {VERIFIER_MODEL}")
+        log(f"DRY   {tid}  将送审 {len(code_files)} 个代码文件给 {verifier}")
         return "skip"
 
     # 网关会间歇性 500 / 连接重置（尤其验证请求也走同一个池子），
@@ -432,7 +459,7 @@ def verify_one(task: dict, key: str, dry: bool) -> str:
     last_err: Exception | None = None
     for attempt in range(3):
         try:
-            passed, reason = llm_review(key, task, code_files)
+            passed, reason = llm_review(key, task, code_files, verifier)
             last_err = None
             break
         except Exception as e:  # noqa: BLE001
@@ -448,7 +475,7 @@ def verify_one(task: dict, key: str, dry: bool) -> str:
         return "skip"
 
     verdict = "PASS" if passed else "FAIL"
-    log(f"{verdict}  {tid}  [{VERIFIER_MODEL} 审] {reason}")
+    log(f"{verdict}  {tid}  [{verifier} 审] {reason}")
     task["verify_notes"] = reason
     return "pass" if passed else "fail"
 
@@ -484,10 +511,27 @@ def main() -> int:
         print("没有需要验证的任务")
         return 0
 
-    log(f"VERIFY 开始，共 {len(targets)} 个任务，验证者模型 {VERIFIER_MODEL}")
+    # 动态挑验证者：收集当前所有工人 pane 的实现者模型，从池里挑一个不同
+    # 的。否则工人全用 deepseek-v4-flash 时固定验证者也撞车 → 全 SKIP，验证
+    # 覆盖率归零（今天实测就是这个）。pane 集合从队列里 done 任务的 pane 字段
+    # 汇总 + PANES 环境变量（若配了）并集，保证不漏。
+    impl_models: set[str] = set()
+    panes = {t.get("pane", "") for t in tasks if t.get("pane")}
+    for raw in os.environ.get("PANES", "").split():
+        panes.add(raw)
+    for p in panes:
+        m = pane_model(p)
+        if m:
+            impl_models.add(m)
+    verifier = pick_verifier(impl_models)
+    if impl_models:
+        log(f"实现者模型 {sorted(impl_models)} → 验证者选 {verifier}")
+    else:
+        log(f"读不到实现者模型，验证者用 {verifier}")
+
     counts = {"pass": 0, "fail": 0, "skip": 0}
     for t in targets:
-        verdict = verify_one(t, key, args.dry_run)
+        verdict = verify_one(t, key, args.dry_run, verifier)
         counts[verdict] += 1
         if not args.dry_run and verdict in ("pass", "fail"):
             t["verified"] = verdict
