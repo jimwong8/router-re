@@ -1297,6 +1297,12 @@ func (s *Server) roleAllows(actor, method, path string) bool {
 	if !ok {
 		return false
 	}
+	// 停用的账号必须立即失去权限。RoleOf 只看 role 字段、不看 Enabled，所以
+	// 单独查一次用户：否则把 users.json 里 enabled 改成 false（或以后加停用接口）
+	// 之后，旧 token 会一直有效直到过期——禁用等于没禁用。
+	if u, ok := s.rbacMgr.Get(actor); !ok || !u.Enabled {
+		return false
+	}
 	return rbac.Can(role, method, path)
 }
 

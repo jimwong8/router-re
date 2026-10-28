@@ -104,6 +104,27 @@ func TestRBACIsEnforcedOnRequests(t *testing.T) {
 		}
 	})
 
+	t.Run("停用的账号立即失去权限", func(t *testing.T) {
+		// API 上没有停用接口（只有建/删/改密），但 Enabled 字段存在、Manager.Update
+		// 也支持。这里直接改状态验证：旧 token 不能因为角色还在就继续可用。
+		createUser("dis1", "Dtest12345!", "operator")
+		tok := login("dis1", "Dtest12345!")
+		if code := do(tok, "POST", "/api/v1/firewall/rules", ruleBody); code != http.StatusOK {
+			t.Fatalf("operator 正常写入应 200，实际 %d", code)
+		}
+		u, ok := s.rbacMgr.Get("dis1")
+		if !ok {
+			t.Fatal("dis1 应存在")
+		}
+		u.Enabled = false
+		if err := s.rbacMgr.Update(u); err != nil {
+			t.Fatalf("disable: %v", err)
+		}
+		if code := do(tok, "POST", "/api/v1/firewall/rules", ruleBody); code != http.StatusForbidden {
+			t.Errorf("停用后旧 token 仍可写：%d，应 403", code)
+		}
+	})
+
 	t.Run("删掉的用户 token 立即失效", func(t *testing.T) {
 		// roleAllows 每次请求都查一次角色，用户被删后拿旧 token 继续用必须被拒。
 		if code := do(admin, "DELETE", "/api/v1/users/vt1", ""); code != http.StatusOK && code != http.StatusNoContent {
