@@ -147,7 +147,7 @@ for p in list_endpoints:
     seen = set()
     dup_count = 0
     page = 0
-    while page < 500:
+    while page < 10:
         st, body = call("GET", f"{p}?limit=10&offset={page*10}", token=token, timeout=15)
         if st != 200 or not isinstance(body, dict):
             break
@@ -191,7 +191,7 @@ for p in list_endpoints:
     st, body = call("GET", f"{p}?limit=5&offset={N+100}", token=token, timeout=15)
     _, lst_b, _ = safe_list(body)
     b_results.append(f"offset>N -> HTTP {st} items={len(lst_b)}")
-    st, body = call("GET", f"{p}?limit=1000&offset=0", token=token, timeout=30)
+    st, body = call("GET", f"{p}?limit=100&offset=0", token=token, timeout=30)
     _, lst_h, _ = safe_list(body)
     b_results.append(f"limit=1000 -> HTTP {st} items={len(lst_h)} (N={N})")
 

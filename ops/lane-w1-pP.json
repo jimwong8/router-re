@@ -1,8 +1,8 @@
 {
   "pane": "w1:pP",
-  "updated": 1793201951.4395006,
+  "updated": 1793204532.9497077,
   "pid": 3061209,
-  "state": "unknown",
-  "task": "p86-connstate-acct-verify",
-  "elapsed_min": 9.7
+  "state": "idle",
+  "task": null,
+  "elapsed_min": 2.0
 }

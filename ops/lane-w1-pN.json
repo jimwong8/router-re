@@ -1,8 +1,8 @@
 {
   "pane": "w1:pN",
-  "updated": 1793201953.1916685,
+  "updated": 1793204532.8113935,
   "pid": 3061120,
   "state": "idle",
-  "task": "p88-dhcp-lease-lifecycle",
-  "elapsed_min": 2.1
+  "task": null,
+  "elapsed_min": 15.2
 }
