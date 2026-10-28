@@ -161,6 +161,7 @@ if curl -s -m 3 "http://127.0.0.1:$UI_PORT/" >/dev/null 2>&1; then
         skip_module "users_edit_e2e" "登录被限流(429)或失败，跳过"
         skip_module "dialog_smoke" "登录被限流(429)或失败，跳过"
         skip_module "form_submit_e2e" "登录被限流(429)或失败，跳过"
+        skip_module "rbac_ui_e2e" "登录被限流(429)或失败，跳过"
     else
         run_module "ui_acceptance" env BASE="$BASE" python3 scripts/ui_acceptance.py
         run_module "ui_acceptance_ext" env BASE="$BASE" python3 scripts/ui_acceptance_ext.py
@@ -175,6 +176,9 @@ if curl -s -m 3 "http://127.0.0.1:$UI_PORT/" >/dev/null 2>&1; then
         # 弹窗能开 ≠ 能存：保存按钮可能绑空函数/调错接口/后端 200 但表格不刷新。
         # 这条做「填 → 存 → 后端真的变了 → 页面真的刷新了」。
         run_module "form_submit_e2e" env BASE="$BASE" env WEB="http://127.0.0.1:$UI_PORT" python3 scripts/form_submit_e2e.py
+        # 权限交叉：后端 403 有测试，但"用户看到什么"没有。viewer 点保存要给出
+        # 看得懂的中文说明，且绝不能误报成功。
+        run_module "rbac_ui_e2e" env BASE="$BASE" env WEB="http://127.0.0.1:$UI_PORT" python3 scripts/rbac_ui_e2e.py
     fi
 else
     skip_module "ui_acceptance" "vite preview :$UI_PORT 不通，跳过（需 cd web && npm run preview）"
@@ -183,6 +187,7 @@ else
     skip_module "users_edit_e2e" "vite preview :$UI_PORT 不通，跳过"
     skip_module "dialog_smoke" "vite preview :$UI_PORT 不通，跳过"
     skip_module "form_submit_e2e" "vite preview :$UI_PORT 不通，跳过"
+    skip_module "rbac_ui_e2e" "vite preview :$UI_PORT 不通，跳过"
 fi
 
 # ---------- 汇总 ----------

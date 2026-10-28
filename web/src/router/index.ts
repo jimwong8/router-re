@@ -45,7 +45,6 @@ import NetworkAdvanced from '../views/NetworkAdvanced.vue';
 import CertManage from '../views/CertManage.vue';
 import OnlineUsers from '../views/OnlineUsers.vue';
 import Terminals from '../views/Terminals.vue';
-import Services from '../views/Services.vue';
 import NetworkTools from '../views/NetworkTools.vue';
 import LinkCheck from '../views/LinkCheck.vue';
 import VpnClient from '../views/VpnClient.vue';
@@ -100,7 +99,6 @@ const routes = [
   { path: '/cert', component: CertManage, meta: { requiresAuth: true } },
   { path: '/online-users', component: OnlineUsers, meta: { requiresAuth: true } },
   { path: '/terminals', component: Terminals, meta: { requiresAuth: true } },
-  { path: '/services', component: Services, meta: { requiresAuth: true } },
   { path: '/network-tools', component: NetworkTools, meta: { requiresAuth: true } },
   // LinkCheck.vue 之前没有路由：组件和后端接口(/api/v1/linkcheck/*)都在，
   // 但用户点不到——功能等于不存在。
