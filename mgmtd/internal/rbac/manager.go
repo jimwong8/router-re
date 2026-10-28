@@ -180,6 +180,8 @@ func (m *Manager) ChangePassword(username, newPassword string) error {
 		return fmt.Errorf("user %q not found", username)
 	}
 	u.PasswordHash = hash
+	i := int64(time.Now().Unix())
+	u.PasswordChangedAt = i
 	m.users[username] = u
 	return m.persistLocked()
 }

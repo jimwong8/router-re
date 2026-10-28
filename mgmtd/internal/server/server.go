@@ -1260,9 +1260,17 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 			writeJSON(w, 401, errBody(10003, "unauthorized", "missing token"))
 			return
 		}
-		sub, err := s.tm.Verify(tok)
+		sub, iat, err := s.tm.VerifyWithIssuedAt(tok)
 		if err != nil {
 			writeJSON(w, 401, errBody(10003, "unauthorized", "invalid token"))
+			return
+		}
+		// 改密后旧会话必须失效。token 是无状态的，改密不会让已签发的 token 作废，
+		// 只能比对签发时间。密码泄漏的第一反应就是改密——如果旧 token 还能用
+		// （哪怕只剩 TTL 那 15 分钟），改密就等于没改。
+		if !s.sessionValid(sub, iat) {
+			s.logAudit(r, "authz.stale_session", sub, "fail", r.Method+" "+r.URL.Path)
+			writeJSON(w, 401, errBody(10003, "unauthorized", "密码已修改，请重新登录"))
 			return
 		}
 		// Put the authenticated actor into context for audit logging.
@@ -1280,6 +1288,26 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r.WithContext(ctx))
 	}
+}
+
+// sessionValid 判定 token 是否签发于用户最后一次改密之前。
+//
+// 内置管理员（环境变量那个）没有用户记录，恒真；有记录时 PasswordChangedAt==0
+// 表示从未改过密，也恒真。秒级精度带来的唯一缝：改密与登录落在同一秒时，
+// 该秒签发的 token 保留（iat == PasswordChangedAt），这是刻意的——否则刚改完密
+// 立刻重新登录的人会被自己的新 token 踢掉。
+func (s *Server) sessionValid(actor string, iat int64) bool {
+	if s.rbacMgr == nil || actor == s.cfg.AdminUser {
+		return true
+	}
+	u, ok := s.rbacMgr.Get(actor)
+	if !ok {
+		return false
+	}
+	if u.PasswordChangedAt <= 0 {
+		return true
+	}
+	return iat >= u.PasswordChangedAt
 }
 
 // roleAllows 判定 actor 是否有权执行 method+path。

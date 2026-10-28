@@ -28,6 +28,9 @@ type User struct {
 	Enabled      bool   `json:"enabled"`
 	CreatedAt    int64  `json:"created_at"`
 	LastLogin    int64  `json:"last_login"`
+	// PasswordChangedAt 是最后一次改密的时间（unix 秒）。签发早于它的 token 一律失效，
+	// 否则密码泄漏后改密不踢人，攻击者手上那 15 分钟照样能用。
+	PasswordChangedAt int64 `json:"password_changed_at,omitempty"`
 }
 
 var usernameRe = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)

@@ -31,33 +31,36 @@ type fileData struct {
 }
 
 type persistedUser struct {
-	Username     string `json:"username"`
-	PasswordHash string `json:"password_hash"`
-	Role         Role   `json:"role"`
-	Enabled      bool   `json:"enabled"`
-	CreatedAt    int64  `json:"created_at"`
-	LastLogin    int64  `json:"last_login"`
+	Username          string `json:"username"`
+	PasswordHash      string `json:"password_hash"`
+	Role              Role   `json:"role"`
+	Enabled           bool   `json:"enabled"`
+	CreatedAt         int64  `json:"created_at"`
+	LastLogin         int64  `json:"last_login"`
+	PasswordChangedAt int64  `json:"password_changed_at,omitempty"`
 }
 
 func toPersisted(u User) persistedUser {
 	return persistedUser{
-		Username:     u.Username,
-		PasswordHash: u.PasswordHash,
-		Role:         u.Role,
-		Enabled:      u.Enabled,
-		CreatedAt:    u.CreatedAt,
-		LastLogin:    u.LastLogin,
+		Username:          u.Username,
+		PasswordHash:      u.PasswordHash,
+		Role:              u.Role,
+		Enabled:           u.Enabled,
+		CreatedAt:         u.CreatedAt,
+		LastLogin:         u.LastLogin,
+		PasswordChangedAt: u.PasswordChangedAt,
 	}
 }
 
 func (p persistedUser) toUser() User {
 	return User{
-		Username:     p.Username,
-		PasswordHash: p.PasswordHash,
-		Role:         p.Role,
-		Enabled:      p.Enabled,
-		CreatedAt:    p.CreatedAt,
-		LastLogin:    p.LastLogin,
+		Username:          p.Username,
+		PasswordHash:      p.PasswordHash,
+		Role:              p.Role,
+		Enabled:           p.Enabled,
+		CreatedAt:         p.CreatedAt,
+		LastLogin:         p.LastLogin,
+		PasswordChangedAt: p.PasswordChangedAt,
 	}
 }
 

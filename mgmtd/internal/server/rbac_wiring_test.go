@@ -130,8 +130,10 @@ func TestRBACIsEnforcedOnRequests(t *testing.T) {
 		if code := do(admin, "DELETE", "/api/v1/users/vt1", ""); code != http.StatusOK && code != http.StatusNoContent {
 			t.Fatalf("delete vtest failed: %d", code)
 		}
-		if code := do(viewer, "GET", "/api/v1/system/info", ""); code != http.StatusForbidden {
-			t.Errorf("已删除用户的旧 token 仍然可用：GET /system/info = %d，应 403", code)
+		// 401 而不是 403：身份已经不存在了，这不是"权限不够"，而是"你得重新登录"。
+		// sessionValid 在建权之前就判掉（用户查不到 → 会话失效），所以走的是 401 分支。
+		if code := do(viewer, "GET", "/api/v1/system/info", ""); code != http.StatusUnauthorized {
+			t.Errorf("已删除用户的旧 token 仍然可用：GET /system/info = %d，应 401（会话失效）", code)
 		}
 	})
 }
