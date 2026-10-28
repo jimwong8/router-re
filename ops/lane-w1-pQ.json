@@ -1,8 +1,8 @@
 {
   "pane": "w1:pQ",
-  "updated": 1793195142.2595308,
+  "updated": 1793195843.2898417,
   "pid": 3061175,
-  "state": "busy",
-  "task": "p66-logs-grep-scope-fix",
-  "elapsed_min": 1.1
+  "state": "idle",
+  "task": null,
+  "elapsed_min": 2.2
 }

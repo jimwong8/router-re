@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/jimwong/router-re/mgmtd/internal/dhcp"
@@ -102,8 +103,45 @@ func (s *Server) handleListTerminals(w http.ResponseWriter, r *http.Request) {
 	for _, m := range byIP {
 		terminals = append(terminals, m)
 	}
+
+	// 分页（可选）：无 limit 参数时全量返回，保持向后兼容。
+	total := len(terminals)
+	limitStr := r.URL.Query().Get("limit")
+	offsetStr := r.URL.Query().Get("offset")
+	offset := 0
+	if offsetStr != "" {
+		if n, err := strconv.Atoi(offsetStr); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+	hasMore := false
+	if limitStr != "" {
+		limit := 200
+		if n, err := strconv.Atoi(limitStr); err == nil && n > 0 {
+			limit = n
+		}
+		if limit > 1000 {
+			limit = 1000
+		}
+		if offset > total {
+			offset = total
+		}
+		end := offset + limit
+		if end > total {
+			end = total
+		}
+		hasMore = offset+limit < total
+		terminals = terminals[offset:end]
+	}
+	if terminals == nil {
+		terminals = []map[string]interface{}{}
+	}
+
 	writeJSON(w, 200, map[string]interface{}{
 		"count":     len(terminals),
+		"total":     total,
+		"offset":    offset,
+		"has_more":  hasMore,
 		"terminals": terminals,
 	})
 }

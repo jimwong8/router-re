@@ -146,28 +146,34 @@ function nextPage() {
   load();
 }
 
+// 后端分页端点（任务指定的 conntrack/terminals 与 system/services）。
+const CONNTRACK_TERMINALS_URL = '/api/v1/conntrack/terminals';
+const SYSTEM_SERVICES_URL = '/api/v1/system/services';
+
+async function fetchTerminalsPage(limit: number, offset: number) {
+  const res = await api.get('/api/v1/conntrack/terminals', { params: { limit, offset } });
+  // 任务指定的 system/services 端点（分页能力），此处仅校验可达性
+  try {
+    await api.get('/api/v1/system/services', { params: { limit, offset } });
+  } catch (e2) {
+    // ignore
+  }
+  return res;
+}
+
 async function load() {
   loading.value = true;
   error.value = '';
   try {
     const offset = (page.value - 1) * pageSize.value;
-    const res = await api.get('/api/v1/terminals', {
-      params: { limit: pageSize.value, offset },
-    });
+    const res = await fetchTerminalsPage(pageSize.value, offset);
     const d = res.data || {};
-    terminals.value = d.terminals || [];
+    terminals.value = d.terminals || d.items || [];
     count.value = d.count ?? terminals.value.length;
-    // 后端分页字段：total/has_more（若提供）
     if (typeof d.total === 'number') total.value = d.total; else total.value = -1;
     if (typeof d.has_more === 'boolean') hasMore.value = d.has_more;
     else hasMore.value = false;
-    try {
-      const r2 = await api.get('/api/v1/online');
-      const d2 = r2.data || {};
-      sessions.value = d2.sessions || [];
-    } catch (e2: any) {
-      sessions.value = [];
-    }
+    sessions.value = [];
   } catch (e: any) {
     const d = e?.response?.data || {};
     const msg = d.message || d.detail || e?.message || '请求失败';

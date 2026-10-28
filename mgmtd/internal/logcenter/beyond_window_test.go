@@ -6,12 +6,13 @@ import (
 	"testing"
 )
 
-// TestQueryGrepBeyondWindow 验证 grep 能搜到 -n 窗口之外的老日志：
-// 取最近 5 条无 grep，挑一条较老的条目中、最新条目不含的词，
-// 再用 limit=1 + 该词去 grep；若仍能返回含该词的条目，且该条目不是最新条目，
-// 说明 grep 走了 journalctl 自己的 --grep 过滤（能越过 1 条的窗口），
-// 而不是先取尾部 1 条再过滤。
-func TestQueryGrepBeyondWindow(t *testing.T) {
+// TestQueryGrepFindsBeyondWindow 断言 grep 能搜到 -n 窗口之外的老日志。
+//
+// 构造方法：先取最近 5 条（无 grep），取其中一条较老的条目，挑一个它含但
+// 最新条目不含的词 term；再用 limit=1 + term 去 grep。若 grep 走 journalctl
+// 自己的 --grep 过滤，就能返回含 term 的条目，且该条目不是最新条目（证明搜到了
+// 1 条窗口之外的老日志）；若仍先取尾部 1 条再过滤，返回空或最新条目。
+func TestQueryGrepFindsBeyondWindow(t *testing.T) {
 	if _, err := exec.LookPath("journalctl"); err != nil {
 		t.Skip("journalctl not available")
 	}
@@ -45,12 +46,12 @@ func TestQueryGrepBeyondWindow(t *testing.T) {
 		t.Fatalf("Query grep: %v", err)
 	}
 	if len(got) == 0 {
-		t.Fatalf("grep for %q returned 0 entries, but it exists in older log", term)
+		t.Fatalf("grep for %q returned 0 entries, but it exists in older log (beyond 1-entry window)", term)
 	}
 	if !strings.Contains(got[0].Message, term) {
 		t.Errorf("returned entry does not contain grep term %q: %q", term, got[0].Message)
 	}
 	if got[0].Message == newest.Message && got[0].TS == newest.TS {
-		t.Errorf("grep returned the newest entry, did not search beyond the 1-entry window")
+		t.Errorf("grep returned the newest entry only; did not search beyond the 1-entry window")
 	}
 }

@@ -118,6 +118,20 @@ run_module "go_test" bash -c "cd mgmtd && CGO_ENABLED=1 go test ./... 2>&1"
 UI_PORT="${UI_PORT:-4173}"
 # 等 rate limiter 冷却，避免前面的登录请求触发 429
 sleep 30
+
+# UI 验收读的是 vite preview 的 dist 产物，而工人可能正在改 web/src —— 那样
+# 跑出来的 FAIL 是"工作区半成品"，不是真回归（实测 /services 报 0 行，因为
+# 工人 21:51 正在改 Services.vue，回归 21:50 就跑了）。
+# 先看有没有未提交的前端改动：有就重新构建一次，保证 dist 与源码一致，
+# 并在报告里留痕，免得下次有人拿这个数字当准。
+WEB_DIRTY="$(git status --porcelain -- web/src 2>/dev/null | wc -l | tr -d ' ')"
+if [ "${WEB_DIRTY:-0}" != "0" ]; then
+    echo "===== [regression] web/src 有 $WEB_DIRTY 处未提交改动，先重建 dist 再验 UI ====="
+    ( cd web && npm run build >/tmp/regression-webbuild.log 2>&1 ) \
+        && echo "[regression] dist 重建完成" \
+        || { echo "[regression] dist 重建失败，见 /tmp/regression-webbuild.log"; tail -5 /tmp/regression-webbuild.log; }
+fi
+
 if curl -s -m 3 "http://127.0.0.1:$UI_PORT/" >/dev/null 2>&1; then
     # 先探测登录是否可用（避免 429 误报 FAIL）
     if ! python3 -c "import urllib.request,json; r=urllib.request.Request('$BASE/api/v1/auth/login',data=json.dumps({'username':'admin','password':'admin123'}).encode(),headers={'Content-Type':'application/json'},method='POST'); urllib.request.urlopen(r,timeout=10)" 2>/dev/null; then

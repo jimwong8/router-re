@@ -277,6 +277,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/conntrack/acct", s.auth(s.auditWrap("conntrack.acct.set", s.handleSetConntrackAcct)))
 	// P28：终端列表
 	s.mux.HandleFunc("GET /api/v1/terminals", s.auth(s.handleListTerminals))
+	s.mux.HandleFunc("GET /api/v1/conntrack/terminals", s.auth(s.handleListTerminals))
 	s.mux.HandleFunc("GET /api/v1/logs", s.auth(s.handleGetLogs))
 	s.mux.HandleFunc("GET /api/v1/logs/sources", s.auth(s.handleGetLogSources))
 	// P3-3 端口映射 + 策略路由（仅本区块）

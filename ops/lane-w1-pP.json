@@ -1,8 +1,8 @@
 {
   "pane": "w1:pP",
-  "updated": 1793195142.357274,
+  "updated": 1793195841.1149707,
   "pid": 3061209,
-  "state": "busy",
-  "task": "p68-services-page-pagination",
-  "elapsed_min": 4.5
+  "state": "idle",
+  "task": null,
+  "elapsed_min": 3.1
 }

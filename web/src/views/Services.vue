@@ -44,6 +44,21 @@
               </el-table-column>
             </el-table>
 
+            <div style="margin-top:12px; display:flex; justify-content:space-between; align-items:center">
+              <span style="font-size:13px; color:#606266">
+                共 {{ svcTotal }} 个服务，当前第 {{ svcPage }} 页
+                <span v-if="svcHasMore">（还有更多）</span>
+              </span>
+              <el-pagination
+                v-model:current-page="svcPage"
+                :page-size="svcLimit"
+                :total="svcHasMore ? svcPage * svcLimit + 1 : svcPage * svcLimit"
+                :disabled="svcLoading"
+                layout="prev, pager, next, total"
+                @current-change="onSvcPageChange"
+              />
+            </div>
+
             <div v-if="lastActionResult" style="margin-top:12px; font-size:13px; color:#606266">
               上次操作：{{ lastActionResult.unit }} / {{ lastActionResult.action }} →
               applied={{ lastActionResult.applied }}，当前状态={{ lastActionResult.active_after }}
@@ -115,6 +130,19 @@ const svcLoading = ref(false);
 const svcError = ref('');
 const lastActionResult = ref<any>(null);
 
+// 分页（后端支持 limit/offset/total/has_more）
+const svcLimit = ref(50);
+const svcPage = ref(1);
+const svcTotal = ref(0);
+const svcHasMore = ref(false);
+
+function svcOffset() { return (svcPage.value - 1) * svcLimit.value; }
+
+function onSvcPageChange(page: number) {
+  svcPage.value = page;
+  loadServices();
+}
+
 const filteredServices = computed(() => {
   const q = svcFilter.value.trim().toLowerCase();
   if (!q) return services.value;
@@ -158,14 +186,16 @@ async function loadServices() {
   svcLoading.value = true;
   svcError.value = '';
   try {
-    const res = await api.get('/api/v1/system/services');
+    const res = await api.get('/api/v1/system/services', {
+      params: { limit: svcLimit.value, offset: svcOffset() },
+    });
     const d = res.data || {};
     svcAvailable.value = d.available !== false;
     svcReason.value = d.reason || '';
     svcHint.value = d.hint || '';
-    // 后端字段是 units（见 handleListServices），不是 services/items。
-    // 猜字段名的代价是表格永远空，而页面没有任何报错。
     services.value = d.units || d.services || d.items || [];
+    svcTotal.value = d.total || services.value.length;
+    svcHasMore.value = !!d.has_more;
   } catch (e: any) {
     showError(e, '加载服务失败');
     svcError.value = e?.response?.data?.detail || e?.response?.data?.message || e?.message || '加载失败';

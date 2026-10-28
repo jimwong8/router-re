@@ -107,8 +107,26 @@ def main():
             # 判据要抓的是"接口有数据、页面却空着"这个真症状。
             # el-table 的合计行/展开行会让行数与接口条数有 ±1 的出入，
             # 那不算 bug；但接口 500 条而页面 0 行一定是 bug。
+            #
+            # 分页例外：前端按页取数（limit=50）时，页面只该渲染当页的几十行，
+            # 拿"渲染行数 >= 接口总数 * 0.8"去卡会得出假 FAIL（实测 /services
+            # 接口 525 条、当页 50 行，被判不一致——其实分页是对的）。
+            # 页面里有 el-pagination 就说明它自己管分页，此时只要求当页非空。
+            has_pager = page.evaluate("""() => {
+              const panes = Array.from(document.querySelectorAll('.el-tab-pane'));
+              let scope = document;
+              if (panes.length) {
+                const vis = panes.find(p => getComputedStyle(p).display !== 'none');
+                if (vis) scope = vis;
+              }
+              return !!scope.querySelector('.el-pagination, .el-pager, button.el-pagination');
+            }""")
             if expect and expect > 0:
-                ok = rows > 0 and rows >= expect * 0.8
+                if has_pager and rows > 0:
+                    ok = True
+                    desc = (desc + " [分页]").strip()
+                else:
+                    ok = rows > 0 and rows >= expect * 0.8
             else:
                 ok = rows >= min_rows
             mark = "OK  " if ok else "FAIL"

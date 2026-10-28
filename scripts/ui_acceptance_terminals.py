@@ -101,7 +101,7 @@ def main():
         page.evaluate("t => localStorage.setItem('router_token', t)", token)
 
         # 1) /terminals
-        path, api, min_rows, desc = "/terminals", "/api/v1/terminals", 1, "终端列表"
+        path, api, min_rows, desc = "/terminals", "/api/v1/conntrack/terminals?limit=20", 1, "终端列表"
         expect, err = api_count(token, api)
         page.goto(WEB + path, wait_until="load")
         page.wait_for_timeout(3500)
