@@ -1,8 +1,8 @@
 {
   "pane": "w1:pN",
-  "updated": 1793201143.2367759,
+  "updated": 1793201517.7918656,
   "pid": 3061120,
   "state": "idle",
   "task": "p85-dns-failover-recovery",
-  "elapsed_min": 3.2
+  "elapsed_min": 9.5
 }

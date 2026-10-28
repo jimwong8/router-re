@@ -128,8 +128,8 @@ for attempt in ("direct","sudo"):
         continue
 api_bytes=sum(e.get("bytes",0) or 0 for e in (b2.get("entries",[]) if isinstance(b2,dict) else []))
 api_count=len(b2.get("entries",[]) if isinstance(b2,dict) else [])
-if system_count<0:
-    step("4 系统 vs 接口字节对比", "SKIP", f"无法读取 {CONNTRACK_PATH}", "N/A")
+if not read_ok:
+    step("4 系统 vs 接口字节对比", "SKIP", f"无法读取 {CONNTRACK_PATH}: {read_err}", "N/A")
 elif not (b2.get("available") if isinstance(b2,dict) else False):
     step("4 系统 vs 接口字节对比", "SKIP", "接口不可用，跳过对比", "N/A")
 else:

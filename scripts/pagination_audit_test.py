@@ -29,7 +29,7 @@ def call(method, path, token=None, body=None, timeout=15):
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
     if token:
-        req.add_header("Authorization", f"Bearer {token}")
+        req.add_header("Authorization", "Bearer " + token)
     if data:
         req.add_header("Content-Type", "application/json")
     try:
@@ -45,7 +45,7 @@ def call(method, path, token=None, body=None, timeout=15):
             return exc.code, json.loads(raw)
         except json.JSONDecodeError:
             return exc.code, raw
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return 0, f"{type(exc).__name__}: {exc}"
 
 
@@ -63,25 +63,25 @@ def short(x, n=200):
 
 
 def find_list(obj):
-    """Return (list_field_name, list_value, total) for a response dict."""
     if not isinstance(obj, dict):
         return None
-    # find first list value
-    list_key = None
-    list_val = None
     for k, v in obj.items():
         if isinstance(v, list):
-            list_key = k
-            list_val = v
-            break
-    if list_val is None:
-        return None
-    total = obj.get("total")
-    if total is None:
-        total = obj.get("count")
-    if total is None:
-        total = len(list_val)
-    return list_key, list_val, int(total)
+            total = obj.get("total")
+            if total is None:
+                total = obj.get("count")
+            if total is None:
+                total = len(v)
+            return k, v, int(total)
+    return None
+
+
+def safe_list(body):
+    info = find_list(body) if isinstance(body, dict) else None
+    if info is None:
+        return None, [], 0
+    key, lst, total = info
+    return key, lst, total
 
 
 def item_key(item):
@@ -93,10 +93,9 @@ def item_key(item):
 
 token = login()
 
-# 枚举 GET 端点
 endpoints = []
 try:
-    text = SERVER_GO.read_text(encoding="utf-8")
+    text = (ROOT / "mgmtd" / "internal" / "server" / "server.go").read_text(encoding="utf-8")
     for m in re.finditer(r'"GET\s+([^"]+)"', text):
         p = m.group(1)
         if "{" in p or "}" in p:
@@ -108,112 +107,89 @@ except Exception as e:
 
 endpoints = sorted(set(endpoints))
 
-# 只测返回列表的端点
 list_endpoints = []
 for p in endpoints:
-    st, body = call("GET", p + "?limit=5", token=token, timeout=15)
+    st, body = call("GET", p + "?limit=3", token=token, timeout=15)
     if st != 200 or not isinstance(body, dict):
         continue
-    info = find_list(body)
-    if info is None:
+    key, lst, total = safe_list(body)
+    if key is None:
         continue
-    _, lst, total = info
-    if len(lst) == 0 and total == 0:
-        # could be empty list endpoint; still consider if key present
-        pass
     list_endpoints.append(p)
 
 print(f"检测到 {len(list_endpoints)} 个列表端点")
 
-# 审计每个
 audit = []
 for p in list_endpoints:
-    # full fetch
-    st, body = call("GET", p + "?limit=10000", token=token, timeout=30)
-    info = find_list(body) if isinstance(body, dict) else None
-    if info is None:
-        audit.append({"endpoint": p, "supported": False, "N": 0, "dedup": 0,
-                     "dup": 0, "missing": 0, "boundary": "no-list", "status": "SKIP"})
-        add(p, "SKIP", "非列表响应")
-        continue
-    key, full_list, total = info
-    N = total if total and total > 0 else len(full_list)
-    if N == 0:
-        N = len(full_list)
+    # first page to get total + list key
+    st, body = call("GET", p + "?limit=10&offset=0", token=token, timeout=15)
+    key, lst0, total = safe_list(body) if isinstance(body, dict) else (None, [], 0)
+    N = total if total and total > 0 else None
 
-    # paginate by 5
+    # paginate
     collected = []
-    page = 0
     seen = set()
     dup_count = 0
-    while True:
-        st, body = call("GET", f"{p}?limit=5&offset={page*5}", token=token, timeout=15)
+    page = 0
+    while page < 500:
+        st, body = call("GET", f"{p}?limit=10&offset={page*10}", token=token, timeout=15)
         if st != 200 or not isinstance(body, dict):
             break
-        info2 = find_list(body)
-        if info2 is None:
+        k, lst, t = safe_list(body)
+        if k is None or not lst:
             break
-        _, lst, _ = info2
-        if not lst:
-            break
+        if N is None:
+            N = t if t and t > 0 else len(lst)
         for item in lst:
-            k = item_key(item)
-            if k in seen:
+            kk = item_key(item)
+            if kk in seen:
                 dup_count += 1
             else:
-                seen.add(k)
+                seen.add(kk)
             collected.append(item)
-        if len(lst) < 5:
+        if len(lst) < 10:
             break
         page += 1
-        if page > 1000:
-            break
 
+    if N is None:
+        N = len(collected)
     dedup_count = len(seen)
     missing = N - dedup_count if N >= dedup_count else 0
-    # supports pagination? check if second page request returned fewer/different
+
+    # supports pagination?
     st1, body1 = call("GET", f"{p}?limit=5&offset=0", token=token, timeout=15)
     st2, body2 = call("GET", f"{p}?limit=5&offset=5", token=token, timeout=15)
-    info1 = find_list(body1) if isinstance(body1, dict) else None
-    info2 = find_list(body2) if isinstance(body2, dict) else None
-    len1 = len(info1[1]) if info1 else 0
-    len2 = len(info2[1]) if info2 else 0
-    # supports pagination if offset=5 returns different items or empty (not identical full list)
-    supports = True
-    if info1 and info2:
-        keys1 = [item_key(x) for x in info1[1]]
-        keys2 = [item_key(x) for x in info2[1]]
-        if keys1 == keys2 and len(keys1) > 0:
-            supports = False
-    if N <= 5:
-        supports = None  # can't tell
+    _, lst1, _ = safe_list(body1)
+    _, lst2, _ = safe_list(body2)
+    supports = None
+    if len(lst1) > 0:
+        keys1 = [item_key(x) for x in lst1]
+        keys2 = [item_key(x) for x in lst2]
+        supports = (keys1 != keys2) or (len(keys2) == 0)
 
     # boundary tests
     b_results = []
-    # offset=0 limit=0
     st, body = call("GET", f"{p}?limit=0&offset=0", token=token, timeout=15)
-    b_results.append(f"limit=0 -> HTTP {st} items={len(find_list(body)[1]) if (isinstance(body,dict) and find_list(body)) else 0}")
-    # offset beyond total
+    _, lst0b, _ = safe_list(body)
+    b_results.append(f"limit=0 -> HTTP {st} items={len(lst0b)}")
     st, body = call("GET", f"{p}?limit=5&offset={N+100}", token=token, timeout=15)
-    lst_b = find_list(body)[1] if (isinstance(body, dict) and find_list(body)) else []
+    _, lst_b, _ = safe_list(body)
     b_results.append(f"offset>N -> HTTP {st} items={len(lst_b)}")
-    # limit huge
-    st, body = call("GET", f"{p}?limit=100000&offset=0", token=token, timeout=30)
-    lst_h = find_list(body)[1] if (isinstance(body, dict) and find_list(body)) else []
-    b_results.append(f"limit=100000 -> HTTP {st} items={len(lst_h)} (N={N})")
+    st, body = call("GET", f"{p}?limit=1000&offset=0", token=token, timeout=30)
+    _, lst_h, _ = safe_list(body)
+    b_results.append(f"limit=1000 -> HTTP {st} items={len(lst_h)} (N={N})")
 
     ok = (dedup_count == N and dup_count == 0)
     status = "PASS" if ok else "FAIL"
     if supports is False:
         status = "NOPAGE"
     detail = (f"N={N} collected={len(collected)} dedup={dedup_count} dup={dup_count} "
-              f"missing={missing} supports_pagination={supports}")
-    add(p, status, detail, short({"boundary": b_results, "collected_sample": collected[:2]}))
+              f"missing={missing} supports={supports}")
+    add(p, status, detail, short({"boundary": b_results}))
     audit.append({"endpoint": p, "N": N, "collected": len(collected), "dedup": dedup_count,
                   "dup": dup_count, "missing": missing, "supports": supports,
                   "boundary": b_results, "status": status})
 
-# summary
 supported = sum(1 for a in audit if a["supports"] is True)
 unsupported = sum(1 for a in audit if a["supports"] is False)
 unknown = sum(1 for a in audit if a["supports"] is None)
@@ -222,7 +198,6 @@ miss_total = sum(a["missing"] for a in audit)
 passed = sum(1 for a in audit if a["status"] == "PASS")
 failed = sum(1 for a in audit if a["status"] == "FAIL")
 
-# write report
 lines = []
 lines.append("# 分页一致性审计报告")
 lines.append("")

@@ -17,6 +17,7 @@ func main() {
 		SecretKey:     []byte(os.Getenv("MGM_SESSION_SECRET")),
 		AdminUser:     os.Getenv("MGM_ADMIN_USER"),
 		AdminPassword: os.Getenv("MGM_ADMIN_PASSWORD"),
+		UserFile:      os.Getenv("MGM_USER_FILE"),
 	}
 	if len(cfg.SecretKey) == 0 {
 		log.Fatal("MGM_SESSION_SECRET must be set (32+ bytes)")

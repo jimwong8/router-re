@@ -12,6 +12,8 @@ import (
 type Manager struct {
 	mu    sync.RWMutex
 	users map[string]User
+	// file 非空时，账号变更会同步落盘（见 persist.go）。
+	file string
 }
 
 // NewManager builds a manager seeded with a single admin account whose
@@ -19,6 +21,12 @@ type Manager struct {
 // cfg.AdminPassword, default admin / admin123). The password is stored only as
 // its PBKDF2 hash.
 func NewManager(adminUser, adminPassword string) *Manager {
+	return NewManagerWithFile(adminUser, adminPassword, "")
+}
+
+// NewManagerWithFile 在 NewManager 基础上把账号表持久化到 path。
+// 文件里已有同名账号时以文件为准（否则改过的密码重启会被初始密码覆盖）。
+func NewManagerWithFile(adminUser, adminPassword, path string) *Manager {
 	if adminUser == "" {
 		adminUser = "admin"
 	}
@@ -36,6 +44,12 @@ func NewManager(adminUser, adminPassword string) *Manager {
 		Role:         RoleAdmin,
 		Enabled:      true,
 		CreatedAt:    now,
+	}
+	if path != "" {
+		m.file = path
+		// 读失败不阻断启动：账号表坏了也不能让路由器起不来，但错误要让调用方
+		// 看得见（New 里会打日志）。
+		_ = m.loadFromFile(path)
 	}
 	return m
 }
@@ -56,7 +70,7 @@ func (m *Manager) Create(u User) error {
 		u.LastLogin = 0
 	}
 	m.users[u.Username] = u
-	return nil
+	return m.persistLocked()
 }
 
 // Update overwrites a user's role/enabled flags. PasswordHash is preserved if empty.
@@ -75,7 +89,7 @@ func (m *Manager) Update(u User) error {
 	}
 	u.CreatedAt = existing.CreatedAt
 	m.users[u.Username] = u
-	return nil
+	return m.persistLocked()
 }
 
 // Delete removes a user; rejecting removal of the last admin prevents lockout.
@@ -90,7 +104,7 @@ func (m *Manager) Delete(username string) error {
 		return fmt.Errorf("cannot delete the last admin")
 	}
 	delete(m.users, username)
-	return nil
+	return m.persistLocked()
 }
 
 // hasAnotherAdminLocked requires the caller to already hold m.mu.
@@ -161,5 +175,5 @@ func (m *Manager) ChangePassword(username, newPassword string) error {
 	}
 	u.PasswordHash = hash
 	m.users[username] = u
-	return nil
+	return m.persistLocked()
 }

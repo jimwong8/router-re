@@ -63,6 +63,9 @@ type Config struct {
 	// (MGM_ADMIN_USER / MGM_ADMIN_PASSWORD).
 	AdminUser     string
 	AdminPassword string
+	// UserFile 是 RBAC 账号表落盘路径。空串=纯内存（测试用）。
+	// 不设的话重启会清空所有非 admin 账号（实测过：建的用户重启后登录不上）。
+	UserFile string
 }
 
 type Server struct {
@@ -145,7 +148,7 @@ func New(cfg Config) *Server {
 		aclApplier:   execx.DefaultRunner{},
 		accountMgr:   account.NewManager(),
 		billingPlans: billing.DefaultPlans(),
-		rbacMgr:      rbac.NewManager(cfg.AdminUser, cfg.AdminPassword),
+		rbacMgr:      rbac.NewManagerWithFile(cfg.AdminUser, cfg.AdminPassword, cfg.UserFile),
 		threatList:   threat.NewList(),
 	}
 	// Start the background stats collector: sample every 30s, run until
