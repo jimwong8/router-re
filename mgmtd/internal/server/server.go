@@ -272,6 +272,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/pppoe/status", s.auth(s.handleGetPPPoEStatus))
 	// P2-2 日志中心 + 连接跟踪（仅本区块）
 	s.mux.HandleFunc("GET /api/v1/conntrack", s.auth(s.handleGetConntrack))
+	// P28：conntrack 字节统计开关（GET 读状态 / POST 开关+持久化）
+	s.mux.HandleFunc("GET /api/v1/conntrack/acct", s.auth(s.handleGetConntrackAcct))
+	s.mux.HandleFunc("POST /api/v1/conntrack/acct", s.auth(s.auditWrap("conntrack.acct.set", s.handleSetConntrackAcct)))
+	// P28：终端列表
+	s.mux.HandleFunc("GET /api/v1/terminals", s.auth(s.handleListTerminals))
 	s.mux.HandleFunc("GET /api/v1/logs", s.auth(s.handleGetLogs))
 	s.mux.HandleFunc("GET /api/v1/logs/sources", s.auth(s.handleGetLogSources))
 	// P3-3 端口映射 + 策略路由（仅本区块）
@@ -371,6 +376,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/firmware/inspect", s.auth(s.handleFirmwareInspect))
 	s.mux.HandleFunc("POST /api/v1/firmware/plan", s.auth(s.handleFirmwarePlan))
 	s.mux.HandleFunc("POST /api/v1/firmware/apply", s.auth(s.auditWrap("firmware.apply", s.handleFirmwareApply)))
+	s.mux.HandleFunc("POST /api/v1/firmware/confirm", s.auth(s.handleFirmwareConfirm))
 	s.mux.HandleFunc("GET /api/v1/diagnostics/report", s.auth(s.handleDiagReportJSON))
 	s.mux.HandleFunc("GET /api/v1/diagnostics/report/text", s.auth(s.handleDiagReportText))
 	s.mux.HandleFunc("GET /api/v1/notify/smtp", s.auth(s.handleGetSMTP))

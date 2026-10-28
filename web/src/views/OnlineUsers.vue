@@ -12,6 +12,12 @@
 
       <el-alert v-if="error" :title="error" type="error" show-icon :closable="true" @close="error=''" style="margin-bottom:12px" />
 
+      <el-alert v-if="acctAvailable" :title="acctNote ? acctNote : '字节统计：' + (acctOn ? '已开启' : '未开启')" :type="acctOn ? 'success' : 'warning'" show-icon :closable="false" style="margin-bottom:12px">
+        <span v-if="!acctOn">未开启：无法统计每条连接的 rx/tx 字节数。</span>
+        <el-button v-if="!acctOn" size="small" type="primary" @click="enableAcct">开启并持久化</el-button>
+        <span v-else>已开启，字节统计正常工作。</span>
+      </el-alert>
+
       <el-row :gutter="12" style="margin-bottom:16px">
         <el-col :span="6">
           <el-card shadow="hover" class="stat"><div class="n">{{ count }}</div><div class="t">账号总数</div></el-card>
@@ -69,6 +75,9 @@ const count = ref(0);
 const conntrackEntries = ref(0);
 const byteCounting = ref(false);
 const byteCountingNote = ref('');
+const acctAvailable = ref(false);
+const acctOn = ref(false);
+const acctNote = ref('');
 const sessions = ref<any[]>([]);
 
 const onlineCount = computed(() => sessions.value.filter((s: any) => s.online).length);
@@ -132,7 +141,35 @@ async function kick(row: any) {
   }
 }
 
+async function loadAcctStatus() {
+  try {
+    const res = await api.get('/api/v1/conntrack/acct');
+    const d = res.data || {};
+    acctAvailable.value = true;
+    acctOn.value = !!d.on;
+    acctNote.value = d.note || d.byte_counting_note || '';
+  } catch (e: any) {
+    // 后端路由未就绪时（404 等）整块隐藏，不爆页面
+    acctAvailable.value = false;
+    acctOn.value = false;
+    acctNote.value = '';
+  }
+}
+
+async function enableAcct() {
+  try {
+    const res = await api.post('/api/v1/conntrack/acct', { on: true, persist: true });
+    const d = res.data || {};
+    ElMessage.success(d.detail || d.message || '已开启');
+    await loadAcctStatus();
+    await load();
+  } catch (e: any) {
+    showError(e);
+  }
+}
+
 onMounted(load);
+onMounted(loadAcctStatus);
 </script>
 
 <style scoped>
