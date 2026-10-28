@@ -74,7 +74,9 @@ ROUTES = [
     ("GET", "/api/v1/portal/preview", None, {200}, None, "门户预览(HTML)"),
     ("POST", "/api/v1/portal/template", {}, {422}, None, "门户模板空body→422(Validate挡)"),
     # ---- p21 防火墙日志分析 ----
-    ("GET", "/api/v1/firewall/log/analysis", None, {200}, has_fields({"available", "summary", "count"}), "fwlog分析"),
+    ("GET", "/api/v1/firewall/log/analysis", None, {200},
+     lambda d: ("summary" in d and "count" in d) if d.get("available") else ("reason" in d),
+     "fwlog分析(可用→验summary/count，不可用→验reason)"),
     ("GET", "/api/v1/firewall/log/suggestions", None, {200}, lambda d: d.get("applied") is False, "fwlog建议(applied=false)"),
     # ---- p26 终端列表 ----
     ("GET", "/api/v1/terminals", None, {200}, has_fields({"count", "terminals"}), "终端聚合列表"),

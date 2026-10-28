@@ -44,6 +44,7 @@ import Alerts from '../views/Alerts.vue';
 import NetworkAdvanced from '../views/NetworkAdvanced.vue';
 import CertManage from '../views/CertManage.vue';
 import OnlineUsers from '../views/OnlineUsers.vue';
+import Terminals from '../views/Terminals.vue';
 import Services from '../views/Services.vue';
 import NetworkTools from '../views/NetworkTools.vue';
 import VpnClient from '../views/VpnClient.vue';
@@ -97,6 +98,7 @@ const routes = [
   { path: '/network-advanced', component: NetworkAdvanced, meta: { requiresAuth: true } },
   { path: '/cert', component: CertManage, meta: { requiresAuth: true } },
   { path: '/online-users', component: OnlineUsers, meta: { requiresAuth: true } },
+  { path: '/terminals', component: Terminals, meta: { requiresAuth: true } },
   { path: '/services', component: Services, meta: { requiresAuth: true } },
   { path: '/network-tools', component: NetworkTools, meta: { requiresAuth: true } },
   { path: '/vpn-client', component: VpnClient, meta: { requiresAuth: true } },

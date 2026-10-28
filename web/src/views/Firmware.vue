@@ -58,9 +58,23 @@
             <el-checkbox v-model="confirmed">我确认升级会重启设备并中断网络</el-checkbox>
           </el-form-item>
           <el-form-item>
-            <el-button type="danger" :disabled="!confirmed" :loading="applying" @click="applyUpgrade">升级</el-button>
+            <el-button type="primary" :loading="confirming" @click="verifyImage">二次验证</el-button>
+            <el-button type="danger" :disabled="!confirmed" :loading="applying" @click="applyUpgrade" style="margin-left:8px">升级</el-button>
           </el-form-item>
         </el-form>
+
+        <el-alert v-if="confirmError" :title="confirmError" type="error" :closable="false" style="margin:12px 0" />
+
+        <div v-if="confirmResult">
+          <el-descriptions title="二次验证结果" :column="2" border style="margin-bottom:12px">
+            <el-descriptions-item label="verified">{{ confirmResult.verified }}</el-descriptions-item>
+            <el-descriptions-item label="board_checked">{{ confirmResult.board_checked }}</el-descriptions-item>
+            <el-descriptions-item label="SHA256">{{ confirmResult.image?.sha256 }}</el-descriptions-item>
+            <el-descriptions-item label="板型">{{ confirmResult.image?.board }}</el-descriptions-item>
+            <el-descriptions-item label="魔数">{{ confirmResult.image?.magic }}</el-descriptions-item>
+            <el-descriptions-item label="大小">{{ confirmResult.image?.size }}</el-descriptions-item>
+          </el-descriptions>
+        </div>
 
         <el-alert v-if="applyError" :title="applyError" type="error" :closable="false" style="margin:12px 0" />
 
@@ -94,6 +108,36 @@ const applying = ref(false);
 const applyError = ref('');
 const applyResult = ref<any>(null);
 
+const confirming = ref(false);
+const confirmError = ref('');
+const confirmResult = ref<any>(null);
+
+async function verifyImage() {
+  confirming.value = true;
+  confirmError.value = '';
+  confirmResult.value = null;
+  try {
+    const res = await api.post('/api/v1/firmware/confirm', {
+      path: path.value,
+      sha256: image.value?.sha256 || '',
+      board: localBoard.value,
+    });
+    const d = res.data || {};
+    confirmResult.value = d;
+    if (d.verified !== true) {
+      confirmError.value = '二次验证未通过';
+      ElMessage.error('二次验证未通过');
+    } else {
+      ElMessage.success('二次验证通过');
+    }
+  } catch (e: any) {
+    confirmError.value = e?.response?.data?.message || e?.response?.data?.detail || e.message;
+    ElMessage.error(confirmError.value);
+  } finally {
+    confirming.value = false;
+  }
+}
+
 async function checkImage() {
   checking.value = true;
   checkError.value = '';
@@ -123,6 +167,17 @@ async function applyUpgrade() {
   applyError.value = '';
   applyResult.value = null;
   try {
+    const cres = await api.post('/api/v1/firmware/confirm', {
+      path: path.value,
+      sha256: image.value?.sha256 || '',
+      board: localBoard.value,
+    });
+    const cd = cres.data || {};
+    if (cd.verified !== true) {
+      applyError.value = '二次验证未通过';
+      ElMessage.error('二次验证未通过');
+      return;
+    }
     const res = await api.post('/api/v1/firmware/apply', {
       confirm: true,
       path: path.value,

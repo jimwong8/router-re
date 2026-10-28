@@ -38,9 +38,39 @@ func (s *Server) handleListServices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	units := procmon.ParseUnits(out)
+
+	// 分页（可选）：无 limit 参数时全量返回，保持向后兼容（e2e 无参调用）。
+	total := len(units)
+	limitStr := r.URL.Query().Get("limit")
+	offsetStr := r.URL.Query().Get("offset")
+	offset := 0
+	if offsetStr != "" {
+		if n, err := strconv.Atoi(offsetStr); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+	if limitStr != "" {
+		limit := 200
+		if n, err := strconv.Atoi(limitStr); err == nil && n > 0 {
+			limit = n
+		}
+		if limit > 1000 {
+			limit = 1000
+		}
+		if offset > total {
+			offset = total
+		}
+		end := offset + limit
+		if end > total {
+			end = total
+		}
+		units = units[offset:end]
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"available": true,
 		"count":     len(units),
+		"total":     total,
 		"units":     units,
 	})
 }

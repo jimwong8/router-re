@@ -1,15 +1,15 @@
 # 新路由冒烟报告 (smoke-new-routes)
 
-> 生成: 2026-10-28 18:53:23  BASE=http://127.0.0.1:9090
+> 生成: 2026-10-28 19:43:30  BASE=http://127.0.0.1:9090
 
-**汇总**: 覆盖 28 条 / PASS 27 / FAIL 1
+**汇总**: 覆盖 28 条 / PASS 28 / FAIL 0
 
 | 路由 | 说明 | 结果 | 详情 |
 |---|---|---|---|
 | `/api/v1/portal/templates` | 门户模板列表 | PASS | HTTP 200 (预期 {200}) 关键字段OK |
 | `/api/v1/portal/preview` | 门户预览(HTML) | PASS | HTTP 200 (预期 {200}) |
 | `/api/v1/portal/template` | 门户模板空body→422(Validate挡) | PASS | HTTP 422 (预期 {422}) |
-| `/api/v1/firewall/log/analysis` | fwlog分析 | FAIL | HTTP 200 (预期 {200}) 关键字段缺失: {"available": false, "reason": "\u672a\u627e\u5230\u542b SRC= \u7684\u9632\u706b\u5899\u65e5\u5fd7\u884c"} |
+| `/api/v1/firewall/log/analysis` | fwlog分析(可用→验summary/count，不可用→验reason) | PASS | HTTP 200 (预期 {200}) 关键字段OK |
 | `/api/v1/firewall/log/suggestions` | fwlog建议(applied=false) | PASS | HTTP 200 (预期 {200}) 关键字段OK |
 | `/api/v1/terminals` | 终端聚合列表 | PASS | HTTP 200 (预期 {200}) 关键字段OK |
 | `/api/v1/voucher/list` | 卡密列表 | PASS | HTTP 200 (预期 {200}) 关键字段OK |

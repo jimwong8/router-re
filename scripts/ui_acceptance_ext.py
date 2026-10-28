@@ -48,7 +48,7 @@ PAGES = [
     ("/pppoe",          "/api/v1/pppoe/sessions",       0,   "PPPoE 会话(可为空)"),
     ("/qos",            "/api/v1/qos/limits",          0,   "QoS 限速(可为空)"),
     ("/remote",         "/api/v1/remote/access",       0,   "远程访问(可为空)"),
-    ("/security",       "/api/v1/acl/rules",           0,   "ACL 规则(可为空)"),
+    ("/security",       "/api/v1/stats/interfaces",     0,   "接口流量(ACL 表格取 acl/rules、主体表格取 stats/interfaces)"),
     ("/threat",         "/api/v1/threat/list",         0,   "威胁列表(可为空)"),
     ("/upnp",           "/api/v1/upnp/mappings",        0,   "UPnP 映射(可为空)"),
     ("/users",          "/api/v1/users",               1,   "用户列表"),

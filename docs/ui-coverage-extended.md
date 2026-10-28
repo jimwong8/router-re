@@ -6,15 +6,15 @@
 
 | 路由 | 结果 | 接口预期条数 | 页面渲染行数 | 说明 |
 |------|------|--------------|--------------|------|
-| `/services` | OK   | 522 | 522 | systemd 单元列表 (units) |
-| `/online-users` | OK   | 32 | 33 | 在线会话 |
+| `/services` | OK   | 525 | 525 | systemd 单元列表 (units) |
+| `/online-users` | OK   | 15 | 20 | 在线会话 |
 | `/routing-policy` | OK   | 1 | 2 | 策略路由规则(可为空) |
 | `/cert` | SKIP | - | - | SKIP: 证书接口返回对象/{exists,path} 非列表 | 没有可识别的列表字段: detail,exists,path |
 | `/alerts` | OK   | 1 | 1 | 告警规则(可为空) |
 | `/network-tools` | SKIP | - | - | SKIP: 无 GET 列表接口(全 POST 探测) |
 | `/network-advanced` | SKIP | - | - | SKIP: 表单/单接口调优，无列表渲染 |
 | `/accounts` | OK   | 0 | 0 | 账号列表(可为空) |
-| `/audit` | OK   | 44 | 44 | 审计事件 |
+| `/audit` | OK   | 94 | 94 | 审计事件 |
 | `/clients` | OK   | 22 | 22 | 客户端列表 |
 | `/cloud` | OK   | 0 | 0 | 云设备(可为空) |
 | `/diag` | OK   | 10 | 10 | 接口诊断列表 |
@@ -25,13 +25,13 @@
 | `/ipv6` | OK   | 4 | 8 | IPv6 地址(可为空) |
 | `/l7` | OK   | 0 | 0 | L7 规则(可为空) |
 | `/logs` | OK   | 100 | 100 | 日志条目(可为空) |
-| `/voucher` | OK   | 2 | 2 | 卡密列表(可为空) |
+| `/voucher` | OK   | 5 | 5 | 卡密列表(可为空) |
 | `/nac` | SKIP | - | - | SKIP: NAC 多表格分页 (devices/limits/top/neighbors)，接口 neighbors=45 非可见表，无法准确比对 |
 | `/network` | SKIP | - | - | SKIP: portmap/rules.rules=None(主机无 NAT 规则) |
 | `/pppoe` | OK   | 0 | 0 | PPPoE 会话(可为空) |
 | `/qos` | OK   | 0 | 0 | QoS 限速(可为空) |
 | `/remote` | SKIP | - | - | 远程访问(可为空) | 没有可识别的列表字段: access,warnings |
-| `/security` | OK   | 0 | 45 | ACL 规则(可为空) |
+| `/security` | OK   | 10 | 34 | 接口流量(ACL 表格取 acl/rules、主体表格取 stats/interfaces) |
 | `/threat` | OK   | 0 | 0 | 威胁列表(可为空) |
 | `/upnp` | OK   | 0 | 1 | UPnP 映射(可为空) |
 | `/users` | OK   | 1 | 1 | 用户列表 |
