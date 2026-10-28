@@ -1,8 +1,8 @@
 {
   "pane": "w1:pN",
-  "updated": 1793208292.075896,
+  "updated": 1793210183.8590014,
   "pid": 3061120,
-  "state": "busy",
-  "task": "p89-uncovered-batch1",
-  "elapsed_min": 9.9
+  "state": "idle",
+  "task": "p94-misc-batch",
+  "elapsed_min": 16.9
 }
