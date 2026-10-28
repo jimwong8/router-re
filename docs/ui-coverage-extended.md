@@ -7,14 +7,14 @@
 | 路由 | 结果 | 接口预期条数 | 页面渲染行数 | 说明 |
 |------|------|--------------|--------------|------|
 | `/services` | OK   | 522 | 522 | systemd 单元列表 (units) |
-| `/online-users` | OK   | 19 | 26 | 在线会话 |
+| `/online-users` | OK   | 32 | 33 | 在线会话 |
 | `/routing-policy` | OK   | 1 | 2 | 策略路由规则(可为空) |
 | `/cert` | SKIP | - | - | SKIP: 证书接口返回对象/{exists,path} 非列表 | 没有可识别的列表字段: detail,exists,path |
 | `/alerts` | OK   | 1 | 1 | 告警规则(可为空) |
 | `/network-tools` | SKIP | - | - | SKIP: 无 GET 列表接口(全 POST 探测) |
 | `/network-advanced` | SKIP | - | - | SKIP: 表单/单接口调优，无列表渲染 |
 | `/accounts` | OK   | 0 | 0 | 账号列表(可为空) |
-| `/audit` | OK   | 40 | 40 | 审计事件 |
+| `/audit` | OK   | 44 | 44 | 审计事件 |
 | `/clients` | OK   | 22 | 22 | 客户端列表 |
 | `/cloud` | OK   | 0 | 0 | 云设备(可为空) |
 | `/diag` | OK   | 10 | 10 | 接口诊断列表 |
