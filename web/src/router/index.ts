@@ -47,6 +47,7 @@ import OnlineUsers from '../views/OnlineUsers.vue';
 import Terminals from '../views/Terminals.vue';
 import Services from '../views/Services.vue';
 import NetworkTools from '../views/NetworkTools.vue';
+import LinkCheck from '../views/LinkCheck.vue';
 import VpnClient from '../views/VpnClient.vue';
 import SecurityPlus from '../views/SecurityPlus.vue';
 import Voucher from '../views/Voucher.vue';
@@ -101,6 +102,9 @@ const routes = [
   { path: '/terminals', component: Terminals, meta: { requiresAuth: true } },
   { path: '/services', component: Services, meta: { requiresAuth: true } },
   { path: '/network-tools', component: NetworkTools, meta: { requiresAuth: true } },
+  // LinkCheck.vue 之前没有路由：组件和后端接口(/api/v1/linkcheck/*)都在，
+  // 但用户点不到——功能等于不存在。
+  { path: '/linkcheck', component: LinkCheck, meta: { requiresAuth: true } },
   { path: '/vpn-client', component: VpnClient, meta: { requiresAuth: true } },
   { path: '/security-plus', component: SecurityPlus, meta: { requiresAuth: true } },
   { path: '/voucher', component: Voucher, meta: { requiresAuth: true } },

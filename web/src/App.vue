@@ -43,6 +43,7 @@
           <router-link to="/services" style="color:#eee; text-decoration:none;">高级服务</router-link>
           <router-link to="/ipv6" style="color:#eee; text-decoration:none;">IPv6</router-link>
           <router-link to="/diag" style="color:#eee; text-decoration:none;">网络诊断</router-link>
+          <router-link to="/linkcheck" style="color:#eee; text-decoration:none;">链路检测</router-link>
           <router-link to="/remote" style="color:#eee; text-decoration:none;">远程与系统</router-link>
           <router-link to="/accounts" style="color:#eee; text-decoration:none;">认证计费</router-link>
           <router-link to="/dns" style="color:#eee; text-decoration:none;">DNS 服务</router-link>
