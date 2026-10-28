@@ -189,3 +189,29 @@ func (s *Server) handleLinkCheckStatus(w http.ResponseWriter, r *http.Request) {
 		"states": states,
 	})
 }
+
+// handleDeleteLinkCheckTarget DELETE /api/v1/linkcheck/targets/{id}
+// 从存储删除指定 id 的 target（同时清理其状态），id 不存在返回 200 deleted=false。
+func (s *Server) handleDeleteLinkCheckTarget(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	targets := s.loadLinkCheckTargets()
+	found := false
+	filtered := make([]linkcheck.Target, 0, len(targets))
+	for _, t := range targets {
+		if t.ID == id {
+			found = true
+			continue
+		}
+		filtered = append(filtered, t)
+	}
+	if found {
+		if err := s.saveLinkCheckTargets(filtered); err != nil {
+			writeJSON(w, http.StatusInternalServerError, errBody(10482, "save failed", err.Error()))
+			return
+		}
+		states := s.loadLinkCheckStates()
+		delete(states, id)
+		_ = s.saveLinkCheckStates(states)
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"deleted": found})
+}

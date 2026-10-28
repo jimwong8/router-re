@@ -316,3 +316,26 @@ func (s *Server) writeSecretFile(path, content string) error {
 	// 兜底：确认最终权限真的是 0600
 	return os.Chmod(path, 0o600)
 }
+
+// handleDeleteDDNSRecord DELETE /api/v1/ddns/records/{id}
+// 从存储删除指定 id 的 record，id 不存在返回 200 deleted=false。
+func (s *Server) handleDeleteDDNSRecord(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	records := s.loadDDNS()
+	found := false
+	filtered := make([]ddnsup.Record, 0, len(records))
+	for _, rec := range records {
+		if rec.ID == id {
+			found = true
+			continue
+		}
+		filtered = append(filtered, rec)
+	}
+	if found {
+		if err := s.saveDDNS(filtered); err != nil {
+			writeJSON(w, http.StatusInternalServerError, errBody(10483, "save failed", err.Error()))
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"deleted": found})
+}

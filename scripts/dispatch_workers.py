@@ -528,6 +528,20 @@ def main() -> int:
     state = load_state()
     t = now()
 
+    # 0-pre) 队列体检：expect 和 verify_cmd 都没有的任务永远不会被标 done，
+    # 只会超时 → RELEASE → 重派 → 再超时，白烧工人时间还看不出异常。
+    # 这里只告警不拦派（工人可能真能产出文件），但把话说在日志里，别让它静默循环。
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import lint_queue as _lint  # noqa: PLC0415
+        for task in tasks:
+            if task.get("status") == "done":
+                continue
+            for p in _lint.lint_task(task):
+                log(f"LINT  {p}")
+    except Exception as e:  # noqa: BLE001
+        log(f"WARN 队列体检跳过: {type(e).__name__}: {e}")
+
     # 0) 孤儿抢回：pane 已经不在 herdr 里（窗口被关/会话销毁），它手上的
     # dispatched 任务立刻回 pending —— 不等超时、不计重试次数。
     # 为什么不计重试：pane 挂了不是任务的错，扣它的重试次数等于让任务替

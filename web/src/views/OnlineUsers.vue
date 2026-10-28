@@ -160,7 +160,7 @@ async function enableAcct() {
   try {
     const res = await api.post('/api/v1/conntrack/acct', { on: true, persist: true });
     const d = res.data || {};
-    ElMessage.success(d.detail || d.message || '已开启');
+    ElMessage.success('字节统计已开启');
     await loadAcctStatus();
     await load();
   } catch (e: any) {

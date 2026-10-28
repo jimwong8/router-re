@@ -49,6 +49,7 @@ func (s *Server) handleListServices(w http.ResponseWriter, r *http.Request) {
 			offset = n
 		}
 	}
+	hasMore := false
 	if limitStr != "" {
 		limit := 200
 		if n, err := strconv.Atoi(limitStr); err == nil && n > 0 {
@@ -64,14 +65,22 @@ func (s *Server) handleListServices(w http.ResponseWriter, r *http.Request) {
 		if end > total {
 			end = total
 		}
+		hasMore = offset+limit < total
 		units = units[offset:end]
+	}
+	if units == nil {
+		units = []procmon.Unit{}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"available": true,
 		"count":     len(units),
 		"total":     total,
-		"units":     units,
+		"offset":    offset,
+		// 与 /api/v1/logs 对齐：服务列表能拿到全量所以 total 是真值，
+		// has_more 直接由"窗口有没有截断"得出，前端两处可以用同一套翻页逻辑。
+		"has_more": hasMore,
+		"units":    units,
 	})
 }
 

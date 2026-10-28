@@ -331,6 +331,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/vpn/client", s.auth(s.handleSetVPNClient))
 	s.mux.HandleFunc("GET /api/v1/ddns/records", s.auth(s.handleListDDNS))
 	s.mux.HandleFunc("POST /api/v1/ddns/records", s.auth(s.handleSetDDNS))
+	s.mux.HandleFunc("DELETE /api/v1/ddns/records/{id}", s.auth(s.auditWrap("ddns.records.delete", s.handleDeleteDDNSRecord)))
 	s.mux.HandleFunc("GET /api/v1/ddns/check", s.auth(s.handleDDNSCheck))
 	// ---- P17: 卡密认证 ----
 	s.mux.HandleFunc("GET /api/v1/voucher/list", s.auth(s.handleListVouchers))
@@ -340,6 +341,7 @@ func (s *Server) routes() {
 	// ---- P18: 链路检测 ----
 	s.mux.HandleFunc("GET /api/v1/linkcheck/targets", s.auth(s.handleListLinkCheck))
 	s.mux.HandleFunc("POST /api/v1/linkcheck/targets", s.auth(s.handleSetLinkCheck))
+	s.mux.HandleFunc("DELETE /api/v1/linkcheck/targets/{id}", s.auth(s.auditWrap("linkcheck.targets.delete", s.handleDeleteLinkCheckTarget)))
 	s.mux.HandleFunc("POST /api/v1/linkcheck/probe", s.auth(s.handleProbeLink))
 	s.mux.HandleFunc("GET /api/v1/linkcheck/status", s.auth(s.handleLinkCheckStatus))
 	// ---- P21: 防火墙日志分析 ----
@@ -2228,6 +2230,31 @@ func (s *Server) handleGetConntrack(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// paginateEntries 从"多取 offset+limit 条"的查询结果里切出当前页。
+//
+// 抽成独立函数是为了能测：真实 journal 一直在变（高流量时同一秒几十条重复
+// 消息），用 HTTP 打两次窗口根本比不出 offset 有没有位移——实测两次请求返回
+// 的首条一模一样，看着像 bug、其实只是日志在刷屏。这里用纯函数把语义钉死，
+// 由单测覆盖边界，HTTP 层只负责解析参数。
+//
+// total 的语义：只有查询没被 queryLimit 截断时才是真总数；被截断时返回 -1
+// 并置 hasMore，绝不谎报（实测旧代码把 5000 条 journal 报成 total=10）。
+func paginateEntries[T any](all []T, limit, offset, queryLimit int) (page []T, total int, hasMore bool) {
+	total = len(all)
+	hasMore = len(all) >= queryLimit
+	if hasMore {
+		total = -1
+	}
+	if offset >= len(all) {
+		return []T{}, total, hasMore
+	}
+	end := offset + limit
+	if end > len(all) {
+		end = len(all)
+	}
+	return all[offset:end], total, hasMore
+}
+
 func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 	limit := 100
 	if v := r.URL.Query().Get("limit"); v != "" {
@@ -2238,8 +2265,19 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 	if limit > 5000 {
 		limit = 5000
 	}
+	offset := 0
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+	// 支持 offset：多取 offset+limit 条，再切片
+	queryLimit := limit + offset
+	if queryLimit > 5000 {
+		queryLimit = 5000
+	}
 	opts := logcenter.QueryOpts{
-		Limit: limit,
+		Limit: queryLimit,
 		Unit:  r.URL.Query().Get("unit"),
 		Grep:  r.URL.Query().Get("grep"),
 		Since: r.URL.Query().Get("since"),
@@ -2249,9 +2287,24 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 500, errBody(10071, "logs query failed", err.Error()))
 		return
 	}
+	total := len(entries)
+	// 注意：total 只有在"这次查询没被 queryLimit 截断"时才是真总数。截断了就说
+	// 实话——返回 total=-1 + has_more=true，别给前端一个假总数（比如实际有
+	// 5000 条 journal，前端会以为只有 offset+limit 条，翻到第二页就到底了）。
+	// 为什么不直接查全量拿真总数：docs/capacity-probe.md 点名的就是这个端点
+	// 在小内存路由上慢，为了一个 total 去拉整本 journal 等于把慢端点做得更慢。
+	//
+	// 判据必须是"窗口被填满"= len(entries) == queryLimit，不能写
+	// offset+limit > total（total 就是 len(entries)，那个比较永远为假，
+	// 实测 limit=10 会返回 total=10/has_more=false，把 5000 条谎报成 10 条）。
+	page, total, truncated := paginateEntries(entries, limit, offset, queryLimit)
 	writeJSON(w, 200, map[string]interface{}{
-		"entries": entries,
-		"count":   len(entries),
+		"entries":  page,
+		"count":    len(page),
+		"limit":    limit,
+		"offset":   offset,
+		"total":    total,
+		"has_more": truncated,
 	})
 }
 
