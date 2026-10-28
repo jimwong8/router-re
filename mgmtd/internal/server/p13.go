@@ -167,6 +167,35 @@ func (s *Server) handleSetMultiWAN(w http.ResponseWriter, r *http.Request) {
 //
 // 这个接口收到的是"探测结果"，不是"探测动作" —— 真正的探测（ping/http）
 // 由部署侧的探针组件执行后回报，这样管理进程不需要为每条线路起 goroutine。
+// applyWANProbeResult 在锁内完成「读整份 states → 推进一个成员的状态机 → 写回」。
+// 返回该成员的新状态和写回后的整份 map（handler 要用它算 usable 列表）。
+func (s *Server) applyWANProbeResult(member string, success bool, errMsg string, now int64) (multiwan.State, map[string]multiwan.State, error) {
+	s.multiwanMu.Lock()
+	defer s.multiwanMu.Unlock()
+
+	rawP, _ := s.store.Get("multiwan", wanProbeKey)
+	var probe multiwan.Probe
+	_ = json.Unmarshal([]byte(rawP), &probe)
+
+	rawS, _ := s.store.Get("multiwan", wanStatesKey)
+	states := map[string]multiwan.State{}
+	if rawS != "" {
+		_ = json.Unmarshal([]byte(rawS), &states)
+	}
+	st, ok := states[member]
+	if !ok {
+		st = multiwan.State{Name: member, Up: true}
+	}
+	st = multiwan.Update(st, success, errMsg, now, probe)
+	states[member] = st
+
+	b, _ := json.Marshal(states)
+	if err := s.store.Set("multiwan", wanStatesKey, string(b)); err != nil {
+		return st, states, err
+	}
+	return st, states, nil
+}
+
 func (s *Server) handleMultiWANProbeResult(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Member  string `json:"member"`
@@ -181,29 +210,16 @@ func (s *Server) handleMultiWANProbeResult(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, 422, errBody(10368, "缺少 member 参数", ""))
 		return
 	}
-	rawP, _ := s.store.Get("multiwan", wanProbeKey)
-	var probe multiwan.Probe
-	_ = json.Unmarshal([]byte(rawP), &probe)
-
-	rawS, _ := s.store.Get("multiwan", wanStatesKey)
-	states := map[string]multiwan.State{}
-	if rawS != "" {
-		_ = json.Unmarshal([]byte(rawS), &states)
+	st, states, err := s.applyWANProbeResult(body.Member, body.Success, body.Error, time.Now().Unix())
+	if err != nil {
+		writeJSON(w, 500, errBody(10369, "save failed", err.Error()))
+		return
 	}
-	st, ok := states[body.Member]
-	if !ok {
-		st = multiwan.State{Name: body.Member, Up: true}
-	}
-	st = multiwan.Update(st, body.Success, body.Error, time.Now().Unix(), probe)
-	states[body.Member] = st
 
 	rawM, _ := s.store.Get("multiwan", wanMembersKey)
 	var members []multiwan.Member
 	_ = json.Unmarshal([]byte(rawM), &members)
 	usable := multiwan.PickMembers(members, states, 0)
-
-	b, _ := json.Marshal(states)
-	s.store.Set("multiwan", wanStatesKey, string(b))
 
 	resp := map[string]interface{}{
 		"state": st, "usable": usable, "usable_count": len(usable),

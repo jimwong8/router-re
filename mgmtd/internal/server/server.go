@@ -96,6 +96,22 @@ type Server struct {
 	trafficState trafficSampler
 	// threatList 是内存封禁表（P7-4 威胁情报与 IP 封禁）。
 	threatList *threat.List
+	// linkcheckMu 串行化链路检测的「读整份 states → 改一条 → 写整份」序列。
+	//
+	// 不加这把锁时，两个目标并发探测会互相覆盖：实测 32 个并发写只剩 2 条，
+	// 丢了 30 条（94%）。单目标、手动点一次永远复现不出来。
+	// 锁只覆盖内存 map + 小 JSON 落盘，持锁时间很短。
+	linkcheckMu sync.Mutex
+	// voucherMu 串行化卡密的「读整份 → 改一张 → 写整份」序列（生成/核销/删除共用）。
+	//
+	// 不加锁时并发核销会互相覆盖：实测 16 张卡并发核销，14 张的 used_at 被抹回 0，
+	// 也就是这 14 张网卡可以再白用一次。这是少收钱，不是显示问题。
+	voucherMu sync.Mutex
+	// multiwanMu 串行化多 WAN 探测结果的「读整份 states → 改一个成员 → 写整份」。
+	//
+	// 不加锁时并发回来的探测结果互相覆盖，故障切换拿着旧状态判断：
+	// 挂掉的链路显示 up（流量继续打死链路），或恢复的显示 down（白白不用）。
+	multiwanMu sync.Mutex
 }
 
 // trafficSampler 保存上一次接口计数器采样，供 /api/v1/traffic/rates 计算差值。

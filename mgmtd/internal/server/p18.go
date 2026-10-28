@@ -65,6 +65,21 @@ func (s *Server) saveLinkCheckStates(states map[string]linkcheck.State) error {
 	return s.store.Set("linkcheck", "states", string(b))
 }
 
+// applyLinkCheckProbe 在锁内完成「读 states → 按状态机推进一条 → 写回」。
+//
+// 为什么必须整段持锁：saveLinkCheckStates 写的是整个 map。两个目标并发探测时，
+// 都读到同一份快照，后写的那个把前一个刚写进去的整条覆盖掉。实测 32 并发只剩
+// 2 条（丢 94%）。旧值也必须在锁内读，否则同一目标的两次探测会互相覆盖状态机。
+func (s *Server) applyLinkCheckProbe(id string, ok bool, now int64, tgt linkcheck.Target) (linkcheck.State, error) {
+	s.linkcheckMu.Lock()
+	defer s.linkcheckMu.Unlock()
+
+	states := s.loadLinkCheckStates()
+	newState, _ := linkcheck.Step(states[id], ok, now, tgt)
+	states[id] = newState
+	return newState, s.saveLinkCheckStates(states)
+}
+
 // handleListLinkCheck GET — 返回 targets + states。
 func (s *Server) handleListLinkCheck(w http.ResponseWriter, r *http.Request) {
 	targets := s.loadLinkCheckTargets()
@@ -148,11 +163,8 @@ func (s *Server) handleProbeLink(w http.ResponseWriter, r *http.Request) {
 	out, runErr := (execx.DefaultRunner{}).Run(cmdName, args...)
 	ok, reason := linkcheck.ParseProbeOK(tgt, out, runErr)
 
-	states := s.loadLinkCheckStates()
-	old := states[body.ID]
-	newState, _ := linkcheck.Step(old, ok, time.Now().Unix(), tgt)
-	states[body.ID] = newState
-	if err := s.saveLinkCheckStates(states); err != nil {
+	newState, stateErr := s.applyLinkCheckProbe(body.ID, ok, time.Now().Unix(), tgt)
+	if stateErr != nil {
 		// 不阻断返回，但记录
 	}
 
@@ -205,13 +217,20 @@ func (s *Server) handleDeleteLinkCheckTarget(w http.ResponseWriter, r *http.Requ
 		filtered = append(filtered, t)
 	}
 	if found {
-		if err := s.saveLinkCheckTargets(filtered); err != nil {
+		// 与探测共用一把锁：删除时读 states → 删一条 → 写回，同样不能让并发探测
+		// 的整份写把刚删掉的 id 复活（或把别人的状态覆盖掉）。
+		s.linkcheckMu.Lock()
+		err := s.saveLinkCheckTargets(filtered)
+		if err == nil {
+			states := s.loadLinkCheckStates()
+			delete(states, id)
+			err = s.saveLinkCheckStates(states)
+		}
+		s.linkcheckMu.Unlock()
+		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody(10482, "save failed", err.Error()))
 			return
 		}
-		states := s.loadLinkCheckStates()
-		delete(states, id)
-		_ = s.saveLinkCheckStates(states)
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"deleted": found})
 }

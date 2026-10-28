@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -100,8 +101,13 @@ func (s *Server) handleGenerateVouchers(w http.ResponseWriter, r *http.Request) 
 		}
 		created = append(created, v)
 	}
+	// 与核销共用一把锁：并发生成时两个请求各读到同一份旧列表，后写的会把
+	// 前一批刚生成的卡整批吞掉（少发卡，且客户端拿到的明文对应不存在的卡）。
+	s.voucherMu.Lock()
 	all := append(s.loadVouchers(), created...)
-	if err := s.saveVouchers(all); err != nil {
+	err = s.saveVouchers(all)
+	s.voucherMu.Unlock()
+	if err != nil {
 		writeJSON(w, 500, errBody(10435, "save failed", err.Error()))
 		return
 	}
@@ -113,6 +119,35 @@ func (s *Server) handleGenerateVouchers(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+// redeemVoucherLocked 在锁内完成「读整份 → 找到这张 → 核销 → 写回」。
+//
+// 返回 (卡, 分钟, 流量MB, 错误)；找不到卡与密码错误返回同一个错误，避免枚举卡号。
+func (s *Server) redeemVoucherLocked(code, password string, now int64) (voucher.Voucher, int, int64, error) {
+	s.voucherMu.Lock()
+	defer s.voucherMu.Unlock()
+
+	list := s.loadVouchers()
+	for i := range list {
+		if list[i].Code != code && list[i].Code != upper(code) {
+			continue
+		}
+		v := list[i]
+		mins, mb, err := voucher.Redeem(&v, password, now)
+		if err != nil {
+			return v, 0, 0, err
+		}
+		list[i] = v
+		if err := s.saveVouchers(list); err != nil {
+			return v, 0, 0, err
+		}
+		return v, mins, mb, nil
+	}
+	return voucher.Voucher{}, 0, 0, errVoucherNotFound
+}
+
+// errVoucherNotFound 与密码错误用同一句话对外，避免枚举卡号。
+var errVoucherNotFound = fmt.Errorf("卡号或卡密错误")
+
 // handleRedeemVoucher 核销。
 func (s *Server) handleRedeemVoucher(w http.ResponseWriter, r *http.Request) {
 	var body struct {
@@ -123,35 +158,20 @@ func (s *Server) handleRedeemVoucher(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, errBody(10436, "invalid JSON body", err.Error()))
 		return
 	}
-	list := s.loadVouchers()
 	now := time.Now().Unix()
-	for i := range list {
-		if list[i].Code != body.Code && list[i].Code != upper(body.Code) {
-			continue
-		}
-		v := list[i]
-		mins, mb, err := voucher.Redeem(&v, body.Password, now)
-		if err != nil {
-			// Redeem 对"卡不存在"和"密码错"返回同一句话，这里不额外区分
-			writeJSON(w, 422, errBody(10437, "核销失败", err.Error()))
-			return
-		}
-		list[i] = v
-		if err := s.saveVouchers(list); err != nil {
-			writeJSON(w, 500, errBody(10438, "save failed", err.Error()))
-			return
-		}
-		writeJSON(w, 200, map[string]interface{}{
-			"ok":            true,
-			"minutes":       mins,
-			"traffic_mb":    mb,
-			"remaining_min": voucher.RemainingMinutes(v, now),
-			"device_limit":  v.DeviceLimit,
-		})
+	v, mins, mb, err := s.redeemVoucherLocked(body.Code, body.Password, now)
+	if err != nil {
+		// Redeem 对"卡不存在"和"密码错"返回同一句话，这里不额外区分
+		writeJSON(w, 422, errBody(10437, "核销失败", err.Error()))
 		return
 	}
-	// 找不到卡：与密码错误同样的错误，避免枚举卡号
-	writeJSON(w, 422, errBody(10439, "核销失败", "卡号或卡密错误"))
+	writeJSON(w, 200, map[string]interface{}{
+		"ok":            true,
+		"minutes":       mins,
+		"traffic_mb":    mb,
+		"remaining_min": voucher.RemainingMinutes(v, now),
+		"device_limit":  v.DeviceLimit,
+	})
 }
 
 func (s *Server) handleDeleteVoucher(w http.ResponseWriter, r *http.Request) {
@@ -160,6 +180,8 @@ func (s *Server) handleDeleteVoucher(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 422, errBody(10440, "code required", "传 ?code=XXXX"))
 		return
 	}
+	// 同一把锁：并发删除/核销时不加锁会互相覆盖，被删掉的卡可能复活。
+	s.voucherMu.Lock()
 	list := s.loadVouchers()
 	out := make([]voucher.Voucher, 0, len(list))
 	removed := 0
@@ -170,12 +192,17 @@ func (s *Server) handleDeleteVoucher(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, v)
 	}
+	var delErr error
+	if removed > 0 {
+		delErr = s.saveVouchers(out)
+	}
+	s.voucherMu.Unlock()
 	if removed == 0 {
 		writeJSON(w, 404, errBody(10441, "not found", "没有卡号 "+code))
 		return
 	}
-	if err := s.saveVouchers(out); err != nil {
-		writeJSON(w, 500, errBody(10442, "save failed", err.Error()))
+	if delErr != nil {
+		writeJSON(w, 500, errBody(10442, "save failed", delErr.Error()))
 		return
 	}
 	writeJSON(w, 200, map[string]interface{}{"removed": removed, "remaining": len(out)})

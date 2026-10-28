@@ -185,6 +185,7 @@ if curl -s -m 3 "http://127.0.0.1:$UI_PORT/" >/dev/null 2>&1; then
         skip_module "dialog_smoke" "登录被限流(429)或失败，跳过"
         skip_module "form_submit_e2e" "登录被限流(429)或失败，跳过"
         skip_module "rbac_ui_e2e" "登录被限流(429)或失败，跳过"
+        skip_module "voucher_concurrent" "登录被限流(429)或失败，跳过"
     else
         run_module "ui_acceptance" env BASE="$BASE" python3 scripts/ui_acceptance.py
         run_module "ui_acceptance_ext" env BASE="$BASE" python3 scripts/ui_acceptance_ext.py
@@ -202,6 +203,9 @@ if curl -s -m 3 "http://127.0.0.1:$UI_PORT/" >/dev/null 2>&1; then
         # 权限交叉：后端 403 有测试，但"用户看到什么"没有。viewer 点保存要给出
         # 看得懂的中文说明，且绝不能误报成功。
         run_module "rbac_ui_e2e" env BASE="$BASE" env WEB="http://127.0.0.1:$UI_PORT" python3 scripts/rbac_ui_e2e.py
+        # 并发核销：读整份卡密表 → 改一张 → 写回整份，并发时会互相覆盖。
+        # 实测修复前 16 张并发核销有 14 张的 used_at 被抹回 0（可再白用一次）。
+        run_module "voucher_concurrent" env BASE="$BASE" python3 scripts/voucher_concurrent_redeem_e2e.py
     fi
 else
     skip_module "ui_acceptance" "vite preview :$UI_PORT 不通，跳过（需 cd web && npm run preview）"
