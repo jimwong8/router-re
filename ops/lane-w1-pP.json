@@ -1,8 +1,8 @@
 {
   "pane": "w1:pP",
-  "updated": 1793197273.7500744,
+  "updated": 1793197568.34524,
   "pid": 3061209,
-  "state": "idle",
-  "task": "p73-api-fuzz-edge",
-  "elapsed_min": 6.4
+  "state": "busy",
+  "task": "p76-user-journey-test",
+  "elapsed_min": 4.4
 }

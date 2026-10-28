@@ -1,23 +1,23 @@
 # Regression Summary
 
-- Generated: 2026-10-28 22:01:50
+- Generated: 2026-10-28 22:23:46
 - Base: http://127.0.0.1:9090
 - Total modules: 9
-- PASS: 7 / FAIL: 2 / SKIP: 0
+- PASS: 9 / FAIL: 0 / SKIP: 0
 
 ## Module Results
 
 | # | Module | Status | Duration |
 |---|--------|--------|----------|
 | 1 | e2e_test | PASS | — |
-| 2 | smoke_new_routes | PASS | 1615ms |
-| 3 | roundtrip_test | PASS | 588ms |
-| 4 | portal_flow_test | PASS | 509ms |
-| 5 | linkcheck_ddns_test | PASS | 3148ms |
-| 6 | go_test | FAIL(rc=1) | 715ms |
-| 7 | ui_acceptance | PASS | 33076ms |
-| 8 | ui_acceptance_ext | FAIL(rc=1) | 92945ms |
-| 9 | ui_acceptance_terminals | PASS | 13042ms |
+| 2 | smoke_new_routes | PASS | 1636ms |
+| 3 | roundtrip_test | PASS | 567ms |
+| 4 | portal_flow_test | PASS | 530ms |
+| 5 | linkcheck_ddns_test | PASS | 3339ms |
+| 6 | go_test | PASS | 8450ms |
+| 7 | ui_acceptance | PASS | 34710ms |
+| 8 | ui_acceptance_ext | PASS | 94764ms |
+| 9 | ui_acceptance_terminals | PASS | 11151ms |
 
 ## Details (tail of each log)
 
@@ -26,7 +26,7 @@
 ```
 OK     200      0.01s /api/v1/diag/interfaces 
 OK     200      0.00s /api/v1/nac/config 
-OK     200      0.01s /api/v1/nac/neighbors 
+OK     200      0.00s /api/v1/nac/neighbors 
 OK     200      0.00s /api/v1/nac/connlimits (空: limits)
 OK     200      0.03s /api/v1/nac/top-connections 
 OK     200      0.00s /api/v1/lb/config 
@@ -93,10 +93,10 @@ PASS policy/timeschedule→timeschedule: write=200 read=200 verified=True
 
 ```
 PASS 1. 选/保存 portal 模板 — GET templates 200 (count=4); POST template 200 saved=true id=roundtrip
-PASS 2. voucher/generate 测试卡 — HTTP 200 generated=1 code=GNFSG7JMZ9
+PASS 2. voucher/generate 测试卡 — HTTP 200 generated=1 code=FKXKJGP32D
 SKIP 3. portal/login 用卡登录 — 路由未注册 (mgmtd 无 /api/v1/portal/login；门户认证走 /portal/auth 表单，非 mgmtd REST API) probe=GET=404 POST=404 HTTP 404
 SKIP 4. portal/status 查会话 — 路由未注册 (mgmtd 无 /api/v1/portal/status) probe=GET=404 POST=404 HTTP 404
-PASS 5. voucher list/verify 确认已用 — redeem HTTP 200 ok; list HTTP 200; card GNFSG7JMZ9 used=True
+PASS 5. voucher list/verify 确认已用 — redeem HTTP 200 ok; list HTTP 200; card FKXKJGP32D used=True
 SKIP 6. portal/logout 登出+status消失 — 路由未注册 (mgmtd 无 /api/v1/portal/logout) probe=GET=404 POST=404 HTTP 404
 
 汇总: 6 步 / PASS 3 / FAIL 0 / SKIP 3
@@ -115,9 +115,10 @@ PASS 5. 清理 (DELETE 端点): target 已删=是 / record 已删=是
 SUMMARY: PASS=5 FAIL=0 SKIP=0
 ```
 
-### go_test — FAIL(rc=1)
+### go_test — PASS
 
 ```
+ok  	github.com/jimwong/router-re/mgmtd/internal/radius	(cached)
 ok  	github.com/jimwong/router-re/mgmtd/internal/rbac	(cached)
 ok  	github.com/jimwong/router-re/mgmtd/internal/remote	(cached)
 ok  	github.com/jimwong/router-re/mgmtd/internal/route	(cached)
@@ -137,18 +138,17 @@ ok  	github.com/jimwong/router-re/mgmtd/internal/wan	(cached)
 ok  	github.com/jimwong/router-re/mgmtd/internal/webadmin	(cached)
 ok  	github.com/jimwong/router-re/mgmtd/internal/webfilter	(cached)
 ok  	github.com/jimwong/router-re/mgmtd/internal/wireless	(cached)
-FAIL
 ```
 
 ### ui_acceptance — PASS
 
 ```
   OK   /services          接口  525 条 -> 页面   50 行   systemd 单元列表 [分页]
-  OK   /online-users      接口   19 条 -> 页面   21 行   在线会话
+  OK   /online-users      接口   20 条 -> 页面   22 行   在线会话
   OK   /routing-policy    接口    1 条 -> 页面    2 行   策略路由规则(可为空)
   SKIP /cert              接口取数失败: 没有可识别的列表字段: detail,exists,path
   OK   /alerts            接口    1 条 -> 页面    1 行   告警规则(可为空)
-  OK   /voucher           接口   30 条 -> 页面   30 行   卡密列表(可能为空)
+  OK   /voucher           接口   32 条 -> 页面   32 行   卡密列表(可能为空)
   OK   /ddns              接口    0 条 -> 页面    0 行   DDNS 记录(可为空)
   OK   /vpn-client        接口    0 条 -> 页面    0 行   VPN 客户端 peers(可为空)
   OK   /security-plus     接口    1 条 -> 页面    2 行   时间段策略 rules(可为空)
@@ -158,13 +158,13 @@ FAIL
 ✅ UI 验收通过（8 个页面，渲染行数与接口一致）
 ```
 
-### ui_acceptance_ext — FAIL(rc=1)
+### ui_acceptance_ext — PASS
 
 ```
   OK   /ipv6              接口    4 条 -> 页面    8 行   IPv6 地址(可为空)
   OK   /l7                接口    0 条 -> 页面    0 行   L7 规则(可为空)
   OK   /logs              接口  100 条 -> 页面  100 行   日志条目(可为空)
-  OK   /voucher           接口   30 条 -> 页面   30 行   卡密列表(可为空)
+  OK   /voucher           接口   32 条 -> 页面   32 行   卡密列表(可为空)
   SKIP /nac               SKIP: NAC 多表格分页 (devices/limits/top/neighbors)，接口 neighbors=45 非可见表，无法准确比对
   SKIP /network           SKIP: portmap/rules.rules=None(主机无 NAT 规则)
   OK   /pppoe             接口    0 条 -> 页面    0 行   PPPoE 会话(可为空)
@@ -179,7 +179,7 @@ FAIL
   OK   /wan               接口    2 条 -> 页面   10 行   SKIP: wan/links links=None(主机无多WAN)
   SKIP /dhcp-server       接口取数失败: 没有可识别的列表字段: applied,config
 
-❌ 1/24 个页面渲染与接口不一致
+✅ UI 验收扩展通过（24 个页面 OK，9 个 SKIP，0 FAIL）
 报告已写 docs/ui-coverage-extended.md
 ```
 
@@ -187,7 +187,7 @@ FAIL
 
 ```
   OK   /terminals       接口   20 条 -> 页面   20 行   终端列表
-  OK   /online-users    接口   19 条 -> 页面   20 行   字节统计块=存在
+  OK   /online-users    接口   20 条 -> 页面   20 行   字节统计块=存在
 
 ✅ terminals 验收通过（2 个页面 OK，0 个 FAIL）
 报告已写 docs/ui-terminals-acceptance.md

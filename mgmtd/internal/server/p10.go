@@ -322,7 +322,18 @@ func (s *Server) handleRestoreConfig(w http.ResponseWriter, r *http.Request) {
 		if !json.Valid(raw) {
 			continue
 		}
-		s.store.Set(ns, ns, string(raw))
+		// ns 形如 "section.option"（Export 的 key 格式），拆回 (section, option)。
+		section, option := ns, ""
+		if i := strings.IndexByte(ns, '.'); i >= 0 {
+			section = ns[:i]
+			option = ns[i+1:]
+		}
+		if option == "" {
+			option = "config"
+		}
+		if err := s.store.Set(section, option, string(raw)); err != nil {
+			continue
+		}
 		restored = append(restored, ns)
 	}
 	sort.Strings(restored)
