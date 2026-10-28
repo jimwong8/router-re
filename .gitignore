@@ -15,3 +15,4 @@ ops/tasks.jsonl.bak-*
 # 运行时产物：调度状态和任务队列（含进度/retry，不该进仓库）
 .dispatch-state.json
 ops/tasks.jsonl
+docs/write-endpoint-audit.md
