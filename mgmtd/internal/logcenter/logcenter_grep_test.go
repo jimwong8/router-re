@@ -2,40 +2,55 @@ package logcenter
 
 import (
 	"os/exec"
+	"strings"
 	"testing"
 )
 
 // TestQueryGrepBeyondWindow 验证 grep 能搜到 -n 窗口之外的老日志：
-// 用极小的 limit=1 + 一个确实存在于 journal 的关键词，若 grep 仍走
-// journalctl 自己的 --grep 过滤，就能返回匹配条目；若仍先取尾部 1 条再过滤，
-// 绝大多数情况下该 1 条不会含关键词，返回空。
+// 取最近 5 条无 grep，挑一条较老的条目中、最新条目不含的词，
+// 再用 limit=1 + 该词去 grep；若仍能返回含该词的条目，且该条目不是最新条目，
+// 说明 grep 走了 journalctl 自己的 --grep 过滤（能越过 1 条的窗口），
+// 而不是先取尾部 1 条再过滤。
 func TestQueryGrepBeyondWindow(t *testing.T) {
 	if _, err := exec.LookPath("journalctl"); err != nil {
 		t.Skip("journalctl not available")
 	}
-	entries, err := Query(QueryOpts{Limit: 1, Grep: "systemd"})
+	base, err := Query(QueryOpts{Limit: 5})
 	if err != nil {
-		t.Fatalf("Query: %v", err)
+		t.Fatalf("Query base: %v", err)
 	}
-	if len(entries) == 0 {
-		t.Skip("no 'systemd' entries in journal on this host; cannot verify beyond-window search")
+	if len(base) < 2 {
+		t.Skip("need at least 2 journal entries")
 	}
-	// 至少 1 条，且每条 message 都含关键词（大小写敏感）
-	for _, e := range entries {
-		if !containsStr(e.Message, "systemd") {
-			t.Errorf("returned entry does not contain grep term: %q", e.Message)
-		}
-	}
-}
+	newest := base[0]
+	older := base[len(base)-1]
 
-func containsStr(s, sub string) bool {
-	if len(sub) == 0 {
-		return true
-	}
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
+	var term string
+	for _, w := range strings.Fields(older.Message) {
+		w = strings.Trim(w, ".,;:!?()[]{}\"'")
+		if len(w) < 4 {
+			continue
+		}
+		if !strings.Contains(newest.Message, w) {
+			term = w
+			break
 		}
 	}
-	return false
+	if term == "" {
+		t.Skip("no distinguishing term between newest and older entry")
+	}
+
+	got, err := Query(QueryOpts{Limit: 1, Grep: term})
+	if err != nil {
+		t.Fatalf("Query grep: %v", err)
+	}
+	if len(got) == 0 {
+		t.Fatalf("grep for %q returned 0 entries, but it exists in older log", term)
+	}
+	if !strings.Contains(got[0].Message, term) {
+		t.Errorf("returned entry does not contain grep term %q: %q", term, got[0].Message)
+	}
+	if got[0].Message == newest.Message && got[0].TS == newest.TS {
+		t.Errorf("grep returned the newest entry, did not search beyond the 1-entry window")
+	}
 }

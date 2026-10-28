@@ -41,7 +41,7 @@ def main():
         elapsed = d.get("elapsed_min", 0)
         elapsed_str = f"{elapsed:.1f}m" if isinstance(elapsed, (int, float)) else str(elapsed)
         # 上下文水位：用日志文件大小 KB 作代理
-        log_path = LOGS / f"lane-{pane}.log"
+        log_path = LOGS / f"lane-{pane.replace(':', '-')}.log"
         ctx_kb = "—"
         if log_path.exists():
             ctx_kb = f"{log_path.stat().st_size / 1024:.1f}"
@@ -86,5 +86,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-PYEOF
-python3 /tmp/lane_status.py 2>&1 | tail -20

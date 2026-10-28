@@ -605,21 +605,51 @@ def main() -> int:
         if not args.dry_run and verdict in ("pass", "fail"):
             t["verified"] = verdict
             t["verified_at"] = time.time()
+            notes = t.get("verify_notes") or ""
+
+            if verdict == "fail":
+                # 自动返工：把任务放回队列，并把失败原因顶到 prompt 最前面。
+                # 只贴一条消息给工人是不够的——它接着领的是**下一条新任务**，
+                # 旧任务就永远停在 fail 等人来 --recheck。闭环应该是：没过 → 重派。
+                retries = (t.get("retries") or 0) + 1
+                max_retries = t.get("max_retries") or 3
+                if retries <= max_retries:
+                    base = t.get("prompt") or ""
+                    marker = "【上一轮验证未通过，本次必修】"
+                    if marker in base:      # 避免多轮返工把 prompt 越堆越长
+                        base = base.split(marker, 1)[0]
+                    rework = (f"{marker}{notes[:500]}\n"
+                              f"（这是第 {retries}/{max_retries} 次返工。先按上面的原因修，"
+                              f"再确认原任务要求全部满足。）\n\n")
+                    ql.update_task(
+                        t["id"], verified=None, verified_at=None, verify_notes=notes,
+                        verified_by=t.get("verified_by"),
+                        status="pending", pane=None, retries=retries,
+                        retry_after=time.time() + 10,
+                        last_fail_reason=notes[:300],
+                        prompt=rework + base,
+                    )
+                    counts["rework"] = counts.get("rework", 0) + 1
+                    log(f"REWORK {t['id']} 验证没过，已放回队列重派（第 {retries}/{max_retries} 次）")
+                    notify_pane(t.get("pane", ""), f"❌ {t['id']} 验证没过：{notes[:200]}")
+                    time.sleep(2)
+                    continue
+                log(f"GIVEUP {t['id']} 已返工 {max_retries} 次仍不过，留给人看")
+                notify_pane(t.get("pane", ""), f"⚠️ {t['id']} 返工 {max_retries} 次仍不过，需人工介入：{notes[:160]}")
+
             # 只改这一条，不能整表回写：lane 进程会并发改别的任务，
             # 用开头读到的那份快照整体覆盖会把它们的 dispatched 状态写回去
             #（等于任务被解除占用、被第二个工人重抢）。走 queue_lib 的锁。
             ql.update_task(t["id"], verified=verdict, verified_at=t["verified_at"],
-                           verify_notes=t.get("verify_notes"),
-                           verified_by=t.get("verified_by"))
-            # 工人对话框里能看到验证结论：PASS 报喜，FAIL 把原因贴回去让它改
+                           verify_notes=notes, verified_by=t.get("verified_by"))
+            # 工人对话框里能看到验证结论
             pane = t.get("pane", "")
             if verdict == "pass":
                 notify_pane(pane, f"✅ {t['id']} 独立验证通过（verified=pass）")
-            else:
-                notify_pane(pane, f"❌ {t['id']} 验证没过：{(t.get('verify_notes') or '')[:200]}，请按这个修")
         time.sleep(2)   # 低频，别把验证本身变成限流源
 
-    log(f"VERIFY 结束 pass={counts['pass']} fail={counts['fail']} skip={counts['skip']}")
+    log(f"VERIFY 结束 pass={counts['pass']} fail={counts['fail']} "
+        f"skip={counts['skip']} rework={counts.get('rework', 0)}")
 
     if counts["fail"]:
         log("有任务验证失败，见上；修正后可用 --id <id> --recheck 重审")
