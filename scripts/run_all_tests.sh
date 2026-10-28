@@ -240,7 +240,13 @@ done
 
 echo ""
 echo "===== [regression] 汇总 ====="
-echo "PASS: $PASS_COUNT / FAIL: $FAIL_COUNT / SKIP: $SKIP_COUNT"
+# UNSTABLE 必须出现在控制台汇总里。漏掉时输出会是「11 个模块但只报 10 个 PASS」，
+# 看上去像少了两个模块（实测就是这么误读的），而报告里其实写全了。
+if [ "$UNSTABLE_COUNT" -gt 0 ]; then
+    echo "PASS: $PASS_COUNT / FAIL: $FAIL_COUNT / SKIP: $SKIP_COUNT / UNSTABLE: $UNSTABLE_COUNT"
+else
+    echo "PASS: $PASS_COUNT / FAIL: $FAIL_COUNT / SKIP: $SKIP_COUNT"
+fi
 echo "报告: $REPORT"
 echo ""
 
