@@ -33,7 +33,16 @@
           </el-table-column>
           <el-table-column prop="message" label="消息" show-overflow-tooltip />
         </el-table>
-        <div style="margin-top: 8px; color: #666">共 {{ logEntries.length }} 条</div>
+        <div style="margin-top: 8px; display: flex; align-items: center; gap: 12px">
+          <el-button size="small" :disabled="logOffset === 0" @click="prevLogs">上一页</el-button>
+          <el-button size="small" :disabled="!logHasMore" @click="nextLogs">下一页</el-button>
+          <span style="color: #666">
+            已加载 {{ logEntries.length }} 条
+            <template v-if="logTotal >= 0">/ 共 {{ logTotal }} 条</template>
+            <template v-else>（还有更多）</template>
+            · offset {{ logOffset }}
+          </span>
+        </div>
       </el-tab-pane>
 
       <el-tab-pane label="连接跟踪" name="conntrack">
@@ -73,6 +82,9 @@ const unitFilter = ref('');
 const grepFilter = ref('');
 const logLimit = ref(100);
 const autoRefresh = ref(false);
+const logOffset = ref(0);
+const logHasMore = ref(false);
+const logTotal = ref(-1);
 let refreshTimer: any = null;
 
 function priorityTagType(p: string) {
@@ -98,16 +110,29 @@ async function loadSources() {
   }
 }
 
-async function loadLogs() {
+async function loadLogs(offset?: number) {
+  if (offset !== undefined) logOffset.value = offset;
   try {
-    const params: any = { limit: logLimit.value };
+    const params: any = { limit: logLimit.value, offset: logOffset.value };
     if (unitFilter.value) params.unit = unitFilter.value;
     if (grepFilter.value) params.grep = grepFilter.value;
     const res = await api.get('/api/v1/logs', { params });
     logEntries.value = res.data?.entries || [];
+    logHasMore.value = !!res.data?.has_more;
+    logTotal.value = (typeof res.data?.total === 'number') ? res.data.total : -1;
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.message || e.message);
   }
+}
+
+function nextLogs() {
+  if (!logHasMore.value) return;
+  loadLogs(logOffset.value + logLimit.value);
+}
+
+function prevLogs() {
+  const newOffset = Math.max(0, logOffset.value - logLimit.value);
+  loadLogs(newOffset);
 }
 
 // ---- 连接跟踪 Tab ----
@@ -123,6 +148,10 @@ async function loadConntrack() {
     ElMessage.error(e?.response?.data?.message || e.message);
   }
 }
+
+watch([unitFilter, grepFilter, logLimit], () => {
+  loadLogs(0);
+});
 
 watch(autoRefresh, (v) => {
   if (refreshTimer) {

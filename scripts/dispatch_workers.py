@@ -229,6 +229,14 @@ def load_queue() -> list[dict]:
 
 
 def save_queue(tasks: list[dict]) -> None:
+    """写回队列。
+
+    ⚠ 这条路径（整表读→改→写）只在**单进程**模型下安全。现在主路径已经是
+    per-pane lane（scripts/worker_lane.py）+ queue_lib 的加锁原子操作；
+    dispatch_workers.py 退化成 watchdog。误跑本脚本会用它开头读的那份快照
+    整体覆盖队列，把 lane 刚标成 dispatched 的任务写回 pending —— 等于让任务
+    被两个工人重抢。所以 main() 开头会先测锁，lane 在跑就直接退出。
+    """
     QUEUE.parent.mkdir(parents=True, exist_ok=True)
     tmp = QUEUE.with_suffix(".tmp")
     with tmp.open("w", encoding="utf-8") as f:
@@ -520,7 +528,34 @@ def produced(task: dict) -> bool:
 
 # ---------- 主流程 ----------
 
+def _lanes_running() -> list[str]:
+    """列出正在跑的 worker_lane 进程（per-pane lane 才是主路径）。
+
+    不能用队列锁来探测：lane 只在 claim/settle 的毫秒里持锁，非阻塞抢一下
+    几乎必然成功，等于没有保护。实测就栽在这里——以为锁能挡住，结果 watchdog
+    真跑了一轮、按它自己的 produced() 把两个正在写的任务误判成 done。
+    """
+    try:
+        r = subprocess.run(["pgrep", "-af", "scripts/worker_lane.py"],
+                           capture_output=True, text=True, timeout=10)
+    except Exception:  # noqa: BLE001
+        return []
+    out = []
+    for line in (r.stdout or "").splitlines():
+        if not line.strip() or "pgrep" in line:
+            continue
+        out.append(line)
+    return out
+
+
 def main() -> int:
+    # 主路径已经是 per-pane lane：watchdog 只在 lane 全挂时兜底。
+    # 只要还有一个 lane 活着就直接退出——两套驱动同时改队列必然打架。
+    lanes = _lanes_running()
+    if lanes:
+        log(f"SKIP {len(lanes)} 个 worker_lane 在跑（per-pane 主路径），watchdog 不介入")
+        return 0
+
     tasks = load_queue()
     if not tasks:
         return 0

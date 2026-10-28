@@ -35,6 +35,9 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(os.environ.get("WORK_DIR", "/home/jimwong/projects/router-re"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import queue_lib as ql  # noqa: E402  并发安全的队列写入（lane 会同时改别的任务）
+
 QUEUE = ROOT / "ops" / "tasks.jsonl"
 LOG = ROOT / "logs" / "verify.log"
 GATEWAY = os.environ.get("GATEWAY_URL", "http://10.100.1.17:8085/v1/chat/completions")
@@ -602,6 +605,12 @@ def main() -> int:
         if not args.dry_run and verdict in ("pass", "fail"):
             t["verified"] = verdict
             t["verified_at"] = time.time()
+            # 只改这一条，不能整表回写：lane 进程会并发改别的任务，
+            # 用开头读到的那份快照整体覆盖会把它们的 dispatched 状态写回去
+            #（等于任务被解除占用、被第二个工人重抢）。走 queue_lib 的锁。
+            ql.update_task(t["id"], verified=verdict, verified_at=t["verified_at"],
+                           verify_notes=t.get("verify_notes"),
+                           verified_by=t.get("verified_by"))
             # 工人对话框里能看到验证结论：PASS 报喜，FAIL 把原因贴回去让它改
             pane = t.get("pane", "")
             if verdict == "pass":
@@ -610,8 +619,6 @@ def main() -> int:
                 notify_pane(pane, f"❌ {t['id']} 验证没过：{(t.get('verify_notes') or '')[:200]}，请按这个修")
         time.sleep(2)   # 低频，别把验证本身变成限流源
 
-    if not args.dry_run:
-        save_queue(tasks)
     log(f"VERIFY 结束 pass={counts['pass']} fail={counts['fail']} skip={counts['skip']}")
 
     if counts["fail"]:

@@ -1,8 +1,8 @@
 # WAN 接入模块冒烟报告
 
-> 生成: 2026-10-28 21:21:51  BASE=http://127.0.0.1:9090
+> 生成: 2026-10-28 21:28:40  BASE=http://127.0.0.1:9090
 
-**汇总**: 23 步 | PASS 18 / FAIL 1 / SKIP 4
+**汇总**: 23 步 | PASS 19 / FAIL 0 / SKIP 4
 
 | # | 步骤 | 结果 | 说明 |
 |---|------|------|------|
@@ -19,7 +19,7 @@
 | 11 | [porttrigger] GET /api/v1/porttrigger | PASS | HTTP 200 |
 | 12 | 结构验证 /api/v1/upnp/mappings | PASS | 列表为空（无映射），端点正常 |
 | 13 | 结构验证 /api/v1/portmap/rules | PASS | 列表为空（无映射），端点正常 |
-| 14 | [wan] POST /api/v1/wan/links 空 body | FAIL | 空 body 被接受 HTTP 200（Validate 未拦） |
+| 14 | [wan] POST /api/v1/wan/links 空 body | PASS | HTTP 422 code=10484 |
 | 15 | [multiwan] POST /api/v1/multiwan 空 body | PASS | HTTP 422 code=10366 |
 | 16 | [upnp] POST /api/v1/upnp/mappings 空 body | PASS | HTTP 422 code=10143 |
 | 17 | [portmap] POST /api/v1/portmap/rules 空 body | PASS | HTTP 422 code=10114 |
@@ -136,10 +136,10 @@
 
 ## 14. [wan] POST /api/v1/wan/links 空 body
 
-- 结果: **FAIL** — 空 body 被接受 HTTP 200（Validate 未拦）
+- 结果: **PASS** — HTTP 422 code=10484
 
 ```
-{"applied": true, "commands": [], "links": null}
+{"code": "10484", "detail": "清空全部 WAN 策略路由请显式发送 {links:[],confirm:true}", "message": "links 不能为空"}
 ```
 
 ## 15. [multiwan] POST /api/v1/multiwan 空 body

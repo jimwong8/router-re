@@ -1,6 +1,6 @@
 # 写端点 Round-trip 测试报告
 
-> 生成: 2026-10-28 21:10:24  BASE=http://127.0.0.1:9090
+> 生成: 2026-10-28 21:30:10  BASE=http://127.0.0.1:9090
 
 **汇总**: 测了 5 个写端点 / PASS 5 / FAIL 0
 
@@ -36,12 +36,12 @@
   "note": "卡密明文只返回这一次，请立即保存；之后查询只能看到打码版本",
   "vouchers": [
     {
-      "code": "PZRLFJSV5H",
-      "password": "AP3WPHYN2B",
+      "code": "8XH74NMPAP",
+      "password": "JY3KQGE2B5",
       "minutes": 30,
       "traffic_mb": 0,
       "device_limit": 1,
-      "created_at": 1793193024,
+      "created_at": 1793194210,
       "expires_at": 0,
       "used_at": 0,
       "used": false,
@@ -57,9 +57,9 @@
 
 ```json
 {
-  "count": 23,
-  "unused": 13,
-  "used": 10,
+  "count": 25,
+  "unused": 14,
+  "used": 11,
   "vouchers": [
     {
       "code": "R4VTY4YKNE",
@@ -72,7 +72,7 @@
       "used_at": 1793113374,
       "used": true,
       "note": "测试批次",
-      "remaining_min": 113,
+      "remaining_min": 93,
       "expired": false
     },
     {
@@ -184,7 +184,7 @@
       "used_at": 1793191646,
       "used": true,
       "note": "p47 roundtrip",
-      "remaining_min": 8,
+      "remaining_min": 0,
       "expired": false
     },
     {
@@ -212,7 +212,7 @@
       "used_at": 1793191719,
       "used": true,
       "note": "p47 roundtrip",
-      "remaining_min": 9,
+      "remaining_min": 0,
       "expired": false
     },
     {
@@ -240,7 +240,7 @@
       "used_at": 1793191870,
       "used": true,
       "note": "p47 roundtrip",
-      "remaining_min": 11,
+      "remaining_min": 0,
       "expired": false
     },
     {
@@ -268,7 +268,7 @@
       "used_at": 1793191944,
       "used": true,
       "note": "p47 roundtrip",
-      "remaining_min": 12,
+      "remaining_min": 0,
       "expired": false
     },
     {
@@ -296,7 +296,7 @@
       "used_at": 1793192018,
       "used": true,
       "note": "p47 roundtrip",
-      "remaining_min": 14,
+      "remaining_min": 0,
       "expired": false
     },
     {
@@ -324,7 +324,7 @@
       "used_at": 1793192652,
       "used": true,
       "note": "p47 roundtrip",
-      "remaining_min": 24,
+      "remaining_min": 5,
       "expired": false
     },
     {
@@ -352,7 +352,7 @@
       "used_at": 1793192807,
       "used": true,
       "note": "p47 roundtrip",
-      "remaining_min": 27,
+      "remaining_min": 7,
       "expired": false
     },
     {
@@ -366,7 +366,7 @@
       "used_at": 1793192913,
       "used": true,
       "note": "p47 roundtrip",
-      "remaining_min": 29,
+      "remaining_min": 9,
       "expired": false
     },
     {
@@ -376,6 +376,34 @@
       "traffic_mb": 0,
       "device_limit": 1,
       "created_at": 1793193024,
+      "expires_at": 0,
+      "used_at": 0,
+      "used": false,
+      "note": "roundtrip-test",
+      "remaining_min": 30,
+      "expired": false
+    },
+    {
+      "code": "JCBZ84SCUQ",
+      "password": "U2******B2",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793193029,
+      "expires_at": 0,
+      "used_at": 1793193029,
+      "used": true,
+      "note": "p47 roundtrip",
+      "remaining_min": 11,
+      "expired": false
+    },
+    {
+      "code": "8XH74NMPAP",
+      "password": "JY******B5",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793194210,
       "expires_at": 0,
       "used_at": 0,
       "used": false,
@@ -719,7 +747,7 @@
 ```json
 {
   "count": 1,
-  "now": "2026-10-28 21:10:24 Wed",
+  "now": "2026-10-28 21:30:10 Wed",
   "rules": [
     {
       "id": "rt-rule-1",

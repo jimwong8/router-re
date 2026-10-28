@@ -97,6 +97,30 @@ def lint_task(t: dict) -> list[str]:
     if vcmd and re.search(r"\|\|\s*(?:true|:)\s*$", vcmd.strip()):
         problems.append(f"{tid}: verify_cmd 里的 `|| true` 会把失败吞成成功")
 
+    # 6) 门槛已经成立 = 门槛无效
+    #
+    # must_contain 的用途是挡空壳：断言"改动之后才该出现的东西"。如果这个字符串
+    # 在文件里**本来就有**，那么工人什么都没做也会被判 produced=True。实测栽过：
+    # p64 要求 LogCenter.vue 含 "has_more"，而该文件本来就有这个词，watchdog 扫
+    # 一轮就把正在写的任务判成了 done。
+    #
+    # 只对 pending（还没派发）的任务做这个判断：一旦派发出去，工人就开始改那个
+    # 文件，任何门槛都会立刻"本来就有"，再报就是噪声。
+    if t.get("status", "pending") == "pending":
+        for path, needles in (t.get("must_contain") or {}).items():
+            f = ROOT / path
+            if not f.exists():
+                continue          # 文件还不存在：说明是新产出，门槛天然有效
+            try:
+                text = f.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for needle in needles:
+                if needle in text:
+                    problems.append(
+                        f"{tid}: must_contain 的 {needle!r} 在 {path} 里**本来就有** —— "
+                        f"挡不住空壳（工人不做也算达标），换一个改动后才出现的独特字符串")
+
     return problems
 
 

@@ -90,6 +90,12 @@ func queryJournalctl(o QueryOpts) ([]LogEntry, error) {
 	if o.Since != "" {
 		args = append(args, "--since", o.Since)
 	}
+	// Grep 走 journalctl 自己的过滤能力（--grep），而不是取完尾部再过滤，
+	// 这样才能搜到 -n 窗口之外的老日志。用 QuoteMeta 保持子串语义，
+	// --case-sensitive 与 strings.Contains 的大小写敏感语义对齐。
+	if o.Grep != "" {
+		args = append(args, "--case-sensitive", "--grep", regexp.QuoteMeta(o.Grep))
+	}
 	cmd := exec.Command("journalctl", args...)
 	out, err := cmd.Output()
 	if err != nil {

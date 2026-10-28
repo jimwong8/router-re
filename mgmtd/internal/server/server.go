@@ -768,12 +768,32 @@ func (s *Server) handleGetWANLinks(w http.ResponseWriter, r *http.Request) {
 // policy-routing commands.
 func (s *Server) handleSetWANLinks(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Links []wan.WANLink `json:"links"`
+		Links   []wan.WANLink `json:"links"`
+		Confirm bool          `json:"confirm"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.logAudit(r, "wan.links.set", "", "fail", "json decode: "+err.Error())
 		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
 		return
+	}
+	// 空列表必须显式 confirm:true 才放行——与 alerts/l7/tables 三个"全量替换"
+	// 端点同一套约定。为什么这条要紧：applier.Apply(nil) 会按"零条策略路由"
+	// 下发，等于把现存的 WAN 策略路由规则整片抽掉，然后还回 200 applied=true。
+	// 实测踩到过：空 body 直接 200，看不出任何异常。
+	if len(req.Links) == 0 && !req.Confirm {
+		s.logAudit(r, "wan.links.set", "", "fail", "empty links without confirm")
+		writeJSON(w, 422, errBody(10484, "links 不能为空",
+			"清空全部 WAN 策略路由请显式发送 {links:[],confirm:true}"))
+		return
+	}
+	for i, l := range req.Links {
+		if l.Interface == "" {
+			s.logAudit(r, "wan.links.set", fmt.Sprintf("%d links", len(req.Links)), "fail",
+				fmt.Sprintf("link %d missing interface", i))
+			writeJSON(w, 422, errBody(10485, "链路缺少接口名",
+				fmt.Sprintf("links[%d].interface 不能为空", i)))
+			return
+		}
 	}
 	for i, l := range req.Links {
 		key := itoa(i)

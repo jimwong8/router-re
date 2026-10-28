@@ -62,6 +62,20 @@
       <div v-if="!loading && terminals.length === 0" style="margin-top:12px">
         <el-empty description="暂无终端数据" />
       </div>
+
+      <div style="margin-top:12px; display:flex; justify-content:flex-end">
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="pageSize"
+          :total="pageTotal"
+          :page-sizes="[10, 20, 50, 100]"
+          :layout="pageLayout"
+          :disabled="loading"
+          @size-change="onPageSizeChange"
+          @current-change="load"
+        />
+        <el-button size="small" style="margin-left:8px" :disabled="!hasMore || loading" @click="nextPage">下一页</el-button>
+      </div>
     </el-card>
   </div>
 </template>
@@ -73,9 +87,24 @@ import api from '../api';
 
 const loading = ref(false);
 const error = ref('');
+const page = ref(1);
+const pageSize = ref(20);
+const total = ref(-1);          // -1 表示后端未提供真总数，不显示假总数
+const hasMore = ref(false);
 const count = ref(0);
 const terminals = ref<any[]>([]);
 const sessions = ref<any[]>([]);
+
+const pageTotal = computed(() => {
+  // total=-1 时给 el-pagination 一个仅够当前页的值，避免显示假总数与假页码
+  if (total.value >= 0) return total.value;
+  if (hasMore.value) return page.value * pageSize.value + 1;
+  return (page.value - 1) * pageSize.value + terminals.value.length;
+});
+
+const pageLayout = computed(() => {
+  return total.value >= 0 ? 'total, sizes, prev, pager, next' : 'sizes, prev, pager, next';
+});
 
 const sessionByIp = computed(() => {
   const m: Record<string, any> = {};
@@ -106,14 +135,32 @@ function formatBytes(b: any) {
   return (n / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
 }
 
+function onPageSizeChange() {
+  page.value = 1;
+  load();
+}
+
+function nextPage() {
+  if (!hasMore.value) return;
+  page.value += 1;
+  load();
+}
+
 async function load() {
   loading.value = true;
   error.value = '';
   try {
-    const res = await api.get('/api/v1/terminals');
+    const offset = (page.value - 1) * pageSize.value;
+    const res = await api.get('/api/v1/terminals', {
+      params: { limit: pageSize.value, offset },
+    });
     const d = res.data || {};
     terminals.value = d.terminals || [];
     count.value = d.count ?? terminals.value.length;
+    // 后端分页字段：total/has_more（若提供）
+    if (typeof d.total === 'number') total.value = d.total; else total.value = -1;
+    if (typeof d.has_more === 'boolean') hasMore.value = d.has_more;
+    else hasMore.value = false;
     try {
       const r2 = await api.get('/api/v1/online');
       const d2 = r2.data || {};
