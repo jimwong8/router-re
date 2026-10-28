@@ -40,6 +40,7 @@ SKIP_PATHS = {"/api/v1/auth/login"}  # POST-only; GET 会 405，单独测
 TEXT_ENDPOINTS = {
     "/api/v1/diagnostics/report/text",
     "/api/v1/notify/smtp/preview",
+    "/api/v1/portal/preview",  # 返回 text/html 门户模板渲染（p18b），非 JSON
 }
 
 EXPECTED_422 = {
