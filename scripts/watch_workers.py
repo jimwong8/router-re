@@ -41,8 +41,36 @@ PANES = os.environ.get("PANES", "w1:pN w1:pQ w1:pP w1:pM").split()
 INTERVAL = float(os.environ.get("WATCH_INTERVAL", "30"))
 REPEAT_MIN = float(os.environ.get("REMIND_REPEAT_MIN", "0"))
 NO_NOTIFY = os.environ.get("NO_NOTIFY") == "1"
+# 检测到空闲就立刻触发一轮调度，把"等下一个 5 分钟 timer"变成"一空闲就补活"。
+# 快工人完成瞬间最迟 30 秒（一个采样间隔）内就领到下一条任务。
+# 必须 flock：否则 watch 触发和 timer 触发会并发跑两个 dispatch 实例，
+# 同一批 pane 各派一次 = 重复派发。
+AUTO_DISPATCH = os.environ.get("AUTO_DISPATCH", "1") == "1"
+DISPATCH_SCRIPT = os.environ.get(
+    "DISPATCH_SCRIPT", str(ROOT / "scripts" / "dispatch_workers.py"))
+DISPATCH_LOCK = os.environ.get("DISPATCH_LOCK", str(ROOT / "logs" / ".dispatch.lock"))
+MIN_IDLE_DISPATCH = float(os.environ.get("MIN_IDLE_DISPATCH", "30"))  # 秒
 
 HERDR = shutil.which("herdr") or str(Path.home() / ".local/bin/herdr")
+
+
+def run_dispatch() -> None:
+    """检测到空闲后补派一轮。flock 防与 timer 并发；失败只记日志不弹窗。"""
+    env = dict(os.environ)
+    env.setdefault("PATH", "/home/jimwong/.local/bin:/usr/local/bin:/usr/bin:/bin")
+    try:
+        r = subprocess.run(
+            ["flock", "-n", "-E", "99", DISPATCH_LOCK,
+             "/usr/bin/python3", str(DISPATCH_SCRIPT)],
+            env=env, capture_output=True, text=True, timeout=180,
+        )
+        if r.returncode == 99:
+            append(ALERT, f"[{stamp()}] dispatch 被占用（timer 在跑），本轮跳过补派")
+        elif r.returncode != 0:
+            append(ALERT, f"[{stamp()}] dispatch rc={r.returncode}: "
+                          f"{(r.stderr or r.stdout or '')[:120]}")
+    except Exception as exc:  # noqa: BLE001 - 补派失败绝不影响 watch 主循环
+        append(ALERT, f"[{stamp()}] dispatch trigger failed: {exc}")
 
 
 def now() -> float:
@@ -202,23 +230,32 @@ def main() -> int:
 
         # ---- 逐窗口判定 ----
         expired: list[tuple[str, float]] = []
+        newly_idle: list[str] = []
+        prev_state: dict[str, str] = state.get("prev_state", {})
 
         for pane in PANES:
             st = states.get(pane, "unknown")
 
+            # busy -> idle 转变：上一次采样是 busy，这次是 idle ⇒ 刚干完活
+            if st == "idle" and prev_state.get(pane) == "busy":
+                newly_idle.append(pane)
+
             if st == "busy":
                 idle_since.pop(pane, None)
                 last_remind.pop(pane, None)
+                prev_state[pane] = "busy"
                 continue
 
             if st != "idle":
                 # unknown / 空输出：不参与空闲计时。宁可漏提醒，
                 # 也不要在工人其实在干活时弹「闲置」打扰人。
+                prev_state[pane] = st
                 continue
 
             since = idle_since.setdefault(pane, t)
             idle_min = (t - since) / 60.0
             if idle_min < IDLE_MINUTES:
+                prev_state[pane] = "idle"
                 continue
 
             last = last_remind.get(pane)
@@ -228,6 +265,16 @@ def main() -> int:
             elif REPEAT_MIN > 0 and (t - last) / 60.0 >= REPEAT_MIN:
                 expired.append((pane, idle_min))
                 last_remind[pane] = t
+            prev_state[pane] = "idle"
+
+        # ---- 新空闲触发补派（一空闲就领下一条活，不等下一个 timer）----
+        if AUTO_DISPATCH and newly_idle:
+            for p in newly_idle:
+                append(LOG, f"[{stamp(t)}] IDLE->DISPATCH {p} (刚从忙碌转空闲)")
+            run_dispatch()
+            prev_state = dict(state.get("prev_state", {}))
+            for p in newly_idle:
+                prev_state[p] = "idle"
 
         # ---- 提醒 ----
         if expired:
@@ -242,6 +289,7 @@ def main() -> int:
         save_state({
             "idle_since": {k: v for k, v in idle_since.items()},
             "last_remind": {k: v for k, v in last_remind.items()},
+            "prev_state": {k: v for k, v in prev_state.items()},
         })
 
         time.sleep(INTERVAL)
