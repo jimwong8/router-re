@@ -710,8 +710,9 @@ def main() -> int:
             state[pane] = cand["id"]
             dispatched_now += 1
             log(f"DISPATCH {cand['id']} -> {pane}")
-            # 工人对话框里能看到新活：派发时回贴任务名
-            notify_pane(pane, f"📥 新任务 {cand['id']} 已派给你，开始干活吧")
+            # 回贴不再单独发一条：紧跟正文的第二条 prompt 会打断工人对正文
+            # 的处理（实测 p31：正文还在读，第二条 📥 把它打断，工人只记住
+            # 任务名、回"等任务详情"后闲置）。正文里本来就有任务名，回贴多余。
         else:
             # 派发失败：保持 pending，下一轮重试（不吞任务）
             log(f"RETRY {cand['id']} 派发失败，保持 pending")
