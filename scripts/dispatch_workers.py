@@ -375,6 +375,16 @@ def pane_identities() -> dict[str, str]:
     return out
 
 
+def live_pane_ids() -> set[str]:
+    """当前 herdr 里还活着的 pane_id 集合。pane 彻底挂了（窗口被关/会话销毁）
+    就不在这个集合里。返回空集合表示 herdr 调不动 —— 调用方必须跳过抢回，
+    否则会把所有 dispatched 任务误判成孤儿一次性全放回队列。"""
+    try:
+        return set(pane_identities().values())
+    except Exception:  # noqa: BLE001
+        return set()
+
+
 def resolve_panes() -> list[str]:
     """把 PANES_RAW 解析成真正的 pane_id 列表。
 
@@ -498,6 +508,28 @@ def main() -> int:
 
     state = load_state()
     t = now()
+
+    # 0) 孤儿抢回：pane 已经不在 herdr 里（窗口被关/会话销毁），它手上的
+    # dispatched 任务立刻回 pending —— 不等超时、不计重试次数。
+    # 为什么不计重试：pane 挂了不是任务的错，扣它的重试次数等于让任务替
+    # 基础设施的故障买单。重试次数只记录"派给活着的 pane 但没做出来"。
+    # 为什么 herdr 调不动时跳过：live 集合为空无法区分"全挂了"和"herdr
+    # 自己挂了"，后者误判会把所有 dispatched 一次性全放回队列、下轮全部
+    # 重派，等于人为制造一次惊群。宁可等超时兜底，不可在信息不足时抢回。
+    live = live_pane_ids()
+    if live:
+        for task in tasks:
+            if task.get("status") != "dispatched":
+                continue
+            pane = task.get("pane", "")
+            if pane and pane not in live:
+                task["status"] = "pending"
+                task["retry_after"] = None
+                task["fail_reason"] = f"pane {pane} 已不在 herdr 里（疑似窗口被关），任务抢回重派"
+                log(f"ORPHAN {task['id']}  {task['fail_reason']}")
+                state.pop(pane, None)
+    else:
+        log("WARN herdr agent list 为空或调不动，本轮跳过孤儿抢回（只做常规结算）")
 
     # 1) 结算：已派发的任务，产出出现就标 done
     for task in tasks:

@@ -46,6 +46,7 @@ def run_case(pane_state_value, ctx, expect_reset, expect_dispatch, name,
         # 产出文件不存在，避免被误判 done
         d.PANES_RAW = ["w1:pX"]
         d.resolve_panes = lambda: ["w1:pX"]  # 不真调 herdr
+        d.live_pane_ids = lambda: {"w1:pX"}  # pane 活着，不触发抢回
         d.MAX_PER_ROUND = 0  # 自动 = pane 数
 
         calls = {"reset": 0, "dispatch": 0}
@@ -110,6 +111,7 @@ def run_custom(tasks, pane_state_val="idle", ctx=20.0, panes=("w1:pX",)):
         d.PANES_RAW = list(panes)
         d.MAX_PER_ROUND = 0  # 自动 = pane 数
         d.resolve_panes = lambda: list(panes)  # 不真调 herdr
+        d.live_pane_ids = lambda _p=list(panes): set(_p)  # 全活着，不触发抢回
 
         calls = {"dispatch": 0}
         d.pane_state = lambda p: pane_state_val
@@ -201,6 +203,7 @@ with tempfile.TemporaryDirectory() as td:
     d.PANES_RAW = ["w1:pN", "w1:pM"]          # pN=free, pM=strong
     d.STRONG_PANES = {"w1:pM"}
     d.resolve_panes = lambda: ["w1:pN", "w1:pM"]
+    d.live_pane_ids = lambda: set(["w1:pN", "w1:pM"])
     d.MAX_PER_ROUND = 1
     d.pane_state = lambda p: "idle"
     d.context_pct = lambda p: 10.0
@@ -220,6 +223,7 @@ with tempfile.TemporaryDirectory() as td:
     d.PANES_RAW = ["w1:pN", "w1:pQ"]
     d.STRONG_PANES = {"w1:pM"}  # 本轮没有 strong pane
     d.resolve_panes = lambda: ["w1:pN", "w1:pQ"]
+    d.live_pane_ids = lambda: set(["w1:pN", "w1:pQ"])
     d.MAX_PER_ROUND = 1
     d.pane_state = lambda p: "idle"
     d.context_pct = lambda p: 10.0
@@ -240,6 +244,7 @@ with tempfile.TemporaryDirectory() as td:
     d.QUEUE.write_text(json.dumps({"id":"e1","status":"pending","prompt":"改个文件"})+"\n", encoding="utf-8")
     d.PANES_RAW = ["w1:pN"]
     d.resolve_panes = lambda: ["w1:pN"]
+    d.live_pane_ids = lambda: set(["w1:pN"])
     d.MAX_PER_ROUND = 1
     d.pane_state = lambda p: "idle"
     d.context_pct = lambda p: 10.0
@@ -250,6 +255,43 @@ with tempfile.TemporaryDirectory() as td:
     with redirect_stdout(buf):
         d.main()
 check("exec 任务派给 free pane", served == ["w1:pN"], f"实际 {served}")
+
+print("\n=== 场景 17: pane 挂了 -> dispatched 任务立刻抢回 pending（不计重试）===")
+_, final, log17 = run_custom([
+    {"id": "orph", "status": "dispatched", "pane": "w1:pDEAD", "prompt": "orph work",
+     "dispatched_at": _t.time() - 60, "expect": ["nope_missing_file_xyz"], "retried": 2},
+], panes=("w1:pX",))
+# run_custom 的 live mock 只含 w1:pX，所以 w1:pDEAD 算已挂
+orph = [t for t in final if t["id"] == "orph"][0]
+# 抢回后同一轮可能被健康的 w1:pX 立刻领走（这是对的：活不等人），
+# 所以不断言最终 status，只断言"脱离死 pane + 不扣重试"
+check("孤儿任务脱离死 pane", orph.get("pane") != "w1:pDEAD",
+      f"实际 status={orph['status']} pane={orph.get('pane')}")
+check("不扣重试次数（仍为 2）", orph.get("retried") == 2, f"实际 {orph.get('retried')}")
+check("日志有 ORPHAN", "ORPHAN" in log17, log17.strip()[-90:] if log17.strip() else "空")
+
+print("\n=== 场景 18: herdr 调不动（live 为空）-> 不抢回，等超时兜底 ===")
+with tempfile.TemporaryDirectory() as td:
+    td = Path(td)
+    d.QUEUE, d.STATE, d.LOG = td/"tasks.jsonl", td/".state.json", td/"dispatch.log"
+    d.QUEUE.write_text(json.dumps({"id": "h1", "status": "dispatched", "pane": "w1:pX",
+        "prompt": "x", "dispatched_at": _t.time() - 60,
+        "expect": ["nope_missing_file_xyz"]})+"\n", encoding="utf-8")
+    d.PANES_RAW = ["w1:pX"]
+    d.resolve_panes = lambda: ["w1:pX"]
+    d.live_pane_ids = lambda: set()  # herdr 挂了，拿不到 live 集合
+    d.MAX_PER_ROUND = 0
+    d.pane_state = lambda p: "busy"  # 避免 RELEASE/超时分支干扰：60 秒远小于预算
+    d.context_pct = lambda p: 10.0
+    d.reset_context = lambda p: True
+    d.dispatch = lambda p, prompt: True
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        d.main()
+    final = [json.loads(l) for l in d.QUEUE.read_text().splitlines() if l.strip()]
+    h1 = final[0]
+    check("herdr 失联时不误判孤儿", h1["status"] == "dispatched", f"实际 {h1['status']}")
+    check("日志有跳过抢回 WARN", "跳过孤儿抢回" in buf.getvalue())
 
 print("\n=== 汇总 ===")
 if FAILED:
