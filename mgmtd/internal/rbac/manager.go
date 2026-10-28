@@ -88,6 +88,12 @@ func (m *Manager) Update(u User) error {
 		u.PasswordHash = existing.PasswordHash
 	}
 	u.CreatedAt = existing.CreatedAt
+	// 降级/停用保护：不能把最后一个 admin 降级或停用。
+	if existing.Role == RoleAdmin && (u.Role != RoleAdmin || !u.Enabled) {
+		if !m.hasAnotherAdminLocked(u.Username) {
+			return fmt.Errorf("cannot demote or disable the last admin")
+		}
+	}
 	m.users[u.Username] = u
 	return m.persistLocked()
 }

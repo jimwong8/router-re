@@ -1,6 +1,6 @@
 # 写端点 Round-trip 测试报告
 
-> 生成: 2026-10-28 23:33:30  BASE=http://127.0.0.1:9090
+> 生成: 2026-10-28 23:47:10  BASE=http://127.0.0.1:9090
 
 **汇总**: 测了 5 个写端点 / PASS 5 / FAIL 0
 
@@ -36,12 +36,12 @@
   "note": "卡密明文只返回这一次，请立即保存；之后查询只能看到打码版本",
   "vouchers": [
     {
-      "code": "TVZYQKKLGH",
-      "password": "TCTDJ9KRN3",
+      "code": "6PK9NQX8RB",
+      "password": "RJVTYNQ584",
       "minutes": 30,
       "traffic_mb": 0,
       "device_limit": 1,
-      "created_at": 1793201610,
+      "created_at": 1793202430,
       "expires_at": 0,
       "used_at": 0,
       "used": false,
@@ -57,9 +57,9 @@
 
 ```json
 {
-  "count": 33,
-  "unused": 18,
-  "used": 15,
+  "count": 35,
+  "unused": 19,
+  "used": 16,
   "vouchers": [
     {
       "code": "R4VTY4YKNE",
@@ -522,6 +522,34 @@
       "note": "roundtrip-test",
       "remaining_min": 30,
       "expired": false
+    },
+    {
+      "code": "PWHEVFZA2D",
+      "password": "2C******7H",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793201616,
+      "expires_at": 0,
+      "used_at": 1793201616,
+      "used": true,
+      "note": "p47 roundtrip",
+      "remaining_min": 17,
+      "expired": false
+    },
+    {
+      "code": "6PK9NQX8RB",
+      "password": "RJ******84",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793202430,
+      "expires_at": 0,
+      "used_at": 0,
+      "used": false,
+      "note": "roundtrip-test",
+      "remaining_min": 30,
+      "expired": false
     }
   ]
 }
@@ -859,7 +887,7 @@
 ```json
 {
   "count": 1,
-  "now": "2026-10-28 23:33:30 Wed",
+  "now": "2026-10-28 23:47:10 Wed",
   "rules": [
     {
       "id": "rt-rule-1",

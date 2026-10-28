@@ -102,10 +102,46 @@ func (s *Server) handleSetMultiWAN(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Members []multiwan.Member `json:"members"`
 		Probe   multiwan.Probe    `json:"probe"`
+		Confirm bool              `json:"confirm"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, 422, errBody(10364, "invalid body", err.Error()))
 		return
+	}
+	// 空成员列表必须显式 confirm:true 才放行——与 wan/links 保持一致的约定。
+	// 清空全部成员会令多 WAN 选路退化为无线路可用，必须显式确认。
+	if len(body.Members) == 0 && !body.Confirm {
+		writeJSON(w, 422, errBody(10369, "members 不能为空",
+			"清空全部 MultiWAN 成员请显式发送 {\"members\":[],\"confirm\":true}"))
+		return
+	}
+	// 集合级校验：权重范围、名称重复、接口重复。
+	// 这些是单成员 ValidateMember 无法发现的交叉问题：
+	//   - 同名 members 导致状态机键冲突；
+	//   - 同 iface 会让加权轮询把同一张网卡的流量算两次，路由表也冲突。
+	// 权重在此提前拦截（负数或超过 100），赋予 10372，区别于单成员 10365。
+	seenNames := make(map[string]int)
+	seenIfaces := make(map[string]int)
+	for i, m := range body.Members {
+		if m.Weight < 0 || m.Weight > 100 {
+			writeJSON(w, 422, errBody(10372, "invalid weight",
+				"members["+itoa(i)+"].weight 必须为 0-100（负数或超过 100 为非法），实际 "+itoa(m.Weight)))
+			return
+		}
+		if prev, ok := seenNames[m.Name]; ok {
+			writeJSON(w, 422, errBody(10370, "duplicate member name",
+				"成员名称 \""+m.Name+"\" 重复（members["+itoa(prev)+"] 和 members["+itoa(i)+"]）"))
+			return
+		}
+		seenNames[m.Name] = i
+		if m.Iface != "" {
+			if prev, ok := seenIfaces[m.Iface]; ok {
+				writeJSON(w, 422, errBody(10371, "duplicate interface",
+					"接口 \""+m.Iface+"\" 在多个成员中重复（members["+itoa(prev)+"] 和 members["+itoa(i)+"]），会造成权重重复计算和路由表冲突"))
+				return
+			}
+			seenIfaces[m.Iface] = i
+		}
 	}
 	for i, m := range body.Members {
 		if err := multiwan.ValidateMember(m); err != nil {

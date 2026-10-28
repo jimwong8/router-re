@@ -318,6 +318,12 @@ func (s *Server) handleRestoreConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	restored := []string{}
+	// 恢复前先打快照：任一段写入失败时回滚，避免半套配置。
+	snap, snapErr := s.store.Snapshot()
+	if snapErr != nil {
+		writeJSON(w, 500, errBody(10226, "snapshot failed", snapErr.Error()))
+		return
+	}
 	for ns, raw := range body.Bundle.Sections {
 		if !json.Valid(raw) {
 			continue
@@ -332,7 +338,11 @@ func (s *Server) handleRestoreConfig(w http.ResponseWriter, r *http.Request) {
 			option = "config"
 		}
 		if err := s.store.Set(section, option, string(raw)); err != nil {
-			continue
+			// 写入失败：回滚到快照，返回 500，detail 写清哪一段失败。
+			_ = s.store.Rollback(snap)
+			writeJSON(w, 500, errBody(10226, "restore failed",
+				"section "+ns+" write failed: "+err.Error()))
+			return
 		}
 		restored = append(restored, ns)
 	}

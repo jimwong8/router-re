@@ -17,6 +17,9 @@ const (
 
 var validRoles = map[Role]bool{RoleAdmin: true, RoleOperator: true, RoleViewer: true}
 
+// ValidRole reports whether role is one of admin/operator/viewer.
+func ValidRole(r Role) bool { return validRoles[r] }
+
 // User is a persisted administrator account. PasswordHash is never serialized.
 type User struct {
 	Username     string `json:"username"`
