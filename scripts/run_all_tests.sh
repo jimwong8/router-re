@@ -160,6 +160,7 @@ if curl -s -m 3 "http://127.0.0.1:$UI_PORT/" >/dev/null 2>&1; then
         skip_module "ui_acceptance_terminals" "登录被限流(429)或失败，跳过"
         skip_module "users_edit_e2e" "登录被限流(429)或失败，跳过"
         skip_module "dialog_smoke" "登录被限流(429)或失败，跳过"
+        skip_module "form_submit_e2e" "登录被限流(429)或失败，跳过"
     else
         run_module "ui_acceptance" env BASE="$BASE" python3 scripts/ui_acceptance.py
         run_module "ui_acceptance_ext" env BASE="$BASE" python3 scripts/ui_acceptance_ext.py
@@ -171,6 +172,9 @@ if curl -s -m 3 "http://127.0.0.1:$UI_PORT/" >/dev/null 2>&1; then
         # 交互冒烟：每页「新增/添加/生成」按钮点下去必须真弹出对话框。
         # 行数验收对"按钮绑了没反应的处理器"完全无感（Users 三个弹窗就是这么坏的）。
         run_module "dialog_smoke" env BASE="$BASE" env WEB="http://127.0.0.1:$UI_PORT" python3 scripts/dialog_smoke.py
+        # 弹窗能开 ≠ 能存：保存按钮可能绑空函数/调错接口/后端 200 但表格不刷新。
+        # 这条做「填 → 存 → 后端真的变了 → 页面真的刷新了」。
+        run_module "form_submit_e2e" env BASE="$BASE" env WEB="http://127.0.0.1:$UI_PORT" python3 scripts/form_submit_e2e.py
     fi
 else
     skip_module "ui_acceptance" "vite preview :$UI_PORT 不通，跳过（需 cd web && npm run preview）"
@@ -178,6 +182,7 @@ else
     skip_module "ui_acceptance_terminals" "vite preview :$UI_PORT 不通，跳过"
     skip_module "users_edit_e2e" "vite preview :$UI_PORT 不通，跳过"
     skip_module "dialog_smoke" "vite preview :$UI_PORT 不通，跳过"
+    skip_module "form_submit_e2e" "vite preview :$UI_PORT 不通，跳过"
 fi
 
 # ---------- 汇总 ----------
