@@ -1,6 +1,6 @@
 # 写端点 Round-trip 测试报告
 
-> 生成: 2026-10-28 22:19:06  BASE=http://127.0.0.1:9090
+> 生成: 2026-10-28 23:33:30  BASE=http://127.0.0.1:9090
 
 **汇总**: 测了 5 个写端点 / PASS 5 / FAIL 0
 
@@ -36,12 +36,12 @@
   "note": "卡密明文只返回这一次，请立即保存；之后查询只能看到打码版本",
   "vouchers": [
     {
-      "code": "QTJZE3PCWB",
-      "password": "W4RLJUANH9",
+      "code": "TVZYQKKLGH",
+      "password": "TCTDJ9KRN3",
       "minutes": 30,
       "traffic_mb": 0,
       "device_limit": 1,
-      "created_at": 1793197146,
+      "created_at": 1793201610,
       "expires_at": 0,
       "used_at": 0,
       "used": false,
@@ -57,9 +57,9 @@
 
 ```json
 {
-  "count": 31,
-  "unused": 17,
-  "used": 14,
+  "count": 33,
+  "unused": 18,
+  "used": 15,
   "vouchers": [
     {
       "code": "R4VTY4YKNE",
@@ -72,7 +72,7 @@
       "used_at": 1793113374,
       "used": true,
       "note": "测试批次",
-      "remaining_min": 44,
+      "remaining_min": 0,
       "expired": false
     },
     {
@@ -478,7 +478,7 @@
       "used_at": 1793195847,
       "used": true,
       "note": "p47 roundtrip",
-      "remaining_min": 9,
+      "remaining_min": 0,
       "expired": false
     },
     {
@@ -488,6 +488,34 @@
       "traffic_mb": 0,
       "device_limit": 1,
       "created_at": 1793197146,
+      "expires_at": 0,
+      "used_at": 0,
+      "used": false,
+      "note": "roundtrip-test",
+      "remaining_min": 30,
+      "expired": false
+    },
+    {
+      "code": "FKXKJGP32D",
+      "password": "2Q******8U",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793197151,
+      "expires_at": 0,
+      "used_at": 1793197151,
+      "used": true,
+      "note": "p47 roundtrip",
+      "remaining_min": 0,
+      "expired": false
+    },
+    {
+      "code": "TVZYQKKLGH",
+      "password": "TC******N3",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793201610,
       "expires_at": 0,
       "used_at": 0,
       "used": false,
@@ -831,7 +859,7 @@
 ```json
 {
   "count": 1,
-  "now": "2026-10-28 22:19:06 Wed",
+  "now": "2026-10-28 23:33:30 Wed",
   "rules": [
     {
       "id": "rt-rule-1",

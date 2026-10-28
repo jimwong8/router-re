@@ -126,7 +126,23 @@ for p in list_endpoints:
     key, lst0, total = safe_list(body) if isinstance(body, dict) else (None, [], 0)
     N = total if total and total > 0 else None
 
-    # paginate
+    # skip empty endpoints quickly
+    if N == 0:
+        supports = None
+        b_results = []
+        st, body = call("GET", f"{p}?limit=0&offset=0", token=token, timeout=15)
+        b_results.append(f"limit=0 -> HTTP {st} items=0")
+        st, body = call("GET", f"{p}?limit=5&offset=100", token=token, timeout=15)
+        _, lst_b, _ = safe_list(body)
+        b_results.append(f"offset>N -> HTTP {st} items={len(lst_b)}")
+        add(p, "PASS", f"N=0 collected=0 dedup=0 dup=0 missing=0 supports={supports}", short({"boundary": b_results}))
+        audit.append({"endpoint": p, "N": 0, "collected": 0, "dedup": 0,
+                      "dup": 0, "missing": 0, "supports": supports,
+                      "boundary": b_results, "status": "PASS"})
+        print(f"  -> {p} done (empty)", flush=True)
+        continue
+
+    print(f"  -> processing {p} (N={N})", flush=True)
     collected = []
     seen = set()
     dup_count = 0

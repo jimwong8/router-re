@@ -1,8 +1,8 @@
 {
   "pane": "w1:pN",
-  "updated": 1793201517.7918656,
+  "updated": 1793201953.1916685,
   "pid": 3061120,
   "state": "idle",
-  "task": "p85-dns-failover-recovery",
-  "elapsed_min": 9.5
+  "task": "p88-dhcp-lease-lifecycle",
+  "elapsed_min": 2.1
 }

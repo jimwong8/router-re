@@ -7,7 +7,7 @@
 | 路由 | 结果 | 接口预期条数 | 页面渲染行数 | 说明 |
 |------|------|--------------|--------------|------|
 | `/services` | OK   | 525 | 50 | systemd 单元列表 (units) [分页] |
-| `/online-users` | OK   | 18 | 21 | 在线会话 |
+| `/online-users` | OK   | 24 | 25 | 在线会话 |
 | `/routing-policy` | OK   | 1 | 2 | 策略路由规则(可为空) |
 | `/cert` | SKIP | - | - | SKIP: 证书接口返回对象/{exists,path} 非列表 | 没有可识别的列表字段: detail,exists,path |
 | `/alerts` | OK   | 1 | 1 | 告警规则(可为空) |
@@ -25,7 +25,7 @@
 | `/ipv6` | OK   | 4 | 8 | IPv6 地址(可为空) |
 | `/l7` | OK   | 0 | 0 | L7 规则(可为空) |
 | `/logs` | OK   | 100 | 100 | 日志条目(可为空) |
-| `/voucher` | OK   | 32 | 32 | 卡密列表(可为空) |
+| `/voucher` | OK   | 34 | 34 | 卡密列表(可为空) |
 | `/nac` | SKIP | - | - | SKIP: NAC 多表格分页 (devices/limits/top/neighbors)，接口 neighbors=45 非可见表，无法准确比对 |
 | `/network` | SKIP | - | - | SKIP: portmap/rules.rules=None(主机无 NAT 规则) |
 | `/pppoe` | OK   | 0 | 0 | PPPoE 会话(可为空) |
@@ -34,10 +34,10 @@
 | `/security` | OK   | 10 | 34 | 接口流量(ACL 表格取 acl/rules、主体表格取 stats/interfaces) |
 | `/threat` | OK   | 0 | 0 | 威胁列表(可为空) |
 | `/upnp` | OK   | 0 | 1 | UPnP 映射(可为空) |
-| `/users` | OK   | 1 | 1 | 用户列表 |
+| `/users` | OK   | 2 | 2 | 用户列表 |
 | `/wireless` | OK   | 0 | 0 | Wi-Fi SSID(可为空) |
 | `/static-route` | SKIP | - | - | SKIP: route/static 返回 routes=None(主机无静态路由) | 没有可识别的列表字段: commands,routes |
-| `/wan` | OK   | 2 | 10 | SKIP: wan/links links=None(主机无多WAN) |
+| `/wan` | OK   | 1 | 10 | SKIP: wan/links links=None(主机无多WAN) |
 | `/dhcp-server` | SKIP | - | - | SKIP: dhcp/server 返回 config(对象)非列表 | 没有可识别的列表字段: applied,config |
 
 ## 说明
