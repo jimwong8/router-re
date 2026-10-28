@@ -5,6 +5,13 @@
 #   bash scripts/run_all_tests.sh
 #   BASE=http://10.100.1.18:9090 bash scripts/run_all_tests.sh
 #
+# 启动时先把自己复制到临时文件再执行副本。原因：bash 是**按字节偏移增量读取**
+# 脚本的，不是整份读进内存。这个仓库并行开发，脚本经常在回归跑着的时候被改，
+# 结果就是进程从旧偏移继续读、读到被改动的行，报出莫名其妙的语法错误。
+# 实测：插入一个新模块后，旧进程在 `if [ "${WEB_DIRTY:-0}" != "0" ]; then`
+# 那行报 `未预期的记号 "then" 附近有语法错误`，整轮 EXIT=2，看起来像回归挂了。
+# 执行副本之后，改仓库里的脚本不再影响正在跑的那轮。
+#
 # 特性:
 #   - 单个测试失败不中断，继续跑完所有模块再汇总。
 #   - 前置检查：mgmtd health 必须 ok，否则退出并提示先起 mgmtd。
@@ -12,7 +19,19 @@
 #   - 结果写入 docs/regression-summary.md（脚本生成，勿手写）。
 set -u
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# 执行副本（原因见文件头）。副本放在临时目录，但 ROOT 仍按原脚本位置算好传下去。
+if [ -z "${REGRESSION_SELF_COPY:-}" ]; then
+    ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+    COPY="$(mktemp "${TMPDIR:-/tmp}/router-re-regression.XXXXXX.sh")" || exit 1
+    if ! cp "$0" "$COPY" 2>/dev/null; then
+        cp "$ROOT/scripts/$(basename "$0")" "$COPY" || { echo "复制回归脚本失败"; exit 1; }
+    fi
+    trap 'rm -f "$COPY"' EXIT
+    REGRESSION_SELF_COPY="$COPY" REGRESSION_ROOT="$ROOT" bash "$COPY" "$@"
+    exit $?
+fi
+
+ROOT="${REGRESSION_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 cd "$ROOT"
 
 BASE="${BASE:-http://127.0.0.1:9090}"
