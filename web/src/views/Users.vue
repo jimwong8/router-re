@@ -64,7 +64,7 @@
     </el-card>
 
     <!-- 新建用户对话框 -->
-    <el-dialog title="新建用户" :visible="openCreate" @close="openCreate = false">
+    <el-dialog title="新建用户" v-model="openCreate" @close="openCreate = false">
       <el-form :model="form">
         <el-form-item label="用户名" label-width="80px">
           <el-input v-model="form.username" placeholder="3-32 位，a-z A-Z 0-9 _ . -" />
@@ -87,7 +87,7 @@
     </el-dialog>
 
     <!-- 编辑用户对话框 -->
-    <el-dialog title="编辑用户" :visible="editDialogVisible" @close="editDialogVisible = false">
+    <el-dialog title="编辑用户" v-model="editDialogVisible" @close="editDialogVisible = false">
       <el-form :model="editForm">
         <el-form-item label="用户名" label-width="80px">
           <el-input v-model="editForm.username" disabled />
@@ -110,7 +110,7 @@
     </el-dialog>
 
     <!-- 改密对话框 -->
-    <el-dialog title="修改密码" :visible="pwDialogVisible" @close="pwDialogVisible = false">
+    <el-dialog title="修改密码" v-model="pwDialogVisible" @close="pwDialogVisible = false">
       <el-form :model="pwForm">
         <el-form-item label="新密码" label-width="80px">
           <el-input v-model="pwForm.password" type="password" placeholder="8-64 位，含字母与数字" />

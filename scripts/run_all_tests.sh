@@ -158,15 +158,21 @@ if curl -s -m 3 "http://127.0.0.1:$UI_PORT/" >/dev/null 2>&1; then
         skip_module "ui_acceptance" "登录被限流(429)或失败，跳过"
         skip_module "ui_acceptance_ext" "登录被限流(429)或失败，跳过"
         skip_module "ui_acceptance_terminals" "登录被限流(429)或失败，跳过"
+        skip_module "users_edit_e2e" "登录被限流(429)或失败，跳过"
     else
         run_module "ui_acceptance" env BASE="$BASE" python3 scripts/ui_acceptance.py
         run_module "ui_acceptance_ext" env BASE="$BASE" python3 scripts/ui_acceptance_ext.py
         run_module "ui_acceptance_terminals" env BASE="$BASE" python3 scripts/ui_acceptance_terminals.py
+        # 交互类 UI 必须单独验：ui_acceptance 只比「接口 N 条 vs 页面 N 行」，
+        # Element Plus 2.x 移除了 el-dialog 的 visible prop（只认 v-model），
+        # 三个弹窗全打不开，行数验收照样全绿。实测点「编辑」「改密」都没反应。
+        run_module "users_edit_e2e" env BASE="$BASE" env WEB="http://127.0.0.1:$UI_PORT" python3 scripts/users_edit_e2e.py
     fi
 else
     skip_module "ui_acceptance" "vite preview :$UI_PORT 不通，跳过（需 cd web && npm run preview）"
     skip_module "ui_acceptance_ext" "vite preview :$UI_PORT 不通，跳过"
     skip_module "ui_acceptance_terminals" "vite preview :$UI_PORT 不通，跳过"
+    skip_module "users_edit_e2e" "vite preview :$UI_PORT 不通，跳过"
 fi
 
 # ---------- 汇总 ----------
