@@ -128,10 +128,36 @@ record("4. ddns check + update 结构 (非 500 崩)", "PASS" if step4_ok else "F
        f"check_resp={short(rd4c)}\nupdate_resp={short(rd4u)}")
 
 # ---------------------------------------------------------------- 5. cleanup
-# No DELETE endpoints exist -> leave data, report.
-record("5. 清理 (DELETE 端点)", "SKIP",
-       "linkcheck/ddns 均无 DELETE 端点，新建的 target/record 留存",
-       "无 DELETE /api/v1/linkcheck/targets 或 /api/v1/ddns/records 端点")
+# 清理：DELETE 端点后补的（p48）。测试先探测再删——不假设端点存在，
+# 但存在就必须真删干净并核对 404，否则每跑一次回归就往生产数据里堆垃圾。
+def _try_delete(path: str) -> tuple[int, str]:
+    st, body, _, _ = call("DELETE", path, token=token)
+    return st, json.dumps(body, ensure_ascii=False)[:200] if isinstance(body, (dict, list)) else str(body)[:200]
+
+
+del_target_st, del_target_body = _try_delete(f"/api/v1/linkcheck/targets/{tgt_id}")
+del_record_st, del_record_body = _try_delete(f"/api/v1/ddns/records/{rec_id}")
+
+if del_target_st in (404, 405) and del_record_st in (404, 405):
+    record("5. 清理 (DELETE 端点)", "SKIP",
+           "服务端没有 DELETE 端点（404/405），新建的 target/record 留存",
+           f"linkcheck DELETE -> {del_target_st}\nddns DELETE -> {del_record_st}")
+elif del_target_st == 200 and del_record_st == 200:
+    # 删完必须核对真的不在了，不能只看 200
+    _, t_after, _, _ = call("GET", "/api/v1/linkcheck/targets", token=token)
+    _, r_after, _, _ = call("GET", "/api/v1/ddns/records", token=token)
+    t_gone = not any((x.get("id") == tgt_id) for x in ((t_after or {}).get("targets") or [])) \
+        if isinstance(t_after, dict) else False
+    r_gone = not any((x.get("id") == rec_id) for x in ((r_after or {}).get("records") or [])) \
+        if isinstance(r_after, dict) else False
+    record("5. 清理 (DELETE 端点)", "PASS" if (t_gone and r_gone) else "FAIL",
+           f"target 已删={'是' if t_gone else '否'} / record 已删={'是' if r_gone else '否'}",
+           f"linkcheck DELETE -> {del_target_st} {del_target_body}\n"
+           f"ddns DELETE -> {del_record_st} {del_record_body}")
+else:
+    record("5. 清理 (DELETE 端点)", "FAIL",
+           f"DELETE 未按预期工作：linkcheck={del_target_st} ddns={del_record_st}",
+           f"linkcheck: {del_target_body}\nddns: {del_record_body}")
 
 # ---------------------------------------------------------------- report
 os.makedirs(ROOT / "docs", exist_ok=True)

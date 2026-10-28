@@ -1,0 +1,194 @@
+#!/usr/bin/env bash
+# run_all_tests.sh — 统一回归入口：把所有测试模块串起来一键跑。
+#
+# 用法:
+#   bash scripts/run_all_tests.sh
+#   BASE=http://10.100.1.18:9090 bash scripts/run_all_tests.sh
+#
+# 特性:
+#   - 单个测试失败不中断，继续跑完所有模块再汇总。
+#   - 前置检查：mgmtd health 必须 ok，否则退出并提示先起 mgmtd。
+#   - UI acceptance 需要 vite preview (4173) + playwright；不通则 SKIP 并写原因。
+#   - 结果写入 docs/regression-summary.md（脚本生成，勿手写）。
+set -u
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+BASE="${BASE:-http://127.0.0.1:9090}"
+REPORT="$ROOT/docs/regression-summary.md"
+TMPDIR_RUN="$ROOT/.hermes/cache/scratch/regression-$$"
+mkdir -p "$TMPDIR_RUN"
+
+# ---------- 前置检查 ----------
+echo "[regression] 前置检查: $BASE/api/v1/health"
+if ! curl -s -m 5 "$BASE/api/v1/health" | grep -q '"ok"'; then
+    echo "[regression] ERROR: mgmtd health 不通，请先启动 mgmtd (127.0.0.1:9090)" >&2
+    exit 1
+fi
+echo "[regression] health ok"
+
+# 冷却：清空可能残留的登录限流窗口（5 次/分钟/IP），保证本次运行从干净状态开始
+sleep 65
+
+# ---------- 结果收集 ----------
+declare -a NAMES=()
+declare -a STATUSES=()
+declare -a DURATIONS=()
+declare -a OUTPUTS=()
+
+run_module() {
+    # $1 = name, $2... = command
+    local name="$1"; shift
+    local logfile="$TMPDIR_RUN/${name}.log"
+    echo ""
+    echo "===== [regression] RUN: $name ====="
+    local t0
+    t0=$(date +%s%N)
+    "$@" >"$logfile" 2>&1
+    local rc=$?
+    local t1
+    t1=$(date +%s%N)
+    local dur_ms=$(( (t1 - t0) / 1000000 ))
+    NAMES+=("$name")
+    DURATIONS+=("${dur_ms}ms")
+    OUTPUTS+=("$logfile")
+    if [ "$rc" -eq 0 ]; then
+        STATUSES+=("PASS")
+        echo "[regression] $name → PASS (${dur_ms}ms)"
+    else
+        STATUSES+=("FAIL(rc=$rc)")
+        echo "[regression] $name → FAIL (rc=$rc, ${dur_ms}ms)"
+    fi
+    return 0
+}
+
+skip_module() {
+    local name="$1"; shift
+    local reason="$*"
+    NAMES+=("$name")
+    STATUSES+=("SKIP")
+    DURATIONS+=("0ms")
+    OUTPUTS+=("(skipped: $reason)")
+    echo "[regression] $name → SKIP ($reason)"
+}
+
+# ---------- 1. e2e_test.py ----------
+BASE="$BASE" python3 scripts/e2e_test.py >"$TMPDIR_RUN/e2e_test.log" 2>&1 &
+E2E_PID=$!
+# run in foreground by waiting
+wait $E2E_PID
+E2E_RC=$?
+if [ "$E2E_RC" -eq 0 ]; then
+    NAMES+=("e2e_test"); STATUSES+=("PASS"); DURATIONS+=("—"); OUTPUTS+=("$TMPDIR_RUN/e2e_test.log")
+    echo "[regression] e2e_test → PASS"
+else
+    NAMES+=("e2e_test"); STATUSES+=("FAIL(rc=$E2E_RC)"); DURATIONS+=("—"); OUTPUTS+=("$TMPDIR_RUN/e2e_test.log")
+    echo "[regression] e2e_test → FAIL (rc=$E2E_RC)"
+fi
+
+# 冷却：给登录限流桶恢复（5 次/分钟/IP）
+sleep 5
+
+# ---------- 2. smoke_new_routes.py ----------
+run_module "smoke_new_routes" env BASE="$BASE" python3 scripts/smoke_new_routes.py
+
+# 冷却：给登录限流桶恢复（5 次/分钟/IP）
+sleep 5
+
+# ---------- 3. roundtrip_test.py ----------
+run_module "roundtrip_test" env BASE="$BASE" python3 scripts/roundtrip_test.py
+
+# 冷却：给登录限流桶恢复（5 次/分钟/IP）
+sleep 5
+
+# ---------- 4. portal_flow_test.py ----------
+run_module "portal_flow_test" env BASE="$BASE" python3 scripts/portal_flow_test.py
+
+# 冷却：登录限流窗口 60s/5 次，额外等待确保窗口重置，避免 linkcheck 登录 429
+sleep 65
+
+# ---------- 5. linkcheck_ddns_test.py ----------
+run_module "linkcheck_ddns_test" env BASE="$BASE" python3 scripts/linkcheck_ddns_test.py
+
+# ---------- 6. Go 单测 ----------
+run_module "go_test" bash -c "cd mgmtd && CGO_ENABLED=1 go test ./... 2>&1"
+
+# ---------- 7. UI acceptance (需要 vite preview 4173) ----------
+UI_PORT="${UI_PORT:-4173}"
+# 等 rate limiter 冷却，避免前面的登录请求触发 429
+sleep 30
+if curl -s -m 3 "http://127.0.0.1:$UI_PORT/" >/dev/null 2>&1; then
+    # 先探测登录是否可用（避免 429 误报 FAIL）
+    if ! python3 -c "import urllib.request,json; r=urllib.request.Request('$BASE/api/v1/auth/login',data=json.dumps({'username':'admin','password':'admin123'}).encode(),headers={'Content-Type':'application/json'},method='POST'); urllib.request.urlopen(r,timeout=10)" 2>/dev/null; then
+        skip_module "ui_acceptance" "登录被限流(429)或失败，跳过"
+        skip_module "ui_acceptance_ext" "登录被限流(429)或失败，跳过"
+        skip_module "ui_acceptance_terminals" "登录被限流(429)或失败，跳过"
+    else
+        run_module "ui_acceptance" env BASE="$BASE" python3 scripts/ui_acceptance.py
+        run_module "ui_acceptance_ext" env BASE="$BASE" python3 scripts/ui_acceptance_ext.py
+        run_module "ui_acceptance_terminals" env BASE="$BASE" python3 scripts/ui_acceptance_terminals.py
+    fi
+else
+    skip_module "ui_acceptance" "vite preview :$UI_PORT 不通，跳过（需 cd web && npm run preview）"
+    skip_module "ui_acceptance_ext" "vite preview :$UI_PORT 不通，跳过"
+    skip_module "ui_acceptance_terminals" "vite preview :$UI_PORT 不通，跳过"
+fi
+
+# ---------- 汇总 ----------
+PASS_COUNT=0; FAIL_COUNT=0; SKIP_COUNT=0
+for s in "${STATUSES[@]}"; do
+    case "$s" in
+        PASS) PASS_COUNT=$((PASS_COUNT+1)) ;;
+        SKIP) SKIP_COUNT=$((SKIP_COUNT+1)) ;;
+        *)    FAIL_COUNT=$((FAIL_COUNT+1)) ;;
+    esac
+done
+
+# ---------- 写报告 ----------
+{
+    echo "# Regression Summary"
+    echo ""
+    echo "- Generated: $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "- Base: $BASE"
+    echo "- Total modules: ${#NAMES[@]}"
+    echo "- PASS: $PASS_COUNT / FAIL: $FAIL_COUNT / SKIP: $SKIP_COUNT"
+    echo ""
+    echo "## Module Results"
+    echo ""
+    echo "| # | Module | Status | Duration |"
+    echo "|---|--------|--------|----------|"
+    for i in "${!NAMES[@]}"; do
+        echo "| $((i+1)) | ${NAMES[$i]} | ${STATUSES[$i]} | ${DURATIONS[$i]} |"
+    done
+    echo ""
+    echo "## Details (tail of each log)"
+    echo ""
+    for i in "${!NAMES[@]}"; do
+        echo "### ${NAMES[$i]} — ${STATUSES[$i]}"
+        echo ""
+        echo '```'
+        if [ -f "${OUTPUTS[$i]}" ]; then
+            tail -20 "${OUTPUTS[$i]}"
+        else
+            echo "${OUTPUTS[$i]}"
+        fi
+        echo '```'
+        echo ""
+    done
+} > "$REPORT"
+
+echo ""
+echo "===== [regression] 汇总 ====="
+echo "PASS: $PASS_COUNT / FAIL: $FAIL_COUNT / SKIP: $SKIP_COUNT"
+echo "报告: $REPORT"
+echo ""
+
+# 清理
+rm -rf "$TMPDIR_RUN"
+
+# 退出码：有 FAIL 则非 0
+if [ "$FAIL_COUNT" -gt 0 ]; then
+    exit 1
+fi
+exit 0

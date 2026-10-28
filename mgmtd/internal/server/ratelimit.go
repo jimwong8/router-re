@@ -29,8 +29,10 @@ func newLoginLimiter(max int, window time.Duration) *loginLimiter {
 	}
 }
 
-// allow reports whether an attempt from ip should be permitted, and records
-// the attempt if it is. It rotates buckets out of the window opportunistically.
+// allow 报告 ip 当前是否还有失败尝试的余量。**只检查、不消费**——
+// 早期版本在这里就 count++，于是「成功登录也扣配额」：回归套件里 11 个脚本
+// 各登录一次，第 6 个开始全部 429（实测 ui_acceptance 就是这么挂的）。
+// 暴力破解防护要限的是失败次数，不是成功次数。
 func (l *loginLimiter) allow(ip string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -38,15 +40,31 @@ func (l *loginLimiter) allow(ip string) bool {
 	now := time.Now()
 	b, ok := l.attempts[ip]
 	if !ok || now.Sub(b.started) >= l.window {
-		// New window: reset bucket.
-		l.attempts[ip] = &bucket{count: 1, started: now}
 		return true
 	}
-	if b.count >= l.max {
-		return false
+	return b.count < l.max
+}
+
+// recordFailure 记一次失败尝试。窗口过期则开新桶。
+func (l *loginLimiter) recordFailure(ip string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	now := time.Now()
+	b, ok := l.attempts[ip]
+	if !ok || now.Sub(b.started) >= l.window {
+		l.attempts[ip] = &bucket{count: 1, started: now}
+		return
 	}
 	b.count++
-	return true
+}
+
+// reset 在登录成功后清空该 IP 的失败计数：用户可能是先打错密码再打对，
+// 不该让之前的失败继续压着他的配额。
+func (l *loginLimiter) reset(ip string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.attempts, ip)
 }
 
 // clientIP extracts the remote IP (stripping port) for rate-limit bucketing.

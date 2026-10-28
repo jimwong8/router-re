@@ -1,16 +1,16 @@
 # 认证门户全流程测试报告 (portal-flow-test)
 
-> 生成: 2026-10-28 20:32:54  BASE=http://127.0.0.1:9090
+> 生成: 2026-10-28 21:10:29  BASE=http://127.0.0.1:9090
 
 **汇总**: 共 6 步 / PASS 3 / FAIL 0 / SKIP 3
 
 | 步骤 | 结果 | 详情 |
 |---|---|---|
 | 1. 选/保存 portal 模板 | PASS | GET templates 200 (count=4); POST template 200 saved=true id=roundtrip |
-| 2. voucher/generate 测试卡 | PASS | HTTP 200 generated=1 code=NDT77R4THB |
+| 2. voucher/generate 测试卡 | PASS | HTTP 200 generated=1 code=JCBZ84SCUQ |
 | 3. portal/login 用卡登录 | SKIP | 路由未注册 (mgmtd 无 /api/v1/portal/login；门户认证走 /portal/auth 表单，非 mgmtd REST API) probe=GET=404 POST=404 HTTP 404 |
 | 4. portal/status 查会话 | SKIP | 路由未注册 (mgmtd 无 /api/v1/portal/status) probe=GET=404 POST=404 HTTP 404 |
-| 5. voucher list/verify 确认已用 | PASS | redeem HTTP 200 ok; list HTTP 200; card NDT77R4THB used=True |
+| 5. voucher list/verify 确认已用 | PASS | redeem HTTP 200 ok; list HTTP 200; card JCBZ84SCUQ used=True |
 | 6. portal/logout 登出+status消失 | SKIP | 路由未注册 (mgmtd 无 /api/v1/portal/logout) probe=GET=404 POST=404 HTTP 404 |
 
 ## 真实返回片段
@@ -24,7 +24,7 @@
 ### 2. voucher/generate 测试卡 — PASS
 
 ```
-{"generated":1,"note":"卡密明文只返回这一次，请立即保存；之后查询只能看到打码版本","vouchers":[{"code":"NDT77R4THB","password":"8VQKCB2GN5","minutes":30,"traffic_mb":0,"device_limit":1,"created_at":1793190774,"expires_at":0,"used_at":0,"used":false,"note":"p47 roundtri...
+{"generated":1,"note":"卡密明文只返回这一次，请立即保存；之后查询只能看到打码版本","vouchers":[{"code":"JCBZ84SCUQ","password":"U2BHDFDFB2","minutes":30,"traffic_mb":0,"device_limit":1,"created_at":1793193029,"expires_at":0,"used_at":0,"used":false,"note":"p47 roundtri...
 ```
 
 ### 3. portal/login 用卡登录 — SKIP
@@ -42,7 +42,7 @@
 ### 5. voucher list/verify 确认已用 — PASS
 
 ```
-{"count":7,"unused":5,"used":2,"vouchers":[{"code":"R4VTY4YKNE","password":"CH******D2","minutes":1440,"traffic_mb":10240,"device_limit":2,"created_at":1793113374,"expires_at":1795705374,"used_at":1793113374,"used":true,"note":"测试批次","remai...
+{"count":24,"unused":13,"used":11,"vouchers":[{"code":"R4VTY4YKNE","password":"CH******D2","minutes":1440,"traffic_mb":10240,"device_limit":2,"created_at":1793113374,"expires_at":1795705374,"used_at":1793113374,"used":true,"note":"测试批次","re...
 ```
 
 ### 6. portal/logout 登出+status消失 — SKIP

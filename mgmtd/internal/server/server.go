@@ -521,10 +521,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	userOK := subtle.ConstantTimeCompare([]byte(req.Username), []byte(s.cfg.AdminUser)) == 1
 	passOK := subtle.ConstantTimeCompare([]byte(req.Password), []byte(s.cfg.AdminPassword)) == 1
 	if !rbacOK && (!userOK || !passOK) {
+		// 只有失败才计入限流配额（成功登录不该扣自己的额度，否则批量脚本
+		// 第 6 次起就全 429——实测回归套件就是这么挂的）。
+		s.loginLimiter.recordFailure(clientIP(r.RemoteAddr))
 		s.logAudit(r, "auth.login", req.Username, "fail", "invalid credentials")
 		writeJSON(w, 401, errBody(10001, "invalid credentials", ""))
 		return
 	}
+	s.loginLimiter.reset(clientIP(r.RemoteAddr))
 	tok, err := s.tm.Issue(req.Username)
 	if err != nil {
 		s.logAudit(r, "auth.login", req.Username, "fail", "token issue: "+err.Error())

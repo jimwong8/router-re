@@ -1,6 +1,6 @@
 # 写端点 Round-trip 测试报告
 
-> 生成: 2026-10-28 20:20:36  BASE=http://127.0.0.1:9090
+> 生成: 2026-10-28 21:10:24  BASE=http://127.0.0.1:9090
 
 **汇总**: 测了 5 个写端点 / PASS 5 / FAIL 0
 
@@ -36,12 +36,12 @@
   "note": "卡密明文只返回这一次，请立即保存；之后查询只能看到打码版本",
   "vouchers": [
     {
-      "code": "NRPQABLRGW",
-      "password": "PJ9HC5BDG4",
+      "code": "PZRLFJSV5H",
+      "password": "AP3WPHYN2B",
       "minutes": 30,
       "traffic_mb": 0,
       "device_limit": 1,
-      "created_at": 1793190036,
+      "created_at": 1793193024,
       "expires_at": 0,
       "used_at": 0,
       "used": false,
@@ -57,9 +57,9 @@
 
 ```json
 {
-  "count": 6,
-  "unused": 5,
-  "used": 1,
+  "count": 23,
+  "unused": 13,
+  "used": 10,
   "vouchers": [
     {
       "code": "R4VTY4YKNE",
@@ -72,7 +72,7 @@
       "used_at": 1793113374,
       "used": true,
       "note": "测试批次",
-      "remaining_min": 163,
+      "remaining_min": 113,
       "expired": false
     },
     {
@@ -138,6 +138,244 @@
       "traffic_mb": 0,
       "device_limit": 1,
       "created_at": 1793190036,
+      "expires_at": 0,
+      "used_at": 0,
+      "used": false,
+      "note": "roundtrip-test",
+      "remaining_min": 30,
+      "expired": false
+    },
+    {
+      "code": "NDT77R4THB",
+      "password": "8V******N5",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793190774,
+      "expires_at": 0,
+      "used_at": 1793190774,
+      "used": true,
+      "note": "p47 roundtrip",
+      "remaining_min": 0,
+      "expired": false
+    },
+    {
+      "code": "89KXTM8BY9",
+      "password": "9X******6T",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793191645,
+      "expires_at": 0,
+      "used_at": 0,
+      "used": false,
+      "note": "roundtrip-test",
+      "remaining_min": 30,
+      "expired": false
+    },
+    {
+      "code": "NYGRESBDBT",
+      "password": "QW******9G",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793191646,
+      "expires_at": 0,
+      "used_at": 1793191646,
+      "used": true,
+      "note": "p47 roundtrip",
+      "remaining_min": 8,
+      "expired": false
+    },
+    {
+      "code": "FFNZMPB2ZM",
+      "password": "ZR******K7",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793191718,
+      "expires_at": 0,
+      "used_at": 0,
+      "used": false,
+      "note": "roundtrip-test",
+      "remaining_min": 30,
+      "expired": false
+    },
+    {
+      "code": "Z4PJKCPQN4",
+      "password": "3R******7C",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793191718,
+      "expires_at": 0,
+      "used_at": 1793191719,
+      "used": true,
+      "note": "p47 roundtrip",
+      "remaining_min": 9,
+      "expired": false
+    },
+    {
+      "code": "E2G53VL6YF",
+      "password": "AN******UQ",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793191869,
+      "expires_at": 0,
+      "used_at": 0,
+      "used": false,
+      "note": "roundtrip-test",
+      "remaining_min": 30,
+      "expired": false
+    },
+    {
+      "code": "H83K6VDQJ4",
+      "password": "W4******BZ",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793191870,
+      "expires_at": 0,
+      "used_at": 1793191870,
+      "used": true,
+      "note": "p47 roundtrip",
+      "remaining_min": 11,
+      "expired": false
+    },
+    {
+      "code": "3DZDZKVBBU",
+      "password": "F6******H7",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793191944,
+      "expires_at": 0,
+      "used_at": 0,
+      "used": false,
+      "note": "roundtrip-test",
+      "remaining_min": 30,
+      "expired": false
+    },
+    {
+      "code": "NLNNYGBRXJ",
+      "password": "YK******PR",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793191944,
+      "expires_at": 0,
+      "used_at": 1793191944,
+      "used": true,
+      "note": "p47 roundtrip",
+      "remaining_min": 12,
+      "expired": false
+    },
+    {
+      "code": "VU8PUR3GNF",
+      "password": "DQ******KY",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793192018,
+      "expires_at": 0,
+      "used_at": 0,
+      "used": false,
+      "note": "roundtrip-test",
+      "remaining_min": 30,
+      "expired": false
+    },
+    {
+      "code": "AZUSNT2H8L",
+      "password": "QL******QX",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793192018,
+      "expires_at": 0,
+      "used_at": 1793192018,
+      "used": true,
+      "note": "p47 roundtrip",
+      "remaining_min": 14,
+      "expired": false
+    },
+    {
+      "code": "5BY2C826SD",
+      "password": "6R******82",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793192497,
+      "expires_at": 0,
+      "used_at": 0,
+      "used": false,
+      "note": "roundtrip-test",
+      "remaining_min": 30,
+      "expired": false
+    },
+    {
+      "code": "GTGMGK5HFQ",
+      "password": "TB******4D",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793192652,
+      "expires_at": 0,
+      "used_at": 1793192652,
+      "used": true,
+      "note": "p47 roundtrip",
+      "remaining_min": 24,
+      "expired": false
+    },
+    {
+      "code": "YLKJA8PP5V",
+      "password": "R6******DU",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793192791,
+      "expires_at": 0,
+      "used_at": 0,
+      "used": false,
+      "note": "roundtrip-test",
+      "remaining_min": 30,
+      "expired": false
+    },
+    {
+      "code": "XQS2GSGMCF",
+      "password": "LM******WT",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793192807,
+      "expires_at": 0,
+      "used_at": 1793192807,
+      "used": true,
+      "note": "p47 roundtrip",
+      "remaining_min": 27,
+      "expired": false
+    },
+    {
+      "code": "T7C2WJWWRB",
+      "password": "FG******WJ",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793192913,
+      "expires_at": 0,
+      "used_at": 1793192913,
+      "used": true,
+      "note": "p47 roundtrip",
+      "remaining_min": 29,
+      "expired": false
+    },
+    {
+      "code": "PZRLFJSV5H",
+      "password": "AP******2B",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793193024,
       "expires_at": 0,
       "used_at": 0,
       "used": false,
@@ -481,7 +719,7 @@
 ```json
 {
   "count": 1,
-  "now": "2026-10-28 20:20:36 Wed",
+  "now": "2026-10-28 21:10:24 Wed",
   "rules": [
     {
       "id": "rt-rule-1",

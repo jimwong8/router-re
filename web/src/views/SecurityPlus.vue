@@ -256,7 +256,7 @@ function errDetail(e: any): string {
   return '';
 }
 
-const tab = ref('ddos');
+const tab = ref('timesched');
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 function fmtDays(days: number[] | undefined): string {
   if (!days || !days.length) return '每天';

@@ -14,6 +14,9 @@
         <el-col :span="6">
           <el-card shadow="hover" class="stat"><div class="n">{{ count }}</div><div class="t">终端总数</div></el-card>
         </el-col>
+        <el-col :span="6">
+          <el-card shadow="hover" class="stat"><div class="n">{{ activeSessionCount }}</div><div class="t">有活跃会话</div></el-card>
+        </el-col>
       </el-row>
 
       <el-table :data="terminals" v-loading="loading" size="small" style="width:100%" empty-text="暂无终端">
@@ -43,6 +46,17 @@
             </span>
           </template>
         </el-table-column>
+        <el-table-column label="在线会话" min-width="150">
+          <template #default="{ row }">
+            <template v-if="sessionOf(row.ip)">
+              <div style="font-size:12px">
+                <div>rx {{ formatBytes(sessionOf(row.ip).rx_bytes) }}</div>
+                <div>tx {{ formatBytes(sessionOf(row.ip).tx_bytes) }}</div>
+              </div>
+            </template>
+            <span v-else>—</span>
+          </template>
+        </el-table-column>
       </el-table>
 
       <div v-if="!loading && terminals.length === 0" style="margin-top:12px">
@@ -53,7 +67,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import api from '../api';
 
@@ -61,6 +75,36 @@ const loading = ref(false);
 const error = ref('');
 const count = ref(0);
 const terminals = ref<any[]>([]);
+const sessions = ref<any[]>([]);
+
+const sessionByIp = computed(() => {
+  const m: Record<string, any> = {};
+  for (const s of sessions.value) {
+    if (s && s.ip) m[String(s.ip)] = s;
+  }
+  return m;
+});
+
+function sessionOf(ip: any) {
+  return ip ? sessionByIp.value[String(ip)] : undefined;
+}
+
+const activeSessionCount = computed(() => {
+  let n = 0;
+  for (const t of terminals.value) {
+    const s = sessionOf(t.ip);
+    if (s && s.online) n++;
+  }
+  return n;
+});
+
+function formatBytes(b: any) {
+  const n = Number(b) || 0;
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + ' MB';
+  return (n / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+}
 
 async function load() {
   loading.value = true;
@@ -70,6 +114,13 @@ async function load() {
     const d = res.data || {};
     terminals.value = d.terminals || [];
     count.value = d.count ?? terminals.value.length;
+    try {
+      const r2 = await api.get('/api/v1/online');
+      const d2 = r2.data || {};
+      sessions.value = d2.sessions || [];
+    } catch (e2: any) {
+      sessions.value = [];
+    }
   } catch (e: any) {
     const d = e?.response?.data || {};
     const msg = d.message || d.detail || e?.message || '请求失败';
