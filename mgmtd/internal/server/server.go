@@ -32,6 +32,7 @@ import (
 	"github.com/jimwong/router-re/mgmtd/internal/conntrack"
 	"github.com/jimwong/router-re/mgmtd/internal/ddns"
 	"github.com/jimwong/router-re/mgmtd/internal/dhcp"
+	"github.com/jimwong/router-re/mgmtd/internal/htb"
 	"github.com/jimwong/router-re/mgmtd/internal/dpi"
 	"github.com/jimwong/router-re/mgmtd/internal/dpiflow"
 	"github.com/jimwong/router-re/mgmtd/internal/execx"
@@ -559,6 +560,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/htb/config", s.auth(s.handleGetHTBConfig))
 	s.mux.HandleFunc("POST /api/v1/htb/config", s.auth(s.auditWrap("htb.config.set", s.handleSetHTBConfig)))
 	s.mux.HandleFunc("POST /api/v1/htb/apply", s.auth(s.auditWrap("htb.apply", s.handleHTBApply)))
+	s.mux.HandleFunc("POST /api/v1/htb/smart-apply", s.auth(s.auditWrap("htb.smart-apply", s.handleHTBSmartApply)))
+	s.mux.HandleFunc("GET /api/v1/htb/smart-plan", s.auth(s.handleGetHTBSmartPlan))
 	s.mux.HandleFunc("POST /api/v1/htb/cleanup", s.auth(s.auditWrap("htb.cleanup", s.handleHTBCleanup)))
 	s.mux.HandleFunc("GET /api/v1/htb/show", s.auth(s.handleHTBShow))
 	s.mux.HandleFunc("GET /api/v1/htb/report", s.auth(s.handleHTBReport))
@@ -4589,3 +4592,28 @@ func (s *Server) handleSetSMSConfig(w http.ResponseWriter, r *http.Request) {
 	s.storeJSON(sms.Section(), sms.Option(), cfg)
 	writeJSON(w, 200, map[string]interface{}{"ok": true, "configured": true})
 }
+
+
+func (s *Server) handleHTBSmartApply(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Confirm bool `json:"confirm"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	raw, _ := s.store.Get("htb", "smart-plan")
+	if raw == "" {
+		writeJSON(w, 422, errBody(11018, "no smart plan", "run smart plan first"))
+		return
+	}
+	if !req.Confirm {
+		writeJSON(w, 422, errBody(11018, "confirm required", "confirm=true required"))
+		return
+	}
+	var cfg htb.Config
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		writeJSON(w, 422, errBody(11018, "bad plan", err.Error()))
+		return
+	}
+	ok, msg := htb.Apply(execx.DefaultRunner{}, cfg)
+	writeJSON(w, 200, map[string]interface{}{"applied": ok, "detail": msg})
+}
+

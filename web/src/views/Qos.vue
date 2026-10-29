@@ -102,6 +102,26 @@
       <el-empty v-else description="尚未提交" />
     </el-card>
   </div>
+<el-card shadow="never" style="margin-top:16px">
+      <template #header>智能流控 (Smart QoS)</template>
+      <el-form inline @submit.prevent>
+        <el-form-item label="总带宽 (Mbps)">
+          <el-input-number v-model="smartRoot" :min="1" :max="10000" />
+        </el-form-item>
+        <el-form-item label="接口">
+          <el-input v-model="smartIface" placeholder="如 eth0" />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :loading="smartLoading" @click="previewSmart">预览</el-button>
+        </el-form-item>
+      </el-form>
+      <el-table v-if="smartPlan.length" :data="smartPlan" border style="margin-top:12px">
+        <el-table-column prop="terminal" label="终端" />
+        <el-table-column prop="rate_mbps" label="分配速率 (Mbps)" />
+      </el-table>
+      <el-button v-if="smartPlan.length" type="success" style="margin-top:12px" :loading="smartApplying" @click="applySmart">确认下发</el-button>
+    </el-card>
+
 </template>
 
 <script setup lang="ts">
@@ -230,6 +250,30 @@ async function submit() {
   } finally {
     submitting.value = false;
   }
+}
+
+const smartRoot = ref(100);
+const smartIface = ref('eth0');
+const smartLoading = ref(false);
+const smartApplying = ref(false);
+const smartPlan = ref<any[]>([]);
+
+async function previewSmart() {
+  smartLoading.value = true;
+  try {
+    const res = await api.get('/api/v1/htb/smart-plan', { params: { iface: smartIface.value, root_mbit: smartRoot.value } });
+    smartPlan.value = res.data?.plan || res.data?.members || [];
+  } catch (e: any) { showError(e); }
+  smartLoading.value = false;
+}
+async function applySmart() {
+  smartApplying.value = true;
+  try {
+    await api.post('/api/v1/htb/smart-apply', { iface: smartIface.value, root_mbit: smartRoot.value });
+    ElMessage.success('已下发');
+    smartPlan.value = [];
+  } catch (e: any) { showError(e); }
+  smartApplying.value = false;
 }
 
 onMounted(() => {
