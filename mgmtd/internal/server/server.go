@@ -207,7 +207,7 @@ func New(cfg Config) *Server {
 		store:        store,
 		storeErr:     storeErr,
 		pppoeUsers:   []pppoe.User{},
-		tm:           auth.NewTokenManager(cfg.SecretKey, 15*time.Minute),
+		tm:           auth.NewTokenManager(cfg.SecretKey, 12*time.Hour),
 		cloudMgr:     cloud.NewManager(),
 		dhcpApplier:  dhcp.NewApplier(),
 		loginLimiter: newLoginLimiter(5, time.Minute),

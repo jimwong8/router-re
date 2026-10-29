@@ -39,6 +39,9 @@ api.interceptors.response.use(
     if (err?.response?.status === 401) {
       localStorage.removeItem('router_token');
       if (window.location.pathname !== '/login') {
+        // 静默跳转会让人以为是页面出问题；明确提示是登录态过期
+        const reason = body?.detail && /expire/i.test(String(body.detail)) ? '登录已过期，请重新登录' : '登录已失效，请重新登录';
+        window.alert(reason);
         window.location.href = '/login';
       }
     }
