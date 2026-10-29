@@ -10,17 +10,27 @@ import (
 	"github.com/jimwong/router-re/mgmtd/internal/remote"
 )
 
-// wolTargetsPath 是 WOL 目标的持久化路径。默认放配置目录；MGM_CONFIG_FILE 未设置时
-// 用 mock store，不落盘，因此这里也允许通过环境变量覆盖（测试/部署可指定）。
+// wolTargetsPath 是 WOL 目标的持久化路径。
+//
+// 优先级：MGM_WOL_TARGETS > MGM_CONFIG_DIR > MGM_CONFIG_FILE 所在目录 > /etc/router-re。
+//
+// 最后一档只该出现在"生产机以 root 运行"的场景。曾经这里漏掉了
+// MGM_CONFIG_FILE：部署时按文档只设了 MGM_CONFIG_FILE，配置本身能存，
+// WOL 却仍然去写 /etc/router-re（普通用户无权限）→ GET /api/v1/wol/targets
+// 直接 500 permission denied。同一份配置被拆到两个目录，是很容易漏的坑。
 func wolTargetsPath() string {
 	if p := os.Getenv("MGM_WOL_TARGETS"); p != "" {
 		return p
 	}
-	dir := os.Getenv("MGM_CONFIG_DIR")
-	if dir == "" {
-		dir = "/etc/router-re"
+	if dir := os.Getenv("MGM_CONFIG_DIR"); dir != "" {
+		return filepath.Join(dir, "wol_targets.json")
 	}
-	return filepath.Join(dir, "wol_targets.json")
+	if cfg := os.Getenv("MGM_CONFIG_FILE"); cfg != "" {
+		if dir := filepath.Dir(cfg); dir != "" && dir != "." {
+			return filepath.Join(dir, "wol_targets.json")
+		}
+	}
+	return filepath.Join("/etc/router-re", "wol_targets.json")
 }
 
 // --- 远程访问 ---

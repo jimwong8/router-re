@@ -180,7 +180,11 @@ func captureSnapshot(j *captureJob) map[string]interface{} {
 
 // handleCaptureDownload 下载 pcap。GET /api/v1/tools/capture/{id}/download
 func (s *Server) handleCaptureDownload(w http.ResponseWriter, r *http.Request) {
-	id, action := splitCapturePath(r.URL.Path)
+	id := r.PathValue("id")
+	action := "download"
+	if id == "" {
+		id, action = splitCapturePath(r.URL.Path)
+	}
 	if id == "" || action != "download" {
 		writeJSON(w, 400, errBody(10494, "bad path", "expected /{id}/download"))
 		return
@@ -210,7 +214,11 @@ func (s *Server) handleCaptureDownload(w http.ResponseWriter, r *http.Request) {
 
 // handleCaptureStop 停止抓包。POST /api/v1/tools/capture/{id}/stop
 func (s *Server) handleCaptureStop(w http.ResponseWriter, r *http.Request) {
-	id, action := splitCapturePath(r.URL.Path)
+	id := r.PathValue("id")
+	action := "stop"
+	if id == "" {
+		id, action = splitCapturePath(r.URL.Path)
+	}
 	if id == "" || action != "stop" {
 		writeJSON(w, 400, errBody(10494, "bad path", "expected /{id}/stop"))
 		return

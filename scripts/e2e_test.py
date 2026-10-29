@@ -49,6 +49,8 @@ EXPECTED_422 = {
 
 DEFAULT_QUERY = {
     "/api/v1/dpi/classify": "?dport=80&proto=tcp",
+    # 子网换算必须带 cidr，否则 422 是正确语义（参数缺失），不是接口坏
+    "/api/v1/tools/subnet": "?cidr=192.168.1.0/24",
     "/api/v1/stats/history": "?minutes=60",
     "/api/v1/conntrack": "?limit=50",
     "/api/v1/logs": "?limit=50",

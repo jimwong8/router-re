@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
+	"time"
 	"sync"
 )
 
@@ -31,6 +33,15 @@ func NewFileStore(path string) (*FileStore, error) {
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("filestore: mkdir %s: %w", filepath.Dir(path), err)
+	}
+	// 启动时就把"能不能写"查清楚。
+	//
+	// 只读文件能正常 Get，第一条 Set 才炸；更阴的是 /tmp 这种粘滞目录里
+	// 目标文件属主是别人（曾被 root 跑过一次）——open 写 tmp 成功，
+	// rename 覆盖目标 EPERM。线上表现为"卡密生成/模板保存 500 save failed"，
+	// 而这些端点在此之前的读取全都正常，很难一眼看出是权限。
+	if err := checkWritable(path); err != nil {
+		return nil, fmt.Errorf("filestore: %w", err)
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -136,3 +147,36 @@ func (f *FileStore) Rollback(snap string) error {
 func (f *FileStore) Commit() error { return nil }
 
 var _ Store = (*FileStore)(nil)
+
+// checkWritable 在启动时验证「这个路径真的能保存」，而不是等第一次 Set 失败。
+//
+// 两类会静默潜伏的情况：
+//  1. 目录不可写 —— 写 probe 就失败，能直接报出来；
+//  2. 目标文件存在且属主不是当前用户，同时所在目录带粘滞位（/tmp、/var/tmp）
+//     —— 写 tmp 成功、rename 覆盖目标 EPERM。这种最容易被误判成"程序 bug"。
+func checkWritable(path string) error {
+	dir := filepath.Dir(path)
+	probe := filepath.Join(dir, fmt.Sprintf(".wprobe-%d-%d", os.Getpid(), time.Now().UnixNano()))
+	if err := os.WriteFile(probe, []byte("{}"), 0o644); err != nil {
+		return fmt.Errorf("目录不可写（%s），配置无法保存: %w", dir, err)
+	}
+	_ = os.Remove(probe)
+
+	fi, err := os.Stat(path)
+	if err != nil {
+		return nil // 文件还不存在，首次创建没问题
+	}
+	di, err := os.Stat(dir)
+	if err != nil || di.Mode()&os.ModeSticky == 0 {
+		return nil
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return nil
+	}
+	if uint32(os.Geteuid()) != st.Uid {
+		return fmt.Errorf("配置文件 %s 属主是 uid=%d，当前 uid=%d 在粘滞目录里无法 rename 覆盖（会 EPERM）；请 chown 或换路径",
+			path, st.Uid, os.Geteuid())
+	}
+	return nil
+}
