@@ -6,7 +6,7 @@
 
 | 路由 | 结果 | 接口预期条数 | 页面渲染行数 | 说明 |
 |------|------|--------------|--------------|------|
-| `/services` | OK   | 534 | 50 | systemd 单元列表 (units) [分页] |
+| `/services` | OK   | 531 | 50 | systemd 单元列表 (units) [分页] |
 | `/online-users` | OK   | 2 | 2 | 在线会话 |
 | `/routing-policy` | OK   | 1 | 2 | 策略路由规则(可为空) |
 | `/cert` | SKIP | - | - | SKIP: 证书接口返回对象/{exists,path} 非列表 | 没有可识别的列表字段: detail,exists,path |
@@ -15,9 +15,9 @@
 | `/network-advanced` | SKIP | - | - | SKIP: 表单/单接口调优，无列表渲染 |
 | `/accounts` | OK   | 2 | 2 | 账号列表(可为空) |
 | `/audit` | OK   | 100 | 100 | 审计事件 |
-| `/clients` | OK   | 24 | 24 | 客户端列表 |
+| `/clients` | OK   | 23 | 23 | 客户端列表 |
 | `/cloud` | OK   | 0 | 0 | 云设备(可为空) |
-| `/diag` | OK   | 11 | 11 | 接口诊断列表 |
+| `/diag` | OK   | 10 | 10 | 接口诊断列表 |
 | `/dhcp` | OK   | 0 | 1 | DHCP 租约(可为空) |
 | `/dpi-flow` | OK   | 0 | 0 | DPI 流量(可为空) |
 | `/dpi` | OK   | 0 | 0 | DPI 标记(可为空) |
@@ -31,13 +31,13 @@
 | `/pppoe` | OK   | 0 | 0 | PPPoE 会话(可为空) |
 | `/qos` | OK   | 0 | 0 | QoS 限速(可为空) |
 | `/remote` | SKIP | - | - | 远程访问(可为空) | 没有可识别的列表字段: access,warnings |
-| `/security` | OK   | 11 | 38 | 接口流量(ACL 表格取 acl/rules、主体表格取 stats/interfaces) |
+| `/security` | OK   | 11 | 37 | 接口流量(ACL 表格取 acl/rules、主体表格取 stats/interfaces) |
 | `/threat` | OK   | 0 | 0 | 威胁列表(可为空) |
 | `/upnp` | OK   | 0 | 1 | UPnP 映射(可为空) |
 | `/users` | OK   | 3 | 3 | 用户列表 |
 | `/wireless` | OK   | 0 | 0 | Wi-Fi SSID(可为空) |
 | `/static-route` | SKIP | - | - | SKIP: route/static 返回 routes=None(主机无静态路由) | 没有可识别的列表字段: commands,routes |
-| `/wan` | OK   | 1 | 10 | SKIP: wan/links links=None(主机无多WAN) |
+| `/wan` | OK   | 2 | 9 | SKIP: wan/links links=None(主机无多WAN) |
 | `/dhcp-server` | SKIP | - | - | SKIP: dhcp/server 返回 config(对象)非列表 | 没有可识别的列表字段: applied,config |
 
 ## 说明

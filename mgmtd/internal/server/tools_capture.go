@@ -234,7 +234,7 @@ func (s *Server) handleCaptureStop(w http.ResponseWriter, r *http.Request) {
 	if job.Status != "running" {
 		st := job.Status
 		job.mu.Unlock()
-		writeJSON(w, 409, errBody(10496, "not running", "capture is "+st))
+		writeJSON(w, 409, errBody(10500, "not running", "capture is "+st))
 		return
 	}
 	// cancel 通过 context 传入 exec.CommandContext(run ctx) → 停止时终止进程。

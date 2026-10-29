@@ -157,7 +157,7 @@ func (s *Server) handleProbeLink(w http.ResponseWriter, r *http.Request) {
 	case "http":
 		cmdName = "curl"
 	default:
-		writeJSON(w, http.StatusUnprocessableEntity, errBody(10454, "unknown kind", tgt.Kind))
+		writeJSON(w, http.StatusUnprocessableEntity, errBody(10498, "unknown kind", tgt.Kind))
 		return
 	}
 	out, runErr := (execx.DefaultRunner{}).Run(cmdName, args...)

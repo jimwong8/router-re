@@ -8,7 +8,10 @@ BASE="http://127.0.0.1:9090"
 ENDPOINTS=["/api/v1/portal/authorize","/api/v1/voucher/generate","/api/v1/ddns/records",
            "/api/v1/linkcheck/targets","/api/v1/qos/limits","/api/v1/firewall/rules",
            "/api/v1/nat/rules","/api/v1/policy/timeschedule","/api/v1/firmware/confirm",
-           "/api/v1/acl/rules"]
+           "/api/v1/acl/rules","/api/v1/tools/iperf","/api/v1/tools/capture/start",
+           "/api/v1/frp/proxies","/api/v1/tasks","/api/v1/ha/status",
+           "/api/v1/auth/sms/send","/api/v1/auth/sms/verify","/api/v1/auth/wechat/login",
+           "/api/v1/webfilter/apply","/api/v1/acl/mac-filter","/api/v1/security/mac"]
 
 def login():
     req=urllib.request.Request(BASE+"/api/v1/auth/login",data=json.dumps({"username":"admin","password":"admin123"}).encode(),headers={"Content-Type":"application/json"},method="POST")
@@ -52,7 +55,7 @@ def one(ep, name, body, ct, token):
         raw=e.read().decode("utf-8","replace")
         status=e.code
     except Exception as e:
-        return {"ep":ep,"case":name,"status":0,"error":str(e),"safe":False,"xss":False,"stack":False,"snippet":str(e)[:120]}
+        return {"ep":ep,"case":name,"status":0,"error":str(e),"safe":False,"accepted":False,"dangerous":True,"xss":False,"stack":False,"snippet":str(e)[:120]}
     stack = any(m in raw for m in STACK_MARKERS)
     xss = XSS_MARKER in raw or "<script" in raw.lower()
     accepted = (200 <= status < 300)

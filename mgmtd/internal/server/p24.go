@@ -52,7 +52,7 @@ func (s *Server) handleSetConntrackAcct(w http.ResponseWriter, r *http.Request) 
 
 	// 即时生效：写 /proc/sys/net/netfilter/nf_conntrack_acct
 	if err := sysctl.SetAcct(body.On); err != nil {
-		writeJSON(w, 422, errBody(10480, "即时开启失败",
+		writeJSON(w, 422, errBody(10499, "即时开启失败",
 			"写 "+sysctl.AcctPath()+" 失败："+err.Error()+
 				"。mgmtd 需以 root 运行，且 nf_conntrack 模块须已加载。"))
 		return

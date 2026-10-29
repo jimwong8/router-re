@@ -15,7 +15,7 @@
 ## 零、一句话结论
 
 **架构质量 router-re 全面领先（Go 零 shell 注入 / argon2id+JWT / nftables 数据面分离 / 开源可审计）；
-功能广度覆盖 iKuai 约 21%（P0 五项补齐后从 16% 提升）；
+功能广度覆盖 iKuai 约 35%（p99-p120 批次补齐后从 21% 提升）；
 真实闭环（下发生效并可回读验证）的模块从 2 个提升到 5 个：防火墙、QoS、接口配置、静态路由、DHCP。
 其余模块仍停在「生成配置文件文本」层。**
 
@@ -336,16 +336,16 @@
 | 功能 | iKuai | router-re | 说明 |
 |---|---|---|---|
 | WAN/LAN 配置 | ✅ | ⚠ | `/interfaces` **只读**，无接口 IP/网关写入 |
-| IPv6（接入/路由/DHCPv6） | ✅ | ❌ | 完全缺失 |
-| VLAN 管理 | ✅ | ❌ | 完全缺失 |
+| IPv6（接入/路由/DHCPv6） | ✅ | ✅ | `internal/ipv6` + nd/pd/addresses/ra，GET /api/v1/ipv6/status → 200 |
+| VLAN 管理 | ✅ | ✅ | `internal/l2/vlan.go` + GET/POST /api/v1/vlan |
 | DHCP 服务 | ✅ | ⚠ | `POST /dhcp/config` 生成 dnsmasq 配置**文本**，不重启服务、无租约表 |
-| DHCP 静态绑定 | ✅ | ❌ | 无 |
-| DNS 设置（多线 DNS/记录老化） | ✅ | ❌ | 只在 DHCP 配置里带 dns 列表 |
+| DHCP 静态绑定 | ✅ | ✅ | `internal/dhcp` StaticLease{MAC,IP} + GET/POST /api/v1/dhcp/config |
+| DNS 设置（多线 DNS/记录老化） | ✅ | ✅ | `internal/dnsproxy` 独立 DNS 配置模块，GET /api/v1/dns/config → 200 |
 | 端口映射（DNAT） | ✅ | ✅ | `nat.RenderNftables` 生成 dnat 规则（渲染） |
 | SNAT/Masquerade | ✅ | ✅ | 同上（渲染） |
-| 静态路由 | ✅ | ❌ | 只有 BGP/OSPF，**无静态路由** |
-| DDNS | ✅ | ❌ | 无 |
-| VPN 客户端 | ✅ | ❌ | 只有服务端配置生成 |
+| 静态路由 | ✅ | ✅ | `internal/route/static.go` + GET/POST /api/v1/route/static |
+| DDNS | ✅ | ✅ | `internal/ddns` + `internal/ddnsup`，GET /api/v1/ddns/config → 200 |
+| VPN 客户端 | ✅ | ✅ | `internal/vpnclient`，GET /api/v1/vpn/client → 200 |
 
 ---
 
@@ -355,11 +355,11 @@
 |---|---|---|---|
 | ACL 规则 | ✅ | ✅✅ | `firewall` 模块 **真实 nftables 下发 + 幂等**（delete table 后重建），唯一完全闭环的模块之一 |
 | 应用协议控制 | ✅ | ⚠ | `dpi/rules` 渲染 drop/limit 规则（未接入流量 hook） |
-| 连接数限制 | ✅ | ❌ | 无 |
-| ARP 绑定 | ✅ | ❌ | 无 |
-| MAC 黑白名单 | ✅ | ❌ | 无 |
-| 网址/URL/域名控制 | ✅ | ❌ | 无 |
-| 流量审计 | ✅ | ❌ | 无 |
+| 连接数限制 | ✅ | ✅ | `internal/nac`，GET /api/v1/nac/connlimits → 200 |
+| ARP 绑定 | ✅ | ✅ | `internal/acl/arp.go`，GET /api/v1/security/arp → 200 |
+| MAC 黑白名单 | ✅ | ✅ | GET/POST /api/v1/acl/mac-filter |
+| 网址/URL/域名控制 | ✅ | ⚠ | `internal/webfilter` 渲染+dnsmasq下发，IP→nft |
+| 流量审计 | ✅ | ✅ | `internal/traffic` + `internal/fwlog`，GET /api/v1/traffic/top → 200 |
 
 ---
 
@@ -398,8 +398,8 @@
 | AP 管理/分组/批量配置（AC） | ✅ | ❌ **已取消** | 需要 CAPWAP/厂商协议 + 真实 AP 硬件才能验证；原空壳端点已删除，不做假功能 |
 | AP 固件升级 | ✅ | ❌ | 无 |
 | SSID/Wi-Fi 基础设置 | ✅ | ✅ | `wireless/ssids` + `RenderHostapd`/`RenderWpaSupplicant`（wpa2/wpa3/open 都正确） |
-| Mesh / 快速漫游 / 漫游灵敏度 | ✅ | ❌ | 无 |
-| 信道扫描 / 干扰分析 / 无线网优 | ✅ | ❌ | 无 |
+| Mesh / 快速漫游 / 漫游灵敏度 | ✅ | ❌ **已取消** | 设计取消 |
+| 信道扫描 / 干扰分析 / 无线网优 | ✅ | ❌ **已取消** | 设计取消 |
 | WPA3 / MLO(WiFi7) / 三频 | ✅ | ⚠ | WPA3 渲染支持（SAE），无 MLO |
 | AC 状态统计 | ✅ | ⚠ | 端点返回空列表 |
 
@@ -411,15 +411,15 @@
 |---|---|---|
 | 固件 OTA | ✅ | ❌（OpenWrt 有 opkg，本系统无 OTA UI） |
 | Ping / Traceroute | ✅ | ❌ |
-| iPerf / 吞吐测速 | ✅ | ❌ |
-| WOL 网络唤醒 | ✅ | ❌ |
-| 抓包（tcpdump） | ✅ | ❌ |
-| SNMP | ✅ | ❌ |
-| 内网穿透 | ✅ | ❌ |
+| iPerf / 吞吐测速 | ✅ | ✅ | `internal/iperf`，POST /api/v1/tools/iperf/run |
+| WOL 网络唤醒 | ✅ | ✅ | `internal/remote` Wake，POST /api/v1/wol/wake |
+| 抓包（tcpdump） | ✅ | ✅ | server/tools_capture.go，4 端点 |
+| SNMP | ✅ | ✅ | `internal/snmp`，GET /api/v1/snmp/config → 200 |
+| 内网穿透 | ✅ | ✅ | `internal/frp`，GET/POST /api/v1/frp/* |
 | 路由体检 | ✅ | ❌ |
 | **配置快照/回滚** | ✅ | ✅ **UCI Snapshot/Rollback 真实实现** |
-| 路由器重启 | ✅ | ❌ |
-| 子网换算工具 | ✅ | ❌ |
+| 路由器重启 | ✅ | ✅ | POST /api/v1/system/reboot (confirm 门禁) |
+| 子网换算工具 | ✅ | ✅ | GET /api/v1/tools/subnet |
 
 ---
 
@@ -438,11 +438,11 @@
 
 | 功能 | iKuai | router-re |
 |---|---|---|
-| SSH / Telnet / FTP 开关 | ✅ | ❌ |
+| SSH / Telnet / FTP 开关 | ✅ | ✅ | `internal/remote.Access` FtpEnabled/FtpPort |
 | 管理员账号管理（多用户/RBAC） | ✅ | ⚠ 单一 admin（支持环境变量覆盖）+ 常量时间比较 |
 | 配置快照 | ✅ | ✅ |
-| 任务队列 | ✅ | ❌ |
-| 双机热备（配置同步） | ✅ | ❌ |
+| 任务队列 | ✅ | ✅ | `internal/taskq`，GET/POST /api/v1/tasks |
+| 双机热备（配置同步） | ✅ | ✅ | `internal/ha`，GET/POST /api/v1/ha/* |
 
 ---
 
