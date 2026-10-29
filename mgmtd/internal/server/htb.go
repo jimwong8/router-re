@@ -179,3 +179,15 @@ func (s *Server) handleHTBReport(w http.ResponseWriter, r *http.Request) {
 		"script": htb.RenderScript(cfg),
 	})
 }
+
+// handleHTBLimitRules exposes LimitRulesToHTB as an HTTP endpoint.
+func (s *Server) handleHTBLimitRules(w http.ResponseWriter, r *http.Request) {
+	iface := r.URL.Query().Get("iface")
+	if iface == "" {
+		iface = "eth0"
+	}
+	var rootMbit float64 = 100
+	cfg := htb.LimitRulesToHTB(nil, iface, rootMbit)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(cfg)
+}

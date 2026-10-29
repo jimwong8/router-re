@@ -565,6 +565,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/htb/smart-apply", s.auth(s.auditWrap("htb.smart-apply", s.handleHTBSmartApply)))
 	s.mux.HandleFunc("GET /api/v1/htb/smart-plan", s.auth(s.handleGetHTBSmartPlan))
 	s.mux.HandleFunc("POST /api/v1/htb/cleanup", s.auth(s.auditWrap("htb.cleanup", s.handleHTBCleanup)))
+	s.mux.HandleFunc("GET /api/v1/htb/limit-rules", s.auth(s.handleHTBLimitRules))
 	s.mux.HandleFunc("GET /api/v1/htb/show", s.auth(s.handleHTBShow))
 	s.mux.HandleFunc("GET /api/v1/htb/report", s.auth(s.handleHTBReport))
 
