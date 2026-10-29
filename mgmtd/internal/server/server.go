@@ -102,6 +102,12 @@ type Server struct {
 	// 丢了 30 条（94%）。单目标、手动点一次永远复现不出来。
 	// 锁只覆盖内存 map + 小 JSON 落盘，持锁时间很短。
 	linkcheckMu sync.Mutex
+
+	// p95: 「读整份→改一条→写整份」(RMW) handler 串行化锁，防并发丢更新
+	// （并发用例证明见 rmw_concurrency_test.go；未加锁时 30/32、31/32 丢更新）。
+	timeschedMu sync.Mutex // timesched rules: 并发 delete / set×delete
+	ddnsMu      sync.Mutex // ddns records: 并发 delete / set(整表回写,继承明文 token)
+	htbMu       sync.Mutex // htb config: apply(继承回写) × config set
 	// voucherMu 串行化卡密的「读整份 → 改一张 → 写整份」序列（生成/核销/删除共用）。
 	//
 	// 不加锁时并发核销会互相覆盖：实测 16 张卡并发核销，14 张的 used_at 被抹回 0，

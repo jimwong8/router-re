@@ -41,7 +41,11 @@ func (s *Server) handleSetHTBConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b, _ := json.Marshal(cfg)
+	// p95: 与 handleHTBApply 的「读存档 → 下发 → 回写存档」串行化：不加锁时 apply
+	// 回写读到的旧存档会盖掉本处刚写入的新配置（rmw_concurrency_test.go 第 4 例）。
+	s.htbMu.Lock()
 	s.store.Set("htb", htbStoreKey, string(b))
+	s.htbMu.Unlock()
 	writeJSON(w, 200, map[string]interface{}{
 		"config": cfg,
 		"script": htb.RenderScript(cfg),
@@ -61,6 +65,10 @@ func (s *Server) handleHTBApply(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 422, errBody(10183, "invalid body", err.Error()))
 		return
 	}
+	// p95: 「读存档 → 下发 → 回写存档」须与 handleSetHTBConfig 串行化：若 set 落在
+	// 读与回写之间，回写会用旧存档盖掉刚写入的新配置（rmw_concurrency_test.go 第 4 例）。
+	s.htbMu.Lock()
+	defer s.htbMu.Unlock()
 	if req.Config.Iface == "" {
 		// 允许不传 config，直接用已保存的
 		if raw, _ := s.store.Get("htb", htbStoreKey); raw != "" {
@@ -87,7 +95,9 @@ func (s *Server) handleHTBApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	applied, detail := htb.Apply(execx.DefaultRunner{}, req.Config)
+	// p95: 走 s.aclApplier（生产即 execx.DefaultRunner{}，行为不变；测试可注入
+	// fake runner，见 rmw_concurrency_test.go 第 4 例）。
+	applied, detail := htb.Apply(s.aclApplier, req.Config)
 	if applied {
 		b, _ := json.Marshal(req.Config)
 		s.store.Set("htb", htbStoreKey, string(b))

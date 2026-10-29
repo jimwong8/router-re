@@ -19,3 +19,4 @@ docs/write-endpoint-audit.md
 
 # 任务完成标记（工人用来给无文件产出的任务一个信号）
 .p*-done
+ops/lane-*.json

@@ -66,6 +66,18 @@ func (s *Server) handleGetVPNClient(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, resp)
 }
 
+// p95 审计结论：本 handler 对两处落盘都是「完整文档写入」——
+//   ① store：saveVPNClient = json.Marshal(整份 config) + store.Set，单键覆盖；
+//   ② 文件：writeSecretFile 写整个 /etc/wireguard/<iface>.conf，随后按
+//      RenderCommands 逐条执行（wg-quick up 等），命令本身也是全量重建。
+// 因此并发的 set 等价于「最后一次保存胜出」，与配置表单语义一致：最终态必为某份
+// 完整文档之一，不存在字段撕裂/丢失（rmw_concurrency_test.go 第 5 例固化该性质）。
+// 这是可接受的单键覆盖语义，故不加锁。
+//
+// 唯一跨读是私钥继承（body.Config.PrivateKey 为空时 loadVPNClient 沿用旧私钥）：
+// 两个并发 set 各自继承时读到的旧 key 可能不同，但各自拼出的文档仍是完整合法的
+// WireGuard 配置（私钥恒为 44 字符合法 key），最坏情况是后写者的 key 胜出——
+// 与「整份覆盖」同一性质，不引入新的撕裂形态。
 func (s *Server) handleSetVPNClient(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Config  vpnclient.Config `json:"config"`
@@ -184,7 +196,16 @@ func (s *Server) handleSetDDNS(w http.ResponseWriter, r *http.Request) {
 			"to clear all ddns records, send {records:[],confirm:true}"))
 		return
 	}
-	// 打码值原样提交回来时不能覆盖真 token
+	// 打码值原样提交回来时不能覆盖真 token。
+	// p95 审计结论：set 是完整文档写入（body.Records 即期望全表，服务端只做
+	// token/密码继承），并发的 set 等价于「最后提交的整表胜出」——与配置表单
+	// 语义一致，最终态恒为某次提交的整表，无字段撕裂（rmw_concurrency_test.go
+	// 第 3 例固化该性质）。客户端持旧快照的过期提交属客户端语义，锁无法修复。
+	// ddnsMu 的作用是：把单次请求内的「读旧表 → 继承 → 校验 → 写回」保持原子，
+	// 并让 delete（真正的服务端读→过滤→写 RMW）与本写回串行，避免 delete 的
+	// 旧快照写回与 set 交叉产生中间态。
+	s.ddnsMu.Lock()
+	defer s.ddnsMu.Unlock()
 	old := s.loadDDNS()
 	byID := map[string]ddnsup.Record{}
 	for _, r0 := range old {
@@ -321,6 +342,9 @@ func (s *Server) writeSecretFile(path, content string) error {
 // 从存储删除指定 id 的 record，id 不存在返回 200 deleted=false。
 func (s *Server) handleDeleteDDNSRecord(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	// p95: 「读整份→改一条→写整份」须与并发 delete / set 串行化：不加锁时两个
+	// 并发删除读同一份快照，后写回者盖掉先写回者的删除（并发用例实测 30/32 丢失）。
+	s.ddnsMu.Lock()
 	records := s.loadDDNS()
 	found := false
 	filtered := make([]ddnsup.Record, 0, len(records))
@@ -331,11 +355,14 @@ func (s *Server) handleDeleteDDNSRecord(w http.ResponseWriter, r *http.Request) 
 		}
 		filtered = append(filtered, rec)
 	}
+	var saveErr error
 	if found {
-		if err := s.saveDDNS(filtered); err != nil {
-			writeJSON(w, http.StatusInternalServerError, errBody(10483, "save failed", err.Error()))
-			return
-		}
+		saveErr = s.saveDDNS(filtered)
+	}
+	s.ddnsMu.Unlock()
+	if saveErr != nil {
+		writeJSON(w, http.StatusInternalServerError, errBody(10483, "save failed", saveErr.Error()))
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"deleted": found})
 }

@@ -328,7 +328,16 @@ func (s *Server) handleSetTimeSchedule(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
-	out, err := (execx.DefaultRunner{}).RunWithInput(nft, "nft", "-f", "-")
+	// p95: 走 s.aclApplier（生产即 execx.DefaultRunner{}，行为不变；测试可注入
+	// fake runner，见 rmw_concurrency_test.go）。
+	// nft 下发与保存包进 timeschedMu：delete 的「读→过滤→写」也持同一把锁，
+	// 否则 delete 在下发前读到的旧表会在保存后写回，把刚下发的规则抹掉。
+	s.timeschedMu.Lock()
+	runner := s.aclApplier
+	if runner == nil {
+		runner = execx.DefaultRunner{}
+	}
+	out, err := runner.RunWithInput(nft, "nft", "-f", "-")
 	resp["applied"] = err == nil
 	resp["output"] = strings.TrimSpace(out)
 	if err != nil {
@@ -336,12 +345,16 @@ func (s *Server) handleSetTimeSchedule(w http.ResponseWriter, r *http.Request) {
 	} else if err := s.saveTimeRules(body.Rules); err != nil {
 		resp["save_error"] = err.Error()
 	}
+	s.timeschedMu.Unlock()
 	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleDeleteTimeSchedule deletes a time-schedule rule by id.
 func (s *Server) handleDeleteTimeSchedule(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	// p95: 「读整份→改一条→写整份」须与并发 delete / set 串行化：不加锁时两个并发
+	// 删除读同一份快照，后写回者盖掉先写回者的删除（并发用例实测 30/32 丢失）。
+	s.timeschedMu.Lock()
 	rules := s.loadTimeRules()
 	filtered := make([]timesched.Rule, 0, len(rules))
 	removed := false
@@ -352,12 +365,17 @@ func (s *Server) handleDeleteTimeSchedule(w http.ResponseWriter, r *http.Request
 		}
 		filtered = append(filtered, ru)
 	}
+	var saveErr error
+	if removed {
+		saveErr = s.saveTimeRules(filtered)
+	}
+	s.timeschedMu.Unlock()
 	if !removed {
 		writeJSON(w, 200, map[string]interface{}{"deleted": false, "rules": rules})
 		return
 	}
-	if err := s.saveTimeRules(filtered); err != nil {
-		writeJSON(w, 500, errBody(10405, "save failed", err.Error()))
+	if saveErr != nil {
+		writeJSON(w, 500, errBody(10405, "save failed", saveErr.Error()))
 		return
 	}
 	writeJSON(w, 200, map[string]interface{}{"deleted": true, "rules": filtered})
