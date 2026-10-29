@@ -103,13 +103,13 @@ func detectContentType(body string) string {
 // ---------------------------------------------------------------------------
 
 const (
-	smsSection   = "sms"
-	smsOption    = "config"
-	codeLen      = 6
-	codeTTL      = 5 * time.Minute
+	smsSection     = "sms"
+	smsOption      = "config"
+	codeLen        = 6
+	codeTTL        = 5 * time.Minute
 	resendInterval = 60 * time.Second
-	maxPerHour   = 5
-	maxWrong     = 5
+	maxPerHour     = 5
+	maxWrong       = 5
 )
 
 // Section 返回短信配置在 config.Store 中的 section。
@@ -121,10 +121,10 @@ func Option() string { return smsOption }
 type record struct {
 	code      string
 	expireAt  time.Time
-	sendCount int      // 当前小时窗口内已发送次数
+	sendCount int       // 当前小时窗口内已发送次数
 	hourStart time.Time // 当前小时窗口起点
 	lastSend  time.Time
-	wrong     int      // 连续错码次数
+	wrong     int // 连续错码次数
 }
 
 // MemoryStore 是基于内存的验证码存储，并发安全。
@@ -137,7 +137,7 @@ type MemoryStore struct {
 // NewMemoryStore 创建内存验证码存储。
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		m:  make(map[string]*record),
+		m:   make(map[string]*record),
 		Now: time.Now,
 	}
 }
@@ -163,7 +163,7 @@ func (s *MemoryStore) CanSend(phone string) (retryAfter time.Duration, allowed b
 		rec.sendCount = 0
 	}
 	if rec.sendCount >= maxPerHour {
-		return time.Until(rec.hourStart.Add(time.Hour)), false
+		return rec.hourStart.Add(time.Hour).Sub(now), false
 	}
 	if !rec.lastSend.IsZero() && now.Sub(rec.lastSend) < resendInterval {
 		return resendInterval - now.Sub(rec.lastSend), false

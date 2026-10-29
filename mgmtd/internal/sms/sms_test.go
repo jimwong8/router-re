@@ -12,11 +12,11 @@ import (
 
 // captureGateway 记录上一次请求并按预设状态码响应，用于单元测试。
 type captureGateway struct {
-	mu        sync.Mutex
-	lastReq   *http.Request
-	lastBody  string
-	status    int
-	failNext  bool // 下一次请求返回 500 后自恢复
+	mu       sync.Mutex
+	lastReq  *http.Request
+	lastBody string
+	status   int
+	failNext bool // 下一次请求返回 500 后自恢复
 }
 
 func (g *captureGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {

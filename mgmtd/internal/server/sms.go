@@ -26,24 +26,24 @@ func (s *Server) handleSMSSend(w http.ResponseWriter, r *http.Request) {
 		Phone string `json:"phone"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, 400, errBody(10497, "invalid body", err.Error()))
+		writeJSON(w, 400, errBody(10518, "invalid body", err.Error()))
 		return
 	}
 	phone := strings.TrimSpace(req.Phone)
 	if phone == "" {
-		writeJSON(w, 422, errBody(10498, "missing phone", "phone is required"))
+		writeJSON(w, 422, errBody(10519, "missing phone", "phone is required"))
 		return
 	}
 
 	var cfg smsConfig
 	if !s.loadJSON(sms.Section(), sms.Option(), &cfg) || cfg.URL == "" {
-		writeJSON(w, 503, errBody(10500, "sms not configured", "请先在配置中设置短信网关 url/模板"))
+		writeJSON(w, 503, errBody(10520, "sms not configured", "请先在配置中设置短信网关 url/模板"))
 		return
 	}
 
 	retry, ok := s.smsStore.CanSend(phone)
 	if !ok {
-		writeJSON(w, 429, errBody(10499, "rate limited", fmt.Sprintf("请 %s 后再试", retry.Round(time.Second))))
+		writeJSON(w, 429, errBody(10521, "rate limited", fmt.Sprintf("请 %s 后再试", retry.Round(time.Second))))
 		return
 	}
 
@@ -57,7 +57,7 @@ func (s *Server) handleSMSSend(w http.ResponseWriter, r *http.Request) {
 		if errors.As(err, &httpErr) && httpErr.StatusCode > 0 {
 			status = httpErr.StatusCode
 		}
-		writeJSON(w, status, errBody(10501, "send failed", err.Error()))
+		writeJSON(w, status, errBody(10522, "send failed", err.Error()))
 		return
 	}
 
@@ -74,13 +74,13 @@ func (s *Server) handleSMSVerify(w http.ResponseWriter, r *http.Request) {
 		Code  string `json:"code"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, 400, errBody(10497, "invalid body", err.Error()))
+		writeJSON(w, 400, errBody(10518, "invalid body", err.Error()))
 		return
 	}
 	phone := strings.TrimSpace(req.Phone)
 	code := strings.TrimSpace(req.Code)
 	if phone == "" || code == "" {
-		writeJSON(w, 422, errBody(10498, "missing phone or code", "phone and code are required"))
+		writeJSON(w, 422, errBody(10523, "missing phone or code", "phone and code are required"))
 		return
 	}
 
@@ -88,11 +88,11 @@ func (s *Server) handleSMSVerify(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		switch reason {
 		case "expired":
-			writeJSON(w, 422, errBody(10503, "code expired", "验证码已过期，请重新获取"))
+			writeJSON(w, 422, errBody(10525, "code expired", "验证码已过期，请重新获取"))
 		case "mismatch":
-			writeJSON(w, 422, errBody(10502, "invalid code", "验证码错误"))
+			writeJSON(w, 422, errBody(10524, "invalid code", "验证码错误"))
 		default:
-			writeJSON(w, 422, errBody(10503, "code not found", "未找到该手机号的验证码"))
+			writeJSON(w, 422, errBody(10526, "code not found", "未找到该手机号的验证码"))
 		}
 		return
 	}
