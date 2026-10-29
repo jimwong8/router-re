@@ -51,6 +51,22 @@
       </div>
     </el-card>
 
+
+    <el-card shadow="never" style="margin-bottom:16px">
+      <template #header>
+        <div style="display:flex; justify-content:space-between; align-items:center">
+          <span>DHCPv6 服务端</span>
+          <el-button type="primary" size="small" :loading="dhcpV6Saving" @click="saveDhcpV6">保存下发</el-button>
+        </div>
+      </template>
+      <el-form :model="dhcpV6Form" label-width="110px">
+        <el-form-item label="v6 起始"><el-input v-model="dhcpV6Form.v6_range_start" placeholder="2001:db8::10" /></el-form-item>
+        <el-form-item label="v6 结束"><el-input v-model="dhcpV6Form.v6_range_end" placeholder="2001:db8::ff" /></el-form-item>
+        <el-form-item label="前缀长度"><el-input v-model.number="dhcpV6Form.v6_prefix_len" placeholder="64" /></el-form-item>
+        <el-form-item label="启用 RA"><el-switch v-model="dhcpV6Form.enable_ra" /></el-form-item>
+      </el-form>
+    </el-card>
+
     <el-card shadow="never" style="margin-bottom:16px">
       <template #header>
         <div style="display:flex; justify-content:space-between; align-items:center">
@@ -110,6 +126,8 @@ const form = ref<ServerCfg>({
   enabled: false,
 });
 const status = ref<Record<string, string>>({});
+const dhcpV6Saving = ref(false);
+const dhcpV6Form = ref({ v6_range_start: "", v6_range_end: "", v6_prefix_len: 64, enable_ra: false });
 const dnsmasqText = ref('');
 const saving = ref(false);
 const copying = ref(false);
@@ -177,6 +195,33 @@ async function apply() {
   }
 }
 
+async function loadDhcpV6() {
+  try {
+    const res = await api.get('/api/v1/dhcp/v6');
+    const cfg = res.data?.config || res.data || {};
+    dhcpV6Form.value = {
+      v6_range_start: cfg.v6_range_start || '',
+      v6_range_end: cfg.v6_range_end || '',
+      v6_prefix_len: cfg.v6_prefix_len || 64,
+      enable_ra: !!cfg.enable_ra,
+    };
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || e.message);
+  }
+}
+
+async function saveDhcpV6() {
+  dhcpV6Saving.value = true;
+  try {
+    await api.post('/api/v1/dhcp/v6', dhcpV6Form.value);
+    ElMessage.success('DHCPv6 下发成功');
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || e.message);
+  } finally {
+    dhcpV6Saving.value = false;
+  }
+}
+
 async function loadStatus() {
   try {
     const res = await api.get('/api/v1/dhcp/status');
@@ -202,7 +247,7 @@ async function copyConfig() {
   }
 }
 
-onMounted(() => { loadConfig(); loadStatus(); });
+onMounted(() => { loadConfig(); loadDhcpV6(); loadStatus(); });
 </script>
 
 <style scoped>

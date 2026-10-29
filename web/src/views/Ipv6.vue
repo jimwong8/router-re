@@ -76,6 +76,28 @@
       </el-collapse>
     </el-card>
 
+    <el-card shadow="never" style="margin-bottom: 16px;">
+      <template #header>DHCPv6 服务端</template>
+      <el-form label-width="140px" style="max-width: 560px;">
+        <el-form-item label="启用 RA">
+          <el-switch v-model="dhcpV6.enable_ra" />
+        </el-form-item>
+        <el-form-item label="v6_range_start">
+          <el-input v-model="dhcpV6.v6_range_start" placeholder="2001:db8::100" style="width: 220px;" />
+        </el-form-item>
+        <el-form-item label="v6_range_end">
+          <el-input v-model="dhcpV6.v6_range_end" placeholder="2001:db8::200" style="width: 220px;" />
+        </el-form-item>
+        <el-form-item label="v6_prefix_len">
+          <el-input-number v-model="dhcpV6.v6_prefix_len" :min="1" :max="128" />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :loading="dhcpV6Saving" @click="saveDhcpV6">保存</el-button>
+          <el-button @click="loadDhcpV6">加载</el-button>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
     <el-card shadow="never">
       <template #header>IPv6 状态</template>
       <el-descriptions :column="1" border>
@@ -107,6 +129,8 @@ const raApplied = ref(false);
 const raDetail = ref('');
 
 const status = ref<any>({});
+const dhcpV6 = ref<any>({ v6_range_start: '', v6_range_end: '', v6_prefix_len: 64, enable_ra: false });
+const dhcpV6Saving = ref(false);
 
 async function loadAddrs() {
   addrError.value = '';
@@ -177,6 +201,28 @@ async function saveRA() {
   }
 }
 
+async function loadDhcpV6() {
+  try {
+    const res = await api.get('/api/v1/dhcp/v6');
+    dhcpV6.value = res.data?.config || dhcpV6.value;
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.response?.data?.message || e.message || '加载 DHCPv6 失败');
+  }
+}
+
+async function saveDhcpV6() {
+  dhcpV6Saving.value = true;
+  try {
+    const res = await api.post('/api/v1/dhcp/v6', dhcpV6.value);
+    dhcpV6.value = res.data?.config || dhcpV6.value;
+    ElMessage.success('DHCPv6 已保存');
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.response?.data?.message || e.message || '保存 DHCPv6 失败');
+  } finally {
+    dhcpV6Saving.value = false;
+  }
+}
+
 async function loadStatus() {
   try {
     const res = await api.get('/api/v1/ipv6/status');
@@ -189,6 +235,7 @@ async function loadStatus() {
 onMounted(() => {
   loadAddrs();
   loadRA();
+  loadDhcpV6();
   loadStatus();
 });
 </script>

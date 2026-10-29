@@ -50,6 +50,16 @@
             {{ statusMap[row.name]?.latency_ms != null ? statusMap[row.name].latency_ms.toFixed(1) + 'ms' : '-' }}
           </template>
         </el-table-column>
+        <el-table-column label="RX bytes" width="110">
+          <template #default="{ row }">
+            {{ perMemberTraffic[row.name]?.rx_bytes != null ? perMemberTraffic[row.name].rx_bytes : '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="TX bytes" width="110">
+          <template #default="{ row }">
+            {{ perMemberTraffic[row.name]?.tx_bytes != null ? perMemberTraffic[row.name].tx_bytes : '-' }}
+          </template>
+        </el-table-column>
         <el-table-column label="启用" width="70">
           <template #default="{ row }">
             <el-switch v-model="row.enabled" @change="saveLB" />
@@ -126,6 +136,7 @@ const lbSaving = ref(false);
 const lbError = ref('');
 const newMem = ref<any>({ name: '', iface: '', gateway: '', weight: 1 });
 const statusMap = ref<Record<string, any>>({});
+const perMemberTraffic = ref<Record<string, any>>({});
 const checkLoading = ref(false);
 const hashKey = ref('');
 const previewMember = ref<any>(null);
@@ -140,6 +151,10 @@ async function loadLB() {
     cfg.value = res.data?.config || cfg.value;
     marksText.value = res.data?.marks ? JSON.stringify(res.data.marks, null, 2) : '';
     iprulesText.value = res.data?.iprules || '';
+    try {
+      const st = await api.get('/api/v1/lb/status');
+      perMemberTraffic.value = st.data?.per_member_rx_tx || {};
+    } catch (e) {}
   } catch (e: any) {
     lbError.value = e?.response?.data?.detail || e?.response?.data?.message || e.message || '加载失败';
   }
@@ -179,6 +194,10 @@ async function runCheck() {
     const snap = res.data?.status || [];
     statusMap.value = {};
     for (const s of snap) statusMap.value[s.name] = s;
+    try {
+      const st = await api.get('/api/v1/lb/status');
+      perMemberTraffic.value = st.data?.per_member_rx_tx || {};
+    } catch (e) {}
     ElMessage.success('已执行一轮健康检查');
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || e?.response?.data?.message || e.message || '检查失败');

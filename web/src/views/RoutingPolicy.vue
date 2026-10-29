@@ -42,6 +42,7 @@
           <el-table-column prop="fwmark" label="fwmark" width="90" />
           <el-table-column prop="table" label="目标表" width="90" />
           <el-table-column prop="iif" label="入接口(iif)" />
+          <el-table-column prop="hits" label="命中数" width="90" />
         </el-table>
       </el-card>
 
@@ -164,6 +165,19 @@ async function loadRules() {
     const res = await api.get('/api/v1/routing/rules');
     rules.value = res.data?.rules || [];
     renderedRules.value = res.data?.rendered || [];
+    // fetch hits
+    try {
+      const hres = await api.get('/api/v1/policyroute/hits');
+      const hitsMap: Record<string, number> = {};
+      for (const h of (hres.data?.hits || [])) {
+        const key = String(h?.rule?.priority ?? h?.rule?.id ?? '');
+        hitsMap[key] = h?.hits ?? 0;
+      }
+      rules.value = rules.value.map((r: any) => ({
+        ...r,
+        hits: hitsMap[String(r.priority ?? r.id)] ?? r.hits ?? 0,
+      }));
+    } catch (_) {}
   } catch (e: any) {
     showError(e);
   }
