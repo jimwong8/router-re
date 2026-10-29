@@ -2832,8 +2832,8 @@ func (s *Server) frp() {
 	s.mux.HandleFunc("GET /api/v1/frp/status", s.auth(s.handleFrpStatus))
 	s.mux.HandleFunc("POST /api/v1/frp/stop", s.auth(s.auditWrap("frp.stop", s.handleFrpStop)))
 	// p153 web embed
-	s.mux.HandleFunc("GET /assets/", s.handleWeb)
-	s.mux.HandleFunc("GET /", s.handleWeb)
+	s.mux.HandleFunc("GET /assets/", s.handleWebEmbed)
+	s.mux.HandleFunc("GET /", s.handleWebEmbed)
 	// P153 web embed
 }
 

@@ -1,39 +1,43 @@
 package server
 
 import (
+	"embed"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 )
 
-func (s *Server) handleWeb(w http.ResponseWriter, r *http.Request) {
+//go:embed webdist/*
+var webDist embed.FS
+
+func (s *Server) handleWebEmbed(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path
 	if strings.HasPrefix(p, "/api/") {
 		http.NotFound(w, r)
 		return
 	}
-	base := "../web/dist"
 	f := p
 	if f == "/" || f == "" {
-		f = "/index.html"
+		f = "webdist/index.html"
+	} else {
+		f = "webdist" + p
 	}
-	f = strings.TrimPrefix(f, "/")
-	full := filepath.Join(base, f)
-	_, err := os.Stat(full)
+	data, err := webDist.ReadFile(strings.TrimPrefix(f, "/"))
 	if err != nil {
 		if !strings.HasPrefix(p, "/assets/") {
-			f = "index.html"
-			full = filepath.Join(base, f)
-		} else {
-			http.NotFound(w, r)
-			return
+			f = "webdist/index.html"
+			data, err = webDist.ReadFile(strings.TrimPrefix(f, "/"))
 		}
 	}
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Del("Cache-Control")
 	if p == "/" || p == "/index.html" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
 	} else if strings.HasPrefix(p, "/assets/") {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	}
-	http.ServeFile(w, r, full)
+	w.Write(data)
 }
