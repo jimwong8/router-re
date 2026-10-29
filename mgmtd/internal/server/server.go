@@ -359,6 +359,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/portal/clients", s.auth(s.handleGetPortalClients))
 	s.mux.HandleFunc("POST /api/v1/portal/authorize", s.auth(s.auditWrap("portal.authorize", s.handlePortalAuthorize)))
 	s.mux.HandleFunc("POST /api/v1/portal/revoke", s.auth(s.auditWrap("portal.revoke", s.handlePortalRevoke)))
+	s.mux.HandleFunc("POST /api/v1/portal/logout", s.auth(s.auditWrap("portal.logout", s.handlePortalLogout)))
+	s.mux.HandleFunc("GET /api/v1/portal/status", s.auth(s.handlePortalStatus))
 	s.mux.HandleFunc("GET /api/v1/portal/config", s.auth(s.handleGetPortalConfig))
 	s.mux.HandleFunc("POST /api/v1/portal/config", s.auth(s.auditWrap("portal.config.set", s.handleSetPortalConfig)))
 	// PPPoE 模块路由（P1-5 — 仅本区块，不动 portal 区块）
