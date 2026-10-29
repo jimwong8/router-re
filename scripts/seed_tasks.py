@@ -79,6 +79,22 @@ def main() -> int:
         return 0
 
     tasks = ql.read_queue()
+
+    # 清扫「重试用尽却仍是 pending」的僵死任务。
+    # claim_task 会把 retries>=max 的任务滤掉，于是一条耗尽重试的任务既不会被派、
+    # 也不会被标 giveup——它就静静躺在 pending 里，还占着「在途」名额，让补货
+    # 误判没空位。实测 p108-frp 就是这样卡住的。
+    exhausted = [t for t in tasks
+                 if t.get("status") == "pending"
+                 and (t.get("retries") or 0) >= t.get("max_retries", 3)]
+    for t in exhausted:
+        print(f"标记 giveup {t['id']}：重试 {(t.get('retries') or 0)} 次仍未通过")
+        if args.apply:
+            ql.settle_task(t["id"], "giveup",
+                           fail_reason=t.get("fail_reason") or "retries exhausted")
+    if exhausted:
+        tasks = ql.read_queue()
+
     existing = {t["id"] for t in tasks}
     inflight = sum(1 for t in tasks if t.get("status") in ("pending", "dispatched"))
     room = MAX_INFLIGHT - inflight
