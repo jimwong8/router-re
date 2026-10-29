@@ -150,7 +150,21 @@ run_module "linkcheck_ddns_test" env BASE="$BASE" python3 scripts/linkcheck_ddns
 run_module "rbac_e2e" env BASE="$BASE" python3 scripts/rbac_e2e.py
 
 
-# ---------- 6. Go 单测 ----------
+# ---------- 6. 静态守卫: 在跑单测之前先扫 RMW 竞争 ----------
+# 扫 mgmtd/internal/server/*.go，找出「读整份 → 改一条 → 写整份」(load+save)
+# 但函数体内无 Lock/Unlock 的 handler → 立即 FAIL，让这类丢更新在新代码提交
+# 时暴露，而不是等到线上并发才现形。见 scripts/guard_race_rw.go。
+#
+# 白名单 scripts/guard_race_rw_whitelist.json 仅用于语义上真正「单键覆盖
+# 且不丢字段」的 handler（如 handleSetVPNClient 的完整文档写入）；任何「改一条
+# 写整份」的真实 RMW 都必须加锁，不能用白名单掩盖。
+run_module "guard_race_rw" bash -c "cd mgmtd && go run ../scripts/guard_race_rw.go internal/server ../scripts/guard_race_rw_whitelist.json 2>&1"
+
+# 巡检器干跑：只采集+分类，不发通知。挡的是「改坏 pane_brief.collect()
+# 导致通知器整条挂掉」——它跑在 systemd timer 里，坏了不会有人立刻发现。
+run_module "lane_watch_dryrun" python3 scripts/lane_watch.py
+
+# ---------- 6b. Go 单测 ----------
 run_module "go_test" bash -c "cd mgmtd && CGO_ENABLED=1 go test ./... 2>&1"
 # 类型检查是独立的一道门：`npm run build` 用的是 esbuild，**不做类型检查**。
 # 实测它放过过：Services 被 import 两次、/services 路由注册两次（vue-tsc 报
