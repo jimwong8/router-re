@@ -1,9 +1,9 @@
 # Regression Summary
 
-- Generated: 2026-10-29 20:07:23
+- Generated: 2026-10-29 20:26:08
 - Base: http://127.0.0.1:9090
-- Commit: 75d20c6 (+未提交改动)
-- 未提交改动: 8 个文件
+- Commit: e586a12 (+未提交改动)
+- 未提交改动: 7 个文件
 
   > 注意：以下文件在本次回归运行时处于未提交状态，相关模块的结果只代表当时的工作区快照：
   >  M docs/linkcheck-ddns-test.md
@@ -12,7 +12,6 @@
   >  M docs/roundtrip-test.md
   >  M docs/smoke-new-routes.md
   >  M docs/ui-coverage-extended.md
-  >  M mgmtd/internal/server/tools_capture.go
   >  M ops/tasks.jsonl
 - Total modules: 19
 - PASS: 19 / FAIL: 0 / SKIP: 0 / UNSTABLE: 0
@@ -22,43 +21,43 @@
 | # | Module | Status | Duration |
 |---|--------|--------|----------|
 | 1 | e2e_test | PASS | — |
-| 2 | smoke_new_routes | PASS | 1829ms |
-| 3 | roundtrip_test | PASS | 1129ms |
-| 4 | portal_flow_test | PASS | 900ms |
-| 5 | linkcheck_ddns_test | PASS | 3259ms |
-| 6 | rbac_e2e | PASS | 2566ms |
-| 7 | guard_race_rw | PASS | 250ms |
-| 8 | lane_watch_dryrun | PASS | 177ms |
-| 9 | guard_route_dup | PASS | 127ms |
-| 10 | go_test | PASS | 54235ms |
-| 11 | vue_typecheck | PASS | 17738ms |
-| 12 | ui_acceptance | PASS | 32599ms |
-| 13 | ui_acceptance_ext | PASS | 93135ms |
-| 14 | ui_acceptance_terminals | PASS | 10621ms |
-| 15 | users_edit_e2e | PASS | 11218ms |
-| 16 | dialog_smoke | PASS | 36116ms |
-| 17 | form_submit_e2e | PASS | 24942ms |
-| 18 | rbac_ui_e2e | PASS | 25161ms |
-| 19 | voucher_concurrent | PASS | 564ms |
+| 2 | smoke_new_routes | PASS | 1678ms |
+| 3 | roundtrip_test | PASS | 531ms |
+| 4 | portal_flow_test | PASS | 597ms |
+| 5 | linkcheck_ddns_test | PASS | 3292ms |
+| 6 | rbac_e2e | PASS | 2632ms |
+| 7 | guard_race_rw | PASS | 292ms |
+| 8 | lane_watch_dryrun | PASS | 171ms |
+| 9 | guard_route_dup | PASS | 136ms |
+| 10 | go_test | PASS | 72853ms |
+| 11 | vue_typecheck | PASS | 20228ms |
+| 12 | ui_acceptance | PASS | 32761ms |
+| 13 | ui_acceptance_ext | PASS | 92786ms |
+| 14 | ui_acceptance_terminals | PASS | 10718ms |
+| 15 | users_edit_e2e | PASS | 10815ms |
+| 16 | dialog_smoke | PASS | 36049ms |
+| 17 | form_submit_e2e | PASS | 23371ms |
+| 18 | rbac_ui_e2e | PASS | 26613ms |
+| 19 | voucher_concurrent | PASS | 588ms |
 
 ## Details (tail of each log)
 
 ### e2e_test — PASS
 
 ```
-OK     200      0.02s /api/v1/nac/neighbors 
-OK     200      0.01s /api/v1/nac/connlimits (空: limits)
-OK     200      0.04s /api/v1/nac/top-connections 
+OK     200      0.01s /api/v1/nac/neighbors 
+OK     200      0.00s /api/v1/nac/connlimits (空: limits)
+OK     200      0.03s /api/v1/nac/top-connections 
 OK     200      0.00s /api/v1/lb/config 
-OK     200      0.02s /api/v1/lb/status 
-OK     200      0.01s /api/v1/lb/preview 
-OK     200      0.05s /api/v1/ddns/status 
-OK     200      0.01s /api/v1/accounts 
-OK     200      0.01s /api/v1/billing/plans 
+OK     200      0.01s /api/v1/lb/status 
+OK     200      0.00s /api/v1/lb/preview 
+OK     200      0.02s /api/v1/ddns/status 
+OK     200      0.00s /api/v1/accounts 
+OK     200      0.00s /api/v1/billing/plans 
 OK     200      0.00s /api/v1/billing/summary 
 OK     200      0.00s /api/v1/users 
-OK     200      0.01s /api/v1/ips/rules 
-OK     200      0.01s /api/v1/ips/stats 
+OK     200      0.00s /api/v1/ips/rules 
+OK     200      0.00s /api/v1/ips/stats 
 OK     200      0.00s /api/v1/ips/blocklist 
 OK     200      0.00s /api/v1/frp/config 
 OK     200      0.00s /api/v1/frp/status 
@@ -115,10 +114,10 @@ PASS policy/timeschedule→timeschedule: write=200 read=200 verified=True
 
 ```
 PASS 1. 选/保存 portal 模板 — GET templates 200 (count=4); POST template 200 saved=true id=roundtrip
-PASS 2. voucher/generate 测试卡 — HTTP 200 generated=1 code=6ZMXUFZ5RE
+PASS 2. voucher/generate 测试卡 — HTTP 200 generated=1 code=Q467JZ7AG8
 SKIP 3. portal/login 用卡登录 — 路由未注册 (mgmtd 无 /api/v1/portal/login；门户认证走 /portal/auth 表单，非 mgmtd REST API) probe=GET=404 POST=404 HTTP 404
 PASS 4. portal/status 查会话 — HTTP 200: {'clients': [], 'online': False, 'online_count': 0}
-PASS 5. voucher list/verify 确认已用 — redeem HTTP 200 ok; list HTTP 200; card 6ZMXUFZ5RE used=True
+PASS 5. voucher list/verify 确认已用 — redeem HTTP 200 ok; list HTTP 200; card Q467JZ7AG8 used=True
 PASS 6. portal/logout 登出+status消失 — logout HTTP 200; status-after HTTP 200
 
 汇总: 6 步 / PASS 5 / FAIL 0 / SKIP 1
@@ -177,8 +176,8 @@ no duplicate routes
 ### go_test — PASS
 
 ```
-ok  	github.com/jimwong/router-re/mgmtd/internal/server	51.766s
-ok  	github.com/jimwong/router-re/mgmtd/internal/sms	(cached)
+ok  	github.com/jimwong/router-re/mgmtd/internal/server	62.653s
+ok  	github.com/jimwong/router-re/mgmtd/internal/sms	0.023s
 ok  	github.com/jimwong/router-re/mgmtd/internal/snmp	(cached)
 ok  	github.com/jimwong/router-re/mgmtd/internal/stats	(cached)
 ok  	github.com/jimwong/router-re/mgmtd/internal/svcmgr	(cached)
@@ -207,12 +206,12 @@ ok  	github.com/jimwong/router-re/mgmtd/internal/wireless	(cached)
 ### ui_acceptance — PASS
 
 ```
-  OK   /services          接口  534 条 -> 页面   50 行   systemd 单元列表 [分页]
+  OK   /services          接口  535 条 -> 页面   50 行   systemd 单元列表 [分页]
   OK   /online-users      接口    2 条 -> 页面    2 行   在线会话
   OK   /routing-policy    接口    1 条 -> 页面    2 行   策略路由规则(可为空)
   SKIP /cert              接口取数失败: 没有可识别的列表字段: detail,exists,path
   OK   /alerts            接口    1 条 -> 页面    1 行   告警规则(可为空)
-  OK   /voucher           接口   67 条 -> 页面   67 行   卡密列表(可能为空)
+  OK   /voucher           接口   69 条 -> 页面   69 行   卡密列表(可能为空)
   OK   /ddns              接口    0 条 -> 页面    0 行   DDNS 记录(可为空)
   OK   /vpn-client        接口    0 条 -> 页面    0 行   VPN 客户端 peers(可为空)
   OK   /security-plus     接口    1 条 -> 页面    2 行   时间段策略 rules(可为空)
@@ -228,7 +227,7 @@ ok  	github.com/jimwong/router-re/mgmtd/internal/wireless	(cached)
   OK   /ipv6              接口    4 条 -> 页面    8 行   IPv6 地址(可为空)
   OK   /l7                接口    0 条 -> 页面    0 行   L7 规则(可为空)
   OK   /logs              接口  100 条 -> 页面  100 行   日志条目(可为空)
-  OK   /voucher           接口   67 条 -> 页面   67 行   卡密列表(可为空)
+  OK   /voucher           接口   69 条 -> 页面   69 行   卡密列表(可为空)
   SKIP /nac               SKIP: NAC 多表格分页 (devices/limits/top/neighbors)，接口 neighbors=45 非可见表，无法准确比对
   SKIP /network           SKIP: portmap/rules.rules=None(主机无 NAT 规则)
   OK   /pppoe             接口    0 条 -> 页面    0 行   PPPoE 会话(可为空)
@@ -240,7 +239,7 @@ ok  	github.com/jimwong/router-re/mgmtd/internal/wireless	(cached)
   OK   /users             接口    3 条 -> 页面    3 行   用户列表
   OK   /wireless          接口    0 条 -> 页面    0 行   Wi-Fi SSID(可为空)
   SKIP /static-route      接口取数失败: 没有可识别的列表字段: commands,routes
-  OK   /wan               接口    2 条 -> 页面   10 行   SKIP: wan/links links=None(主机无多WAN)
+  OK   /wan               接口    1 条 -> 页面   10 行   SKIP: wan/links links=None(主机无多WAN)
   SKIP /dhcp-server       接口取数失败: 没有可识别的列表字段: applied,config
 
 ✅ UI 验收扩展通过（24 个页面 OK，9 个 SKIP，0 FAIL）
@@ -288,8 +287,8 @@ PASS 7/7
 ```
 OK   告警规则保存后后端有这条 — rules=2
 OK   告警页表格出现新规则
-OK   批量生成后卡密多了 2 条 — 67 → 69
-OK   生成的卡密已清理 — 67 条（基线 67）
+OK   批量生成后卡密多了 2 条 — 69 → 71
+OK   生成的卡密已清理 — 69 条（基线 69）
 OK   链路目标保存后后端有这条 — targets=1
 OK   链路检测页显示新目标
 

@@ -1,6 +1,6 @@
 # 写端点 Round-trip 测试报告
 
-> 生成: 2026-10-29 20:00:26  BASE=http://127.0.0.1:9090
+> 生成: 2026-10-29 20:18:52  BASE=http://127.0.0.1:9090
 
 **汇总**: 测了 5 个写端点 / PASS 5 / FAIL 0
 
@@ -36,12 +36,12 @@
   "note": "卡密明文只返回这一次，请立即保存；之后查询只能看到打码版本",
   "vouchers": [
     {
-      "code": "BFM9YEEP4R",
-      "password": "25ZFYA5Y5F",
+      "code": "38KZFVNAL3",
+      "password": "H4WKDDVJZX",
       "minutes": 30,
       "traffic_mb": 0,
       "device_limit": 1,
-      "created_at": 1793275226,
+      "created_at": 1793276332,
       "expires_at": 0,
       "used_at": 0,
       "used": false,
@@ -57,9 +57,9 @@
 
 ```json
 {
-  "count": 66,
-  "unused": 36,
-  "used": 30,
+  "count": 68,
+  "unused": 37,
+  "used": 31,
   "vouchers": [
     {
       "code": "R4VTY4YKNE",
@@ -940,7 +940,7 @@
       "used_at": 1793273834,
       "used": true,
       "note": "p47 roundtrip",
-      "remaining_min": 7,
+      "remaining_min": 0,
       "expired": false
     },
     {
@@ -968,7 +968,7 @@
       "used_at": 1793274020,
       "used": true,
       "note": "p47 roundtrip",
-      "remaining_min": 10,
+      "remaining_min": 0,
       "expired": false
     },
     {
@@ -978,6 +978,34 @@
       "traffic_mb": 0,
       "device_limit": 1,
       "created_at": 1793275226,
+      "expires_at": 0,
+      "used_at": 0,
+      "used": false,
+      "note": "roundtrip-test",
+      "remaining_min": 30,
+      "expired": false
+    },
+    {
+      "code": "6ZMXUFZ5RE",
+      "password": "4C******6N",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793275232,
+      "expires_at": 0,
+      "used_at": 1793275232,
+      "used": true,
+      "note": "p47 roundtrip",
+      "remaining_min": 12,
+      "expired": false
+    },
+    {
+      "code": "38KZFVNAL3",
+      "password": "H4******ZX",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793276332,
       "expires_at": 0,
       "used_at": 0,
       "used": false,
@@ -1322,7 +1350,7 @@
 ```json
 {
   "count": 1,
-  "now": "2026-10-29 20:00:26 Thu",
+  "now": "2026-10-29 20:18:52 Thu",
   "rules": [
     {
       "id": "rt-rule-1",
