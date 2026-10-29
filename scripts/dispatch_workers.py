@@ -278,7 +278,15 @@ def pane_state(pane: str) -> str:
     判定顺序：blocked > busy > idle。blocked 必须排在 idle 前面，
     因为卡在重试时状态栏同时带着 idle 标记（见 BLOCKED_MARKERS 注释）。
     """
-    out = read_tail(pane, 8)
+    return pane_state_from(read_tail(pane, 8))
+
+
+def pane_state_from(out: str) -> str:
+    """从已经读到的尾部文本判状态。
+
+    抽出来是为了让调用方「读一次尾部、同时用于状态判定和停滞检测」，
+    否则每轮要 shell 出去两次 herdr。
+    """
     if not out.strip():
         return "unknown"
     # 大小写不敏感：同一个 TUI 在不同场景下会写 "Ctrl+P" / "ctrl+p"，

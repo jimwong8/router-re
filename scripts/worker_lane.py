@@ -38,6 +38,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 import traceback
@@ -50,6 +51,11 @@ import queue_lib as ql               # noqa: E402  并发安全队列
 
 ROOT = dw.ROOT
 POLL_SECONDS = float(os.environ.get("LANE_POLL_SECONDS", "3"))
+# 输出多久不变化就算「停滞」。lane 原来只看状态栏（busy/idle/blocked），
+# 工人在 busy 状态里反复自问自答、反复重试同一条命令、或者停下来等一个
+# 永远等不到的回答时，状态栏一直显示 busy，只有 wall limit 超时才被发现——
+# 而 wall limit 是 20 分钟起步。这里改成看**对话尾部有没有变化**。
+STALL_WARN_SECONDS = float(os.environ.get("LANE_STALL_SECONDS", "240"))
 # 刚判定 idle 时不一定真的写完了（TUI 落盘有一两秒延迟），给一个稳定窗口：
 # 连续 N 次看到 idle 且 produced 才结算，避免把"写完但还没刷盘"判成没做完。
 IDLE_STABLE_HITS = int(os.environ.get("LANE_IDLE_STABLE_HITS", "2"))
@@ -60,6 +66,87 @@ MAX_DEAD_PANE_WAIT = 120.0
 
 def lane_name(pane: str) -> str:
     return pane.replace(":", "-")
+
+
+# TUI 装饰行：状态栏（☤ AUTO · 10% · ◎ 36%）、提示行（❯ type to redirect…）、
+# 纯分隔线（───）、只有 spinner 的行。这些每轮都在变或者完全没有信息量，
+# 直接取"最后一行"会拿到状态栏，看起来像在监测、其实什么也没说。
+_DECOR_MARKERS = ("☤", "type to redirect this turn", "Tab queues it")
+_SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+
+def _content_line(text: str, state: str = "", limit: int = 110) -> str:
+    """从 pane 尾部取一行**能说明它在干什么**的话。
+
+    TUI 底部是输入建议面板（"─── Help with question ───" / "❯ Explain this error…"），
+    整块切掉；剩下的内容再按状态挑：
+
+      - 非 busy 且有 `☤ Hermes` 汇报块 → 取汇报第一行（"p104 完成。新增：…"）
+      - busy → 取最后一条 `💻 $ ...`（正在跑什么）
+      - 都不满足 → 取最后一行像样的内容（跳过折行碎片和时间戳）
+    """
+    lines = (text or "").splitlines()
+    cut = len(lines)
+    for i, l in enumerate(lines):
+        if "Help with question" in l:
+            cut = i
+            break
+    body = lines[:cut]
+
+    if state != "busy":
+        for i, l in enumerate(body):
+            if "☤ Hermes" in l:
+                for nxt in body[i + 1:]:
+                    t = nxt.strip()
+                    if t and not set(t) <= set("─━═-_ ") and len(t) >= 6:
+                        return t[:limit]
+                break
+
+    for raw in reversed(body[-14:]):
+        if "💻 $" in raw:
+            return raw.strip().strip("─━═-_· ").strip()[:limit]
+
+    for raw in reversed(body):
+        if "· edited " in raw or "· ran " in raw:
+            continue
+        line = raw.strip().strip("─━═-_· ").strip()
+        if not line or len(line) < 6:            # 折行碎片没有信息量
+            continue
+        if any(m in line for m in _DECOR_MARKERS):
+            continue
+        if any(ch in line for ch in _SPIN):
+            continue
+        if line.startswith("❯"):
+            continue
+        if re.fullmatch(r"\d{1,2}:\d{2}(\s*[AP]M)?", line):   # 时间戳
+            continue
+        return line[:limit]
+    return ""
+
+def _content_signature(text: str) -> str:
+    """对「去装饰后的内容」取指纹，用于判断输出是否真的在推进。
+
+    不能对原始尾部取指纹：状态栏/进度 spinner 每帧都在变（☤ 10% → ☤ 11%，
+    ⠦ → ⠧），指纹永远在变，停滞检测就永远不会触发——第一版就是这么写的，
+    降到 20 秒阈值等了 75 秒一次都没报。
+    """
+    lines = (text or "").splitlines()
+    cut = len(lines)
+    for i, l in enumerate(lines):
+        if "Help with question" in l:
+            cut = i
+            break
+    keep = []
+    for raw in lines[:cut]:
+        line = raw.strip().strip("─━═-_· ").strip()
+        if not line:
+            continue
+        if any(m in line for m in _DECOR_MARKERS):
+            continue
+        if any(ch in line for ch in _SPIN):
+            continue
+        keep.append(line)
+    return "\n".join(keep[-12:])   # 只看最后 12 行内容
 
 
 def lane_log(pane: str, msg: str) -> None:
@@ -150,6 +237,10 @@ def run(pane: str) -> int:
     write_lane_status(pane, state="starting")
     idle_hits = 0
     dead_since: float | None = None
+    tail_sig: str | None = None      # 上一次看到的尾部指纹
+    tail_since = time.time()         # 尾部最后一次变化的时间
+    stall_warned = False
+    last_task_id: str | None = None
 
     while True:
         try:
@@ -168,6 +259,13 @@ def run(pane: str) -> int:
             dead_since = None
 
             task = my_task(pane)
+            if task is not None and task["id"] != last_task_id:
+                # 换了新任务：尾部基线重新算，否则会把上一条任务的静默时间
+                # 算到新任务头上，一上来就报 STALL。
+                last_task_id = task["id"]
+                tail_sig = None
+                tail_since = time.time()
+                stall_warned = False
             if task is None:
                 idle_hits = 0
                 write_lane_status(pane, state="idle", task=None)
@@ -175,7 +273,15 @@ def run(pane: str) -> int:
                 time.sleep(POLL_SECONDS)
                 continue
 
-            state = dw.pane_state(pane)
+            # 读一次尾部，同时用于状态判定和停滞检测（少一次 herdr 调用）
+            tail = dw.read_tail(pane, 20)
+            state = dw.pane_state_from(tail)
+            sig = _content_signature(tail)
+            if sig != tail_sig:
+                tail_sig = sig
+                tail_since = time.time()
+                stall_warned = False
+            stall_sec = time.time() - tail_since
             elapsed_min = (time.time() - task.get("dispatched_at", time.time())) / 60
 
             if state == "idle":
@@ -201,7 +307,30 @@ def run(pane: str) -> int:
                 if elapsed_min > dw.wall_limit_minutes(task) * 1.5:
                     release(task, pane, f"运行 {elapsed_min:.1f}min 远超上限，强制释放")
 
-            write_lane_status(pane, state=state, task=task["id"], elapsed_min=round(elapsed_min, 1))
+            # 状态栏说 busy、但尾部几分钟没变 = 大概率卡住（在等一个等不到的答案、
+            # 或在一个循环里反复重试）。只记日志不自动释放：误判的代价比等 wall
+            # limit 更高，先让它可见，由人来判。
+            # 两种要报的情况：
+            #   1) 非 idle 且内容长时间不变 → 卡住（在等一个等不到的答案 / 循环重试）
+            #   2) idle 但产出不达标        → 工人说完了，判据却认为没产出
+            # 第 2 种最坑：lane 会一直等到 wall limit（20 分钟）才释放并返工，
+            # 而真正的原因往往是 expect 路径写错了。实测 p103：prompt 允许实现到
+            # server/，expect 只写了 system/，工人做对了照样判"没产出"。
+            stalled = stall_sec >= STALL_WARN_SECONDS
+            if stalled and not stall_warned:
+                if state == "idle":
+                    missing = [f for f in (task.get("expect") or [])
+                               if not (ROOT / f).exists()]
+                    lane_log(pane, f"IDLE_NO_OUTPUT {task['id']} 空闲 {stall_sec/60:.1f} 分钟"
+                                   f"但产出判据不成立；缺失路径={missing or '（文件都在，内容门槛没过）'}")
+                else:
+                    lane_log(pane, f"STALL {task['id']} 尾部 {stall_sec/60:.1f} 分钟无变化："
+                                   f"{_content_line(tail, state)}")
+                stall_warned = True
+            write_lane_status(pane, state=state, task=task["id"],
+                              elapsed_min=round(elapsed_min, 1),
+                              stall_sec=round(stall_sec, 1), stalled=stalled,
+                              last_line=_content_line(tail, state))
             time.sleep(POLL_SECONDS)
 
         except KeyboardInterrupt:
