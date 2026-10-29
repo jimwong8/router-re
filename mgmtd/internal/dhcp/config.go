@@ -22,7 +22,15 @@ type DHCPConfig struct {
 	Gateway    string   `json:"gateway"`     // 网关，写入 dhcp-option=3
 	LeaseTime  string   `json:"lease_time"`  // 租期，如 "12h" 或 "86400"
 	DNS        []string `json:"dns"`         // DNS 服务器列表，写入 dhcp-option=6
+	// DHCPv6
+	V6RangeStart string `json:"v6_range_start"`
+	V6RangeEnd   string `json:"v6_range_end"`
+	V6PrefixLen  int    `json:"v6_prefix_len"`
+	EnableRA     bool   `json:"enable_ra"`
 }
+
+// Config 是 ServerConfig 的别名，兼容旧调用方。
+type Config = ServerConfig
 
 // RenderDnsmasq 将 DHCPConfig 渲染为 dnsmasq 配置文本。
 //
@@ -88,6 +96,8 @@ type ServerConfig struct {
 	V6PrefixLen  int    `json:"v6_prefix_len"`
 	EnableRA     bool   `json:"enable_ra"`
 }
+
+// Config 是 ServerConfig 的别名，兼容旧调用方。
 
 // subnetFor 根据地址池起点与子网掩码构造 *net.IPNet。
 func subnetFor(rangeStart, netmask string) (*net.IPNet, error) {
