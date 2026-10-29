@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -33,6 +34,29 @@ def load(path: Path) -> dict:
         return {}
 
 
+def unit_state(pane: str) -> dict:
+    """查 systemd 单元状态。
+
+    为什么心跳不够：进程崩溃后 systemd 立刻拉起，新进程第一件事就是写心跳，
+    于是「心跳永远新鲜」——一个每 5 秒崩一次的 lane 在心跳上看是健康的。
+    实测自己改坏了 worker_lane.py（删掉了 _heartbeat_loop 的函数定义），
+    三个 lane 崩溃重启了两分钟，pane_brief 依然报「闲置·可派活」。
+    """
+    unit = f"router-re-lane@{pane.replace(':', '-')}.service"
+    out = {}
+    try:
+        r = subprocess.run(["systemctl", "--user", "show", unit,
+                            "-p", "ActiveState", "-p", "NRestarts", "-p", "SubState"],
+                           capture_output=True, text=True, timeout=8)
+        for line in r.stdout.splitlines():
+            if "=" in line:
+                k, v = line.split("=", 1)
+                out[k] = v
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
 def classify(r: dict) -> tuple[str, str]:
     """把一个 pane 判成「闲置 / 干活中 / 卡住 / 死了」。
 
@@ -40,6 +64,10 @@ def classify(r: dict) -> tuple[str, str]:
     手上没活（可派）、活干完了等 lane 结算、活没干完就停了、agent 在等一个
     永远不会来的回答。必须结合「有没有任务」和「内容多久没变」才分得开。
     """
+    u = r.get("unit") or {}
+    if u.get("ActiveState") and u["ActiveState"] != "active":
+        # activating/failed 都意味着进程没在正常循环——崩溃重启循环最常见
+        return f"进程异常({u['ActiveState']})", "dead"
     if r["lane_dead"]:
         return "lane停", "dead"
     has_task = bool(r["task"])
@@ -94,6 +122,7 @@ def main() -> int:
             "hb_age_sec": None if hb_age is None else round(hb_age, 1),
             # 存活看心跳（每 3 秒一次，15 秒没有就是真死了）。
             # 不能用循环进度（age）判死：一轮里 go build 最长 240 秒不写状态。
+            "unit": unit_state(pane),
             "lane_dead": hb_age is None or hb_age > 15,
             # 心跳在、循环很久没更新 = 卡在长操作（构建/测试），不是死了
             "busy_long": (hb_age is not None and hb_age <= 15) and age > 45,
@@ -124,10 +153,10 @@ def main() -> int:
             print(f"{r['pane']:8} {label:14} {state:8} {task:24} {st:>6} {flag} {r['last_line'][:46]}")
 
     print()
-    labels = [classify(r)[0] for r in rows]
-    n_idle = sum(1 for l in labels if l.startswith("闲置"))
-    n_busy = sum(1 for l in labels if l in ("干活中", "收尾中"))
-    n_stuck = sum(1 for l in labels if "卡" in l or "停滞" in l or "lane停" in l)
+    kinds = [classify(r)[1] for r in rows]
+    n_idle = sum(1 for k in kinds if k == "idle")
+    n_busy = sum(1 for k in kinds if k == "busy")
+    n_stuck = sum(1 for k in kinds if k in ("stuck", "dead"))
     print(f"窗口：{n_idle} 个闲置可派 · {n_busy} 个在忙 · {n_stuck} 个有问题")
     print(f"待派 {len(pending)} 条 · 进行中 {len(dispatched)} 条 · 待验证 {len(vq)} 条")
     # 只报「有任务却不动」的；没任务的窗口本来就不该有输出变化

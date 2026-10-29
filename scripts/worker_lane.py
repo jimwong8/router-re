@@ -143,6 +143,25 @@ def _content_line(text: str, state: str = "", limit: int = 110) -> str:
     return ""
 
 
+def _heartbeat_loop(pane: str) -> None:
+    """守护线程：只要进程活着就每 HEARTBEAT_SECONDS 写一次时间戳。
+
+    单独一个文件而不是复用 lane-*.json：JSON 由主循环整份重写，
+    两个线程同时写会互相覆盖（还容易写出半截 JSON）。
+
+    ⚠ 这个函数在一轮重写中被误删过（替换 _content_line 到 _content_signature
+    之间的整段），lane 立刻崩溃重启——而 systemd 每次拉起的新进程都会写一次
+    心跳，pane_brief 看着「心跳正常」。所以判定必须叠加 systemd 的 ActiveState。
+    """
+    path = ROOT / "ops" / f"lane-{lane_name(pane)}.hb"
+    while True:
+        try:
+            path.write_text(f"{time.time():.0f}", encoding="utf-8")
+        except OSError:
+            pass
+        time.sleep(HEARTBEAT_SECONDS)
+
+
 def _content_signature(text: str) -> str:
     """对「去装饰后的内容」取指纹，用于判断输出是否真的在推进。
 
