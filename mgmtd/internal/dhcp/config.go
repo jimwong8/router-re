@@ -29,8 +29,16 @@ type DHCPConfig struct {
 	EnableRA     bool   `json:"enable_ra"`
 }
 
-// Config 是 ServerConfig 的别名，兼容旧调用方。
-type Config = ServerConfig
+type Config struct {
+	DHCPConfig
+	Domain       string        `json:"domain"`
+	StaticLeases []StaticLease `json:"static_leases"`
+	Enabled      bool          `json:"enabled"`
+	V6RangeStart string        `json:"v6_range_start"`
+	V6RangeEnd   string        `json:"v6_range_end"`
+	V6PrefixLen  int           `json:"v6_prefix_len"`
+	EnableRA     bool          `json:"enable_ra"`
+}
 
 // RenderDnsmasq 将 DHCPConfig 渲染为 dnsmasq 配置文本。
 //
@@ -39,7 +47,7 @@ type Config = ServerConfig
 //   - dhcp-range=<start>,<end>,<netmask>,<leasetime>：地址池
 //   - dhcp-option=3,<gateway>：网关
 //   - dhcp-option=6,<dns1>,<dns2>,...：DNS
-func RenderDnsmasq(cfg DHCPConfig) string {
+func RenderDnsmasq(cfg Config) string {
 	var b strings.Builder
 
 	if cfg.Interface != "" {
@@ -96,8 +104,6 @@ type ServerConfig struct {
 	V6PrefixLen  int    `json:"v6_prefix_len"`
 	EnableRA     bool   `json:"enable_ra"`
 }
-
-// Config 是 ServerConfig 的别名，兼容旧调用方。
 
 // subnetFor 根据地址池起点与子网掩码构造 *net.IPNet。
 func subnetFor(rangeStart, netmask string) (*net.IPNet, error) {
