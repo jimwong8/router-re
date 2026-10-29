@@ -722,7 +722,7 @@ func (s *Server) handleGetDHCPConfig(w http.ResponseWriter, r *http.Request) {
 	cfg := s.dhcpConfigFromStore()
 	writeJSON(w, 200, map[string]interface{}{
 		"config":  cfg,
-		"dnsmasq": dhcp.RenderDnsmasq(cfg),
+		"dnsmasq": dhcp.RenderDnsmasq(dhcp.Config{DHCPConfig: cfg}),
 	})
 }
 
@@ -757,7 +757,7 @@ func (s *Server) handleSetDHCPConfig(w http.ResponseWriter, r *http.Request) {
 	s.logAudit(r, "dhcp.config.set", cfg.Interface, "ok", "")
 	writeJSON(w, 200, map[string]interface{}{
 		"config":  cfg,
-		"dnsmasq": dhcp.RenderDnsmasq(cfg),
+		"dnsmasq": dhcp.RenderDnsmasq(dhcp.Config{DHCPConfig: cfg}),
 		"applied": true,
 	})
 }

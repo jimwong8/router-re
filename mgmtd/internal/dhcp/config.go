@@ -126,6 +126,40 @@ func subnetFor(rangeStart, netmask string) (*net.IPNet, error) {
 //   - DNS 每项为 IP
 //   - Gateway(若非空)为 IP 且在地址池子段内
 //   - 静态租约的 MAC 合法、IP 为 IP 且在子段内、不落在动态 range 内、MAC 不重复
+func ValidateV6Config(c ServerConfig) error {
+	if c.Interface == "" {
+		return fmt.Errorf("interface is required")
+	}
+	if c.V6RangeStart != "" {
+		startIP := net.ParseIP(c.V6RangeStart)
+		if startIP == nil {
+			return fmt.Errorf("v6_range_start is not a valid ipv6: %s", c.V6RangeStart)
+		}
+		if startIP.To4() != nil {
+			return fmt.Errorf("v6_range_start must be ipv6, got ipv4: %s", c.V6RangeStart)
+		}
+	} else {
+		return fmt.Errorf("v6_range_start is required")
+	}
+	if c.V6RangeEnd != "" {
+		endIP := net.ParseIP(c.V6RangeEnd)
+		if endIP == nil {
+			return fmt.Errorf("v6_range_end is not a valid ipv6: %s", c.V6RangeEnd)
+		}
+		if endIP.To4() != nil {
+			return fmt.Errorf("v6_range_end must be ipv6, got ipv4: %s", c.V6RangeEnd)
+		}
+	} else {
+		return fmt.Errorf("v6_range_end is required")
+	}
+	if c.V6PrefixLen != 0 {
+		if c.V6PrefixLen < 1 || c.V6PrefixLen > 128 {
+			return fmt.Errorf("v6_prefix_len %d 超出 1-128", c.V6PrefixLen)
+		}
+	}
+	return nil
+}
+
 func ValidateConfig(c ServerConfig) error {
 	if c.Interface == "" {
 		return fmt.Errorf("interface is required")
@@ -200,30 +234,6 @@ func ValidateConfig(c ServerConfig) error {
 		seenMAC[sl.MAC] = true
 	}
 	if c.V6RangeStart != "" && c.V6RangeEnd != "" {
-		if c.V6PrefixLen < 1 || c.V6PrefixLen > 128 {
-			return fmt.Errorf("v6_prefix_len %d 超出 1-128", c.V6PrefixLen)
-		}
-	}
-	return nil
-}
-
-// ValidateV6Config validates only the v6-related fields of ServerConfig.
-func ValidateV6Config(c ServerConfig) error {
-	if c.Interface == "" {
-		return fmt.Errorf("interface is empty")
-	}
-	if c.V6RangeStart != "" {
-		if net.ParseIP(c.V6RangeStart) == nil {
-			return fmt.Errorf("v6_range_start is not a valid ipv6: %s", c.V6RangeStart)
-		}
-		if c.V6RangeEnd != "" {
-			if net.ParseIP(c.V6RangeEnd) == nil {
-				return fmt.Errorf("v6_range_end is not a valid ipv6: %s", c.V6RangeEnd)
-			}
-		}
-		if c.V6RangeEnd != "" && c.V6RangeStart == c.V6RangeEnd {
-			return fmt.Errorf("v6_range_start and v6_range_end must differ")
-		}
 		if c.V6PrefixLen < 1 || c.V6PrefixLen > 128 {
 			return fmt.Errorf("v6_prefix_len %d 超出 1-128", c.V6PrefixLen)
 		}

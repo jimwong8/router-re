@@ -85,3 +85,4 @@ func contains(s, sub string) bool {
 		return false
 	})()
 }
+// p131 validate

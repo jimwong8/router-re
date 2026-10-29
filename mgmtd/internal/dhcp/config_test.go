@@ -16,7 +16,7 @@ func TestRenderDnsmasqRange(t *testing.T) {
 		LeaseTime:  "12h",
 		DNS:        []string{"223.5.5.5", "114.114.114.114"},
 	}
-	out := RenderDnsmasq(cfg)
+	out := RenderDnsmasq(Config{DHCPConfig: cfg})
 	if out == "" {
 		t.Fatal("empty output")
 	}
@@ -40,7 +40,7 @@ func TestRenderDnsmasqNoDNS(t *testing.T) {
 		RangeEnd:   "192.168.1.200",
 		Gateway:    "192.168.1.1",
 	}
-	out := RenderDnsmasq(cfg)
+	out := RenderDnsmasq(Config{DHCPConfig: cfg})
 	if strings.Contains(out, "dhcp-option=6") {
 		t.Fatalf("unexpected dhcp-option=6 in output:\n%s", out)
 	}
@@ -48,7 +48,7 @@ func TestRenderDnsmasqNoDNS(t *testing.T) {
 
 // TestRenderDnsmasqEmptyCfg 验证空配置仍可渲染且不产生垃圾。
 func TestRenderDnsmasqEmptyCfg(t *testing.T) {
-	out := RenderDnsmasq(DHCPConfig{})
+	out := RenderDnsmasq(Config{})
 	if out != "" {
 		t.Fatalf("expected empty output for empty cfg, got:\n%s", out)
 	}

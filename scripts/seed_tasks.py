@@ -56,7 +56,13 @@ def save_backlog(items: list[dict]) -> None:
 
 
 def already_done(item: dict) -> str | None:
-    """功能是否已经在代码里了？返回证据字符串，否则 None。"""
+    """功能是否已经在代码里了？返回证据字符串，否则 None。
+
+    两类任务永不跳过（存在≠完成）：
+    - rerunnable: 回归/重跑类（报告存在恰恰是要重跑的信号）。
+    - needs_commit: 交付物需入库（文件存在但 git status 还能看到它=没入库）。"""
+    if item.get("rerunnable") or item.get("needs_commit"):
+        return None
     for path, needles in (item.get("must_contain") or {}).items():
         f = ROOT / path
         if not f.exists():

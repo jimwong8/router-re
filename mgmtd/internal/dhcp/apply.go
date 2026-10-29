@@ -39,7 +39,7 @@ func NewApplier() *Applier {
 // 然后尝试重载 dnsmasq（逐步尝试：systemctl → init.d → kill -HUP 通过 PID 文件），
 // 任一成功即返回 nil，全部失败则返回带 stderr 的错误。
 func (a *Applier) Apply(cfg DHCPConfig) error {
-	content := RenderDnsmasq(cfg)
+	content := RenderDnsmasq(Config{DHCPConfig: cfg})
 	dir := filepath.Dir(a.ConfPath)
 	if dir != "" && dir != "." {
 		_ = os.MkdirAll(dir, 0755)
