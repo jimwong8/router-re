@@ -10,8 +10,10 @@ import (
 
 	"github.com/jimwong/router-re/mgmtd/internal/ddos"
 	"github.com/jimwong/router-re/mgmtd/internal/execx"
+	"github.com/jimwong/router-re/mgmtd/internal/iperf"
 	"github.com/jimwong/router-re/mgmtd/internal/nettools2"
 	"github.com/jimwong/router-re/mgmtd/internal/procmon"
+	"github.com/jimwong/router-re/mgmtd/internal/svcmgr"
 	"github.com/jimwong/router-re/mgmtd/internal/timesched"
 )
 
@@ -531,6 +533,169 @@ func (s *Server) handlePortProbe(w http.ResponseWriter, r *http.Request) {
 		"elapsed_ms": time.Since(start).Milliseconds(),
 		"note":       "closed_or_filtered 表示端口没有响应，无法区分是被防火墙 DROP 还是服务未启动",
 	})
+}
+
+// handleServicesStatus returns the enabled/running status of ssh/telnet/ftp/dnsmasq.
+//
+// GET /api/v1/services/status
+func (s *Server) handleServicesStatus(w http.ResponseWriter, r *http.Request) {
+	mgr := s.svcMgr
+	if mgr == nil {
+		mgr = svcmgr.New(execx.DefaultRunner{})
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"services": mgr.StatusAll(),
+	})
+}
+
+// handleServiceSwitch toggles a service's enabled state.
+//
+// POST /api/v1/services/{name}  body {"enabled":bool}
+func (s *Server) handleServiceSwitch(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if !svcmgrValid(name) {
+		writeJSON(w, http.StatusUnprocessableEntity, errBody(10505, "unknown service",
+			"service must be one of: ssh, telnet, ftp, dnsmasq"))
+		return
+	}
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, errBody(10506, "invalid JSON body", err.Error()))
+		return
+	}
+	mgr := s.svcMgr
+	if mgr == nil {
+		mgr = svcmgr.New(execx.DefaultRunner{})
+	}
+	if err := mgr.SetEnabled(name, body.Enabled); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errBody(10507, "service switch failed", err.Error()))
+		return
+	}
+	st, _ := mgr.Status(name)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"name":    name,
+		"enabled": body.Enabled,
+		"status":  st,
+	})
+}
+
+// svcmgrValid mirrors svcmgr.validService without exporting it.
+func svcmgrValid(name string) bool {
+	for _, s := range svcmgr.Services {
+		if s == name {
+			return true
+		}
+	}
+	return false
+}
+
+// handleIperfRun runs an iperf3 client test.
+//
+// POST /api/v1/tools/iperf/run  body {"host","port","duration","protocol"}
+func (s *Server) handleIperfRun(w http.ResponseWriter, r *http.Request) {
+	var cfg iperf.Config
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		writeJSON(w, http.StatusBadRequest, errBody(10508, "invalid JSON body", err.Error()))
+		return
+	}
+	if err := iperf.Validate(&cfg); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, errBody(10509, "invalid iperf config", err.Error()))
+		return
+	}
+	runner := s.iperfRunner
+	if runner == nil {
+		runner = execx.DefaultRunner{}
+	}
+	res := iperf.Run(runner, cfg)
+	s.iperfMu.Lock()
+	s.iperfLast = res
+	s.iperfMu.Unlock()
+	if !res.OK {
+		writeJSON(w, http.StatusInternalServerError, errBody(10510, "iperf run failed", res.Error))
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// handleIperfStatus returns the most recent iperf result.
+//
+// GET /api/v1/tools/iperf/status
+func (s *Server) handleIperfStatus(w http.ResponseWriter, r *http.Request) {
+	s.iperfMu.Lock()
+	res := s.iperfLast
+	s.iperfMu.Unlock()
+	writeJSON(w, http.StatusOK, res)
+}
+
+// handleTaskSubmit submits a new background task.
+//
+// POST /api/v1/tasks  body {"type":..., "params":{...}}
+func (s *Server) handleTaskSubmit(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Type   string          `json:"type"`
+		Params json.RawMessage `json:"params"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, errBody(10513, "invalid JSON body", err.Error()))
+		return
+	}
+	if body.Type == "" {
+		writeJSON(w, http.StatusUnprocessableEntity, errBody(10514, "type required", "task type is required"))
+		return
+	}
+	if body.Params == nil {
+		body.Params = json.RawMessage("{}")
+	}
+	task, err := s.taskQ.Submit(body.Type, body.Params)
+	if err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, errBody(10515, "submit failed", err.Error()))
+		return
+	}
+	writeJSON(w, http.StatusAccepted, task)
+}
+
+// handleTaskList lists tasks with optional state/type filters and pagination.
+//
+// GET /api/v1/tasks?state=...&type=...&offset=...&limit=...
+func (s *Server) handleTaskList(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	state := q.Get("state")
+	typ := q.Get("type")
+	offset, _ := strconv.Atoi(q.Get("offset"))
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	tasks, total := s.taskQ.List(state, typ, offset, limit)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"tasks": tasks,
+		"total": total,
+	})
+}
+
+// handleTaskGet returns a single task.
+//
+// GET /api/v1/tasks/{id}
+func (s *Server) handleTaskGet(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	task, ok := s.taskQ.Get(id)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, errBody(10516, "task not found", "no task with id "+id))
+		return
+	}
+	writeJSON(w, http.StatusOK, task)
+}
+
+// handleTaskCancel cancels a pending/running task.
+//
+// POST /api/v1/tasks/{id}/cancel
+func (s *Server) handleTaskCancel(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.taskQ.Cancel(id); err != nil {
+		writeJSON(w, http.StatusConflict, errBody(10517, "cancel failed", err.Error()))
+		return
+	}
+	task, _ := s.taskQ.Get(id)
+	writeJSON(w, http.StatusOK, task)
 }
 
 // netSplitHostPort 仅供测试用，拆分 host:port

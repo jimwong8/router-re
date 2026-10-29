@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"sort"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/jimwong/router-re/mgmtd/internal/account"
 	"github.com/jimwong/router-re/mgmtd/internal/acl"
+	"github.com/jimwong/router-re/mgmtd/internal/frp"
 	"github.com/jimwong/router-re/mgmtd/internal/audit"
 	"github.com/jimwong/router-re/mgmtd/internal/auth"
 	"github.com/jimwong/router-re/mgmtd/internal/billing"
@@ -34,6 +36,7 @@ import (
 	"github.com/jimwong/router-re/mgmtd/internal/execx"
 	"github.com/jimwong/router-re/mgmtd/internal/firewall"
 	"github.com/jimwong/router-re/mgmtd/internal/iface"
+	"github.com/jimwong/router-re/mgmtd/internal/iperf"
 	"github.com/jimwong/router-re/mgmtd/internal/ips"
 	"github.com/jimwong/router-re/mgmtd/internal/l2"
 	"github.com/jimwong/router-re/mgmtd/internal/logcenter"
@@ -46,6 +49,8 @@ import (
 	"github.com/jimwong/router-re/mgmtd/internal/rbac"
 	"github.com/jimwong/router-re/mgmtd/internal/route"
 	"github.com/jimwong/router-re/mgmtd/internal/snmp"
+	"github.com/jimwong/router-re/mgmtd/internal/svcmgr"
+	"github.com/jimwong/router-re/mgmtd/internal/taskq"
 	"github.com/jimwong/router-re/mgmtd/internal/stats"
 	"github.com/jimwong/router-re/mgmtd/internal/system"
 	"github.com/jimwong/router-re/mgmtd/internal/threat"
@@ -86,6 +91,18 @@ type Server struct {
 	statsRing *stats.Ring
 	// aclApplier runs nft rulesets (reuses execx; nil-safe in handlers).
 	aclApplier execx.Runner
+	// rebootRunner executes the actual reboot command (injectable for tests).
+	rebootRunner execx.Runner
+	// iperfRunner runs iperf3 client (injectable for tests).
+	iperfRunner execx.Runner
+	// iperfMu guards iperfLast.
+	iperfMu sync.Mutex
+	// iperfLast holds the most recent iperf result.
+	iperfLast iperf.Result
+	// svcMgr manages ssh/telnet/ftp/dnsmasq enable/disable switches.
+	svcMgr *svcmgr.Manager
+	// taskQ is the background task queue.
+	taskQ *taskq.Queue
 	// accountMgr holds PPPoE/portal billing accounts (P4-2).
 	accountMgr *account.Manager
 	// billingPlans holds the sellable package list (P4-2).
@@ -162,6 +179,10 @@ func newConfigStore() (config.Store, error) {
 }
 
 func New(cfg Config) *Server {
+	taskStorePath := "/tmp/router-re-tasks.json"
+	if v := os.Getenv("MGM_TASK_STORE"); v != "" {
+		taskStorePath = v
+	}
 	if cfg.AdminUser == "" {
 		cfg.AdminUser = "admin"
 	}
@@ -183,14 +204,20 @@ func New(cfg Config) *Server {
 		cloudMgr:     cloud.NewManager(),
 		dhcpApplier:  dhcp.NewApplier(),
 		loginLimiter: newLoginLimiter(5, time.Minute),
+		taskQ:        taskq.New(taskStorePath, 2, 50),
 		portalMgr:    portal.NewManager(),
 		statsRing:    stats.NewRing(720),
 		aclApplier:   execx.DefaultRunner{},
+		rebootRunner:  execx.DefaultRunner{},
+		iperfRunner:   execx.DefaultRunner{},
+		svcMgr:       svcmgr.New(execx.DefaultRunner{}),
 		accountMgr:   account.NewManager(),
 		billingPlans: billing.DefaultPlans(),
 		rbacMgr:      rbac.NewManagerWithFile(cfg.AdminUser, cfg.AdminPassword, cfg.UserFile),
 		threatList:   threat.NewList(),
 	}
+	s.frp()
+
 	// Start the background stats collector: sample every 30s, run until
 	// process exit. Sleep inside the goroutine so it never blocks requests.
 	go s.collectStatsLoop()
@@ -204,6 +231,28 @@ func New(cfg Config) *Server {
 		auditPath = "./audit.jsonl"
 	}
 	s.audit = audit.New(auditPath)
+	// Register default task handlers.
+	s.taskQ.Register("echo", func(ctx context.Context, params json.RawMessage, progress func(int)) (any, error) {
+		return params, nil
+	})
+	s.taskQ.Register("sleep", func(ctx context.Context, params json.RawMessage, progress func(int)) (any, error) {
+		var p struct {
+			Seconds int `json:"seconds"`
+		}
+		_ = json.Unmarshal(params, &p)
+		if p.Seconds <= 0 {
+			p.Seconds = 1
+		}
+		for i := 0; i < p.Seconds; i++ {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(time.Second):
+			}
+			progress((i + 1) * 100 / p.Seconds)
+		}
+		return map[string]any{"slept": p.Seconds}, nil
+	})
 	s.routes()
 	// Restore persisted accounts and billing plans (P4-2).
 	s.loadAccounts()
@@ -347,6 +396,21 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/wol/targets", s.auth(s.handleGetWOLTargets))
 	s.mux.HandleFunc("POST /api/v1/wol/targets", s.auth(s.auditWrap("wol.targets.set", s.handleSetWOLTargets)))
 	s.mux.HandleFunc("POST /api/v1/wol/wake", s.auth(s.auditWrap("wol.wake", s.handleWOLWake)))
+	// P6-5 系统重启 + 子网换算工具（仅本区块）
+	s.mux.HandleFunc("POST /api/v1/system/reboot", s.auth(s.auditWrap("system.reboot", s.handleSystemReboot)))
+	s.mux.HandleFunc("GET /api/v1/tools/subnet", s.auth(s.handleSubnetCalc))
+	s.mux.HandleFunc("POST /api/v1/tools/iperf/run", s.auth(s.auditWrap("tools.iperf.run", s.handleIperfRun)))
+	s.mux.HandleFunc("GET /api/v1/tools/iperf/status", s.auth(s.handleIperfStatus))
+	// P12: background task queue
+	s.mux.HandleFunc("POST /api/v1/tasks", s.auth(s.auditWrap("tasks.submit", s.handleTaskSubmit)))
+	s.mux.HandleFunc("GET /api/v1/tasks", s.auth(s.handleTaskList))
+	s.mux.HandleFunc("GET /api/v1/tasks/{id}", s.auth(s.handleTaskGet))
+	s.mux.HandleFunc("POST /api/v1/tasks/{id}/cancel", s.auth(s.auditWrap("tasks.cancel", s.handleTaskCancel)))
+	// P6-6 抓包工具（仅本区块）
+	s.mux.HandleFunc("POST /api/v1/tools/capture/start", s.auth(s.auditWrap("tools.capture.start", s.handleCaptureStart)))
+	s.mux.HandleFunc("GET /api/v1/tools/capture/status", s.auth(s.handleCaptureStatus))
+	s.mux.HandleFunc("GET /api/v1/tools/capture/", s.auth(s.handleCaptureDownload)) // {id}/download
+	s.mux.HandleFunc("POST /api/v1/tools/capture/", s.auth(s.auditWrap("tools.capture.stop", s.handleCaptureStop))) // {id}/stop
 	// P7-4 威胁情报与 IP 封禁（仅本区块）
 	s.mux.HandleFunc("GET /api/v1/threat/list", s.auth(s.handleThreatList))
 	s.mux.HandleFunc("POST /api/v1/threat/block", s.auth(s.auditWrap("threat.block", s.handleThreatBlock)))
@@ -361,6 +425,8 @@ func (s *Server) routes() {
 	// ---- P15: 进程与服务 / DDoS / 时间段策略 / 网络工具 ----
 	s.mux.HandleFunc("GET /api/v1/system/services", s.auth(s.handleListServices))
 	s.mux.HandleFunc("POST /api/v1/system/services/action", s.auth(s.handleServiceAction))
+	s.mux.HandleFunc("GET /api/v1/services/status", s.auth(s.handleServicesStatus))
+	s.mux.HandleFunc("POST /api/v1/services/{name}", s.auth(s.auditWrap("services.switch", s.handleServiceSwitch)))
 	s.mux.HandleFunc("GET /api/v1/system/processes", s.auth(s.handleListProcesses))
 	s.mux.HandleFunc("POST /api/v1/system/processes/kill", s.auth(s.handleKillProcess))
 	s.mux.HandleFunc("GET /api/v1/security/ddos", s.auth(s.handleGetDDoS))
@@ -481,6 +547,9 @@ func (s *Server) routes() {
 	// P3-1 安全管控（仅本区块）
 	s.mux.HandleFunc("GET /api/v1/acl/rules", s.auth(s.handleGetACLRules))
 	s.mux.HandleFunc("POST /api/v1/acl/rules", s.auth(s.auditWrap("acl.rules.set", s.handleSetACLRules)))
+	s.mux.HandleFunc("GET /api/v1/acl/mac-filter", s.auth(s.handleGetACLMacFilter))
+	s.mux.HandleFunc("POST /api/v1/acl/mac-filter", s.auth(s.auditWrap("acl.mac_filter.set", s.handleSetACLMacFilter)))
+
 	s.mux.HandleFunc("GET /api/v1/security/arp", s.auth(s.handleGetArp))
 	s.mux.HandleFunc("POST /api/v1/security/arp", s.auth(s.auditWrap("security.arp.set", s.handleSetArp)))
 	s.mux.HandleFunc("GET /api/v1/security/arp/neighbors", s.auth(s.handleGetNeighbors))
@@ -2679,6 +2748,120 @@ func (s *Server) handleSetACLRules(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleGetACLMacFilter returns the current MAC filter config from store.
+func (s *Server) handleGetACLMacFilter(w http.ResponseWriter, r *http.Request) {
+	raw, _ := s.store.Get("acl", "mac_filter")
+	cfg := acl.MacFilter{Mode: acl.MacFilterModeBlacklist}
+	if raw != "" {
+		_ = json.Unmarshal([]byte(raw), &cfg)
+	}
+	writeJSON(w, 200, map[string]interface{}{"config": cfg})
+}
+
+// handleSetACLMacFilter validates, stores and live-applies a MAC filter.
+func (s *Server) handleSetACLMacFilter(w http.ResponseWriter, r *http.Request) {
+	var req acl.MacFilter
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10505, "invalid body", err.Error()))
+		return
+	}
+	if err := acl.ValidateMacFilter(req); err != nil {
+		writeJSON(w, 422, errBody(10506, "validation failed", err.Error()))
+		return
+	}
+	applied := false
+	var nftOut string
+	if s.aclApplier != nil {
+		if err := acl.ApplyMacFilter(s.aclApplier, req); err != nil {
+			writeJSON(w, 500, errBody(10507, "nft apply failed", err.Error()))
+			return
+		}
+		applied = true
+		if out, err := s.aclApplier.Run(acl.NftName, acl.NftMacFilterListArgs...); err == nil {
+			nftOut = out
+		}
+	} else {
+		nftOut = acl.RenderMacFilter(req)
+	}
+	b, _ := json.Marshal(req)
+	_ = s.store.Set("acl", "mac_filter", string(b))
+	writeJSON(w, 200, map[string]interface{}{
+		"applied": applied,
+		"config":  req,
+		"nft":     nftOut,
+	})
+}
+
+// frp registers frp client management routes.
+func (s *Server) frp() {
+	s.mux.HandleFunc("GET /api/v1/frp/config", s.auth(s.handleGetFrpConfig))
+	s.mux.HandleFunc("POST /api/v1/frp/config", s.auth(s.auditWrap("frp.config.set", s.handleSetFrpConfig)))
+	s.mux.HandleFunc("POST /api/v1/frp/apply", s.auth(s.auditWrap("frp.apply", s.handleFrpApply)))
+	s.mux.HandleFunc("GET /api/v1/frp/status", s.auth(s.handleFrpStatus))
+	s.mux.HandleFunc("POST /api/v1/frp/stop", s.auth(s.auditWrap("frp.stop", s.handleFrpStop)))
+}
+
+// handleGetFrpConfig returns the stored frp client config.
+func (s *Server) handleGetFrpConfig(w http.ResponseWriter, r *http.Request) {
+	raw, _ := s.store.Get("frp", "config")
+	cfg, _ := frp.ParseConfig(raw)
+	writeJSON(w, 200, map[string]interface{}{"config": cfg})
+}
+
+// handleFrpConfig handles GET/POST /api/v1/frp/config.
+func (s *Server) handleFrpConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "GET" {
+		s.handleGetFrpConfig(w, r)
+		return
+	}
+	s.handleSetFrpConfig(w, r)
+}
+
+// handleSetFrpConfig stores (validates) an frp client config.
+func (s *Server) handleSetFrpConfig(w http.ResponseWriter, r *http.Request) {
+	var cfg frp.Config
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		writeJSON(w, 400, errBody(10508, "invalid body", err.Error()))
+		return
+	}
+	if err := cfg.Validate(); err != nil {
+		writeJSON(w, 422, errBody(10509, "validation failed", err.Error()))
+		return
+	}
+	b, _ := json.Marshal(cfg)
+	_ = s.store.Set("frp", "config", string(b))
+	writeJSON(w, 200, map[string]interface{}{"config": cfg})
+}
+
+// handleFrpApply writes config and starts/reloads frpc.
+func (s *Server) handleFrpApply(w http.ResponseWriter, r *http.Request) {
+	raw, _ := s.store.Get("frp", "config")
+	cfg, _ := frp.ParseConfig(raw)
+	if err := cfg.Validate(); err != nil {
+		writeJSON(w, 422, errBody(10510, "validation failed", err.Error()))
+		return
+	}
+	if err := frp.Apply(cfg); err != nil {
+		writeJSON(w, 500, errBody(10511, "frp apply failed", err.Error()))
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{"status": frp.CurrentStatus(), "config": cfg})
+}
+
+// handleFrpStatus returns frpc process status.
+func (s *Server) handleFrpStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, frp.CurrentStatus())
+}
+
+// handleFrpStop stops frpc.
+func (s *Server) handleFrpStop(w http.ResponseWriter, r *http.Request) {
+	if err := frp.Stop(); err != nil {
+		writeJSON(w, 500, errBody(10512, "frp stop failed", err.Error()))
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{"stopped": true, "status": frp.CurrentStatus()})
+}
+
 // handleGetArp returns the configured ARP-guard interface and the actual
 // per-scope sysctl readback (all / default / each real interface).
 func (s *Server) handleGetArp(w http.ResponseWriter, r *http.Request) {
@@ -4044,9 +4227,106 @@ func (s *Server) handleSetDPIMarkRules(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleSystemReboot triggers a system reboot.
+func (s *Server) handleSystemReboot(w http.ResponseWriter, r *http.Request) {
+	// confirm 门禁：没有显式确认绝不下发重启。曾经这里的实现在 confirm=false
+	// 时也返回 200 rebooting:true（测试 p103 抓到），等于前端传错参数就把机器重启了。
+	var req struct {
+		Confirm bool `json:"confirm"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10486, "invalid body", err.Error()))
+		return
+	}
+	if !req.Confirm {
+		writeJSON(w, 422, errBody(10487, "confirm required", "body must be {\"confirm\":true}"))
+		return
+	}
+	const delay = 2
+	go func() {
+		time.Sleep(delay * time.Second)
+		_, _ = s.rebootRunner.Run("systemctl", "reboot")
+	}()
+	writeJSON(w, 200, map[string]interface{}{"reboot": true, "delay": delay})
+}
+
+// handleSubnetCalc 计算 IPv4 子网信息。GET /api/v1/tools/subnet?cidr=192.168.1.0/24
+func (s *Server) handleSubnetCalc(w http.ResponseWriter, r *http.Request) {
+	cidr := r.URL.Query().Get("cidr")
+	if cidr == "" {
+		writeJSON(w, 422, errBody(10488, "missing cidr", "cidr query param required"))
+		return
+	}
+	prefix, err := netip.ParsePrefix(cidr)
+	if err != nil {
+		writeJSON(w, 422, errBody(10489, "invalid cidr", err.Error()))
+		return
+	}
+	if !prefix.Addr().Is4() {
+		writeJSON(w, 422, errBody(10490, "ipv6 not supported", "only IPv4 supported"))
+		return
+	}
+	masked := prefix.Masked()
+	networkAddr := masked.Addr()
+	bits := prefix.Bits()
+	netmask := "0.0.0.0"
+	if bits > 0 {
+		mask := uint32(0xFFFFFFFF) << (32 - bits)
+		netmask = fmt.Sprintf("%d.%d.%d.%d", (mask>>24)&0xFF, (mask>>16)&0xFF, (mask>>8)&0xFF, mask&0xFF)
+	}
+	networkUint := ip4ToUint(networkAddr)
+	maskUint := uint32(0xFFFFFFFF) << (32 - bits)
+	broadcastUint := networkUint | ^maskUint
+	broadcastAddr := netip.AddrFrom4([4]byte{byte(broadcastUint>>24), byte(broadcastUint>>16), byte(broadcastUint>>8), byte(broadcastUint)})
+	firstUint := networkUint + 1
+	lastUint := broadcastUint - 1
+	if bits >= 31 {
+		firstUint = networkUint
+		lastUint = broadcastUint
+	}
+	if bits == 32 {
+		firstUint = networkUint
+		lastUint = networkUint
+	}
+	firstHost := netip.AddrFrom4([4]byte{byte(firstUint>>24), byte(firstUint>>16), byte(firstUint>>8), byte(firstUint)})
+	lastHost := netip.AddrFrom4([4]byte{byte(lastUint>>24), byte(lastUint>>16), byte(lastUint>>8), byte(lastUint)})
+	hostCount := 0
+	if bits < 31 {
+		hostCount = (1 << (32 - bits)) - 2
+		if hostCount < 0 {
+			hostCount = 0
+		}
+	} else if bits == 31 {
+		hostCount = 0
+	} else if bits == 32 {
+		hostCount = 0
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"network":    networkAddr.String(),
+		"prefix_len": bits,
+		"netmask":    netmask,
+		"broadcast":  broadcastAddr.String(),
+		"first_host": firstHost.String(),
+		"last_host":  lastHost.String(),
+		"host_count": float64(hostCount),
+	})
+}
+
+// ip4ToUint 把 IPv4 地址转成主机序 uint32。
+func ip4ToUint(a netip.Addr) uint32 {
+	b := a.As4()
+	return uint32(b[0])<<24 | uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3])
+}
+
+// uintToIP4 把 uint32 转回 IPv4 地址。
+func uintToIP4(v uint32) netip.Addr {
+	return netip.AddrFrom4([4]byte{byte(v >> 24), byte(v >> 16), byte(v >> 8), byte(v)})
+}
+
 // loadDPIMarkRules 从 store 读取 mark 规则配置。
 func loadDPIMarkRules(s *Server) map[string][]int {
 	appPorts := map[string][]int{}
+
 	if raw, err := s.store.Get("dpi", dpiMarkRulesStoreKey); err == nil && raw != "" {
 		_ = json.Unmarshal([]byte(raw), &appPorts)
 	}
