@@ -420,6 +420,21 @@ def llm_review(key: str, task: dict, files: list[tuple[Path, str]], model: str,
     它会按"只看到代码、没看到运行结果"判 FAIL（p34 就这么被误判过）。
     """
     requirement = (task.get("prompt") or "")[:1500]
+    # 剥掉累积的返工前缀：那段文本是上一轮验证者的话，里面有"未修复 sms"之类
+    # 属于别的任务的指责。把它喂回给审查者，等于让上一轮的误判自我强化
+    # （p112 因此连续三次被判"未修复 sms"，而 sms 根本不是它的活）。
+    _mk = "【上一轮验证未通过，本次必修】"
+    if _mk in requirement:
+        requirement = requirement.split(_mk, 1)[0].strip() or requirement
+    # 范围约束：server.go 这类共享文件同时被多个任务改，审查者只看到本任务
+    # 的产出片段时，会拿"别的功能还没写完"当本任务缺失（p114 被要求证明
+    # sms 函数存在，那是 p113 的活）。所以显式给出判定范围。
+    scope_keys = sorted({k for keys in (task.get("must_contain") or {}).values() for k in keys})
+    scope_line = ""
+    if scope_keys:
+        scope_line = ("\n**判定范围**：只判断与「" + "、".join(scope_keys) +
+                      "」相关的功能点是否实现。产出文件里若还有其它功能缺失/未完成，"
+                      "那是别的任务的在途工作，**不作为本任务判 FAIL 的理由**。\n")
     body_parts = []
     for p, text in files:
         body_parts.append(f"### 文件 `{p.relative_to(ROOT)}`\n```\n{text}\n```")
@@ -440,7 +455,7 @@ def llm_review(key: str, task: dict, files: list[tuple[Path, str]], model: str,
 
 任务要求：
 {requirement}
-
+{scope_line}
 实际产出：
 {"".join(body_parts)}{evidence_block}
 
