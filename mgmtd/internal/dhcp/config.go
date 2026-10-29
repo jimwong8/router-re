@@ -82,6 +82,11 @@ type ServerConfig struct {
 	Domain       string        `json:"domain"`
 	StaticLeases []StaticLease `json:"static_leases"`
 	Enabled      bool          `json:"enabled"`
+	// DHCPv6
+	V6RangeStart string `json:"v6_range_start"`
+	V6RangeEnd   string `json:"v6_range_end"`
+	V6PrefixLen  int    `json:"v6_prefix_len"`
+	EnableRA     bool   `json:"enable_ra"`
 }
 
 // subnetFor 根据地址池起点与子网掩码构造 *net.IPNet。
@@ -178,10 +183,38 @@ func ValidateConfig(c ServerConfig) error {
 		}
 		seenMAC[sl.MAC] = true
 	}
+	if c.V6RangeStart != "" && c.V6RangeEnd != "" {
+		if c.V6PrefixLen < 1 || c.V6PrefixLen > 128 {
+			return fmt.Errorf("v6_prefix_len %d 超出 1-128", c.V6PrefixLen)
+		}
+	}
 	return nil
 }
 
-// RenderDnsmasq 方法版：将 ServerConfig 渲染为 dnsmasq 配置。
+// ValidateV6Config validates only the v6-related fields of ServerConfig.
+func ValidateV6Config(c ServerConfig) error {
+	if c.Interface == "" {
+		return fmt.Errorf("interface is empty")
+	}
+	if c.V6RangeStart != "" {
+		if net.ParseIP(c.V6RangeStart) == nil {
+			return fmt.Errorf("v6_range_start is not a valid ipv6: %s", c.V6RangeStart)
+		}
+		if c.V6RangeEnd != "" {
+			if net.ParseIP(c.V6RangeEnd) == nil {
+				return fmt.Errorf("v6_range_end is not a valid ipv6: %s", c.V6RangeEnd)
+			}
+		}
+		if c.V6RangeEnd != "" && c.V6RangeStart == c.V6RangeEnd {
+			return fmt.Errorf("v6_range_start and v6_range_end must differ")
+		}
+		if c.V6PrefixLen < 1 || c.V6PrefixLen > 128 {
+			return fmt.Errorf("v6_prefix_len %d 超出 1-128", c.V6PrefixLen)
+		}
+	}
+	return nil
+}
+
 //
 // NOTE：这里是方法 (ServerConfig.RenderDnsmasq) 而非新包级函数，
 // 目的是避免与已有的包级函数 RenderDnsmasq(DHCPConfig) 发生命名冲突
@@ -226,6 +259,17 @@ func (c ServerConfig) RenderDnsmasq() string {
 		}
 		line += "\n"
 		b.WriteString(prefix(line))
+	}
+	if c.V6RangeStart != "" && c.V6RangeEnd != "" {
+		v6line := "dhcp-range=" + c.V6RangeStart + "," + c.V6RangeEnd
+		if c.V6PrefixLen > 0 {
+			v6line += "," + fmt.Sprintf("%d", c.V6PrefixLen)
+		}
+		v6line += ",12h"
+		b.WriteString(prefix(v6line + "\n"))
+	}
+	if c.EnableRA {
+		b.WriteString(prefix("enable-ra\n"))
 	}
 	if !c.Enabled {
 		// 最后补一条兜底，让禁用状态下文件内容仍完整可读
