@@ -18,6 +18,8 @@ type Access struct {
 	WebPort       int      `json:"web_port"`
 	AllowSources  []string `json:"allow_sources"`
 	TelnetEnabled bool     `json:"telnet_enabled"`
+	FtpEnabled    bool     `json:"ftp_enabled"`
+	FtpPort       int      `json:"ftp_port"`
 }
 
 // ValidateAccess 检查 Access 的静态合法性：
@@ -33,8 +35,21 @@ func ValidateAccess(a Access) error {
 	if a.WebPort < 1 || a.WebPort > 65535 {
 		return fmt.Errorf("web_port %d 超出 1-65535", a.WebPort)
 	}
+	if a.FtpPort != 0 && (a.FtpPort < 1 || a.FtpPort > 65535) {
+		return fmt.Errorf("ftp_port %d 超出 1-65535", a.FtpPort)
+	}
 	if a.SSHPort == a.WebPort {
 		return fmt.Errorf("ssh_port 与 web_port 不能相同（都是 %d）", a.SSHPort)
+	}
+	// FTP 端口不能和 SSH/Web 撞：撞了就是一个服务静默抢不到端口，
+	// 面板上显示 enabled、实际连不上。
+	if a.FtpEnabled && a.FtpPort != 0 {
+		if a.FtpPort == a.SSHPort {
+			return fmt.Errorf("ftp_port 与 ssh_port 不能相同（都是 %d）", a.FtpPort)
+		}
+		if a.FtpPort == a.WebPort {
+			return fmt.Errorf("ftp_port 与 web_port 不能相同（都是 %d）", a.FtpPort)
+		}
 	}
 	for _, cidr := range a.AllowSources {
 		cidr = strings.TrimSpace(cidr)
@@ -65,6 +80,9 @@ func AccessWarnings(a Access) []string {
 	var warnings []string
 	if a.TelnetEnabled {
 		warnings = append(warnings, "Telnet 是明文协议，凭据与流量不加密，建议改用 SSH。")
+	}
+	if a.FtpEnabled {
+		warnings = append(warnings, "FTP 是明文协议（含密码），建议改用 SFTP/FTPS 或仅在受信网段开放。")
 	}
 	return warnings
 }
@@ -119,6 +137,7 @@ func serviceActions(a Access) []serviceAction {
 	out := []serviceAction{
 		{unit: "ssh", action: onOff(a.SSHEnabled, true)},
 		{unit: "telnet", action: onOff(a.TelnetEnabled, true)},
+		{unit: "vsftpd", action: onOff(a.FtpEnabled, true)},
 		{unit: "nginx.service", action: onOff(a.WebEnabled, true)},
 	}
 	return out
@@ -150,6 +169,19 @@ func AccessStatus(r execx.Runner) (map[string]string, error) {
 		"ssh_port":      "22",
 		"ssh_listen":    "",
 		"telnet_active": "inactive",
+		"ftp_active":    "inactive",
+		"ftp_port":      "21",
+	}
+	if out2, err := r.Run("systemctl", "is-active", "vsftpd"); err == nil {
+		st := strings.TrimSpace(out2)
+		if st == "active" {
+			out["ftp_active"] = "active"
+		}
+	} else if out2, err := r.Run("systemctl", "is-active", "ftp"); err == nil {
+		st := strings.TrimSpace(out2)
+		if st == "active" {
+			out["ftp_active"] = "active"
+		}
 	}
 	if ports, err := sshPorts(r); err == nil && len(ports) > 0 {
 		out["ssh_port"] = strings.Join(ports, ",")

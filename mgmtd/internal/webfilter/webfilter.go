@@ -89,3 +89,56 @@ func Apply(r execx.Runner, rs []Rule, confPath string) error {
 	// 当成"原因"抛出去 —— 那样运维看不出到底哪一步失败。
 	return fmt.Errorf("配置已写入 %s，但 dnsmasq 未重启：systemctl: %v；init.d: %v", confPath, sysErr, initErr)
 }
+
+// ApplyWebfilter generates an nftables script that installs a table inet webfilter
+// with a set blocked_domains and a forward chain dropping daddr in the set, then
+// executes it through runner. When rules is empty the table is deleted instead.
+// Returns the generated nft script text and any error from the runner.
+func ApplyWebfilter(r execx.Runner, rules []Rule) (string, error) {
+	if err := Validate(rules); err != nil {
+		return "", err
+	}
+	var domains []string
+	for _, rl := range rules {
+		if !rl.Enabled {
+			continue
+		}
+		if rl.Action != "block" {
+			continue
+		}
+		domains = append(domains, rl.Domain)
+	}
+	if len(domains) == 0 {
+		// delete table
+		_, err := r.Run("nft", "delete", "table", "inet", "webfilter")
+		if err != nil {
+			return "", err
+		}
+		return "delete table inet webfilter\n", nil
+	}
+	var b strings.Builder
+	b.WriteString("table inet webfilter {\n")
+	b.WriteString("  set blocked_domains {\n")
+	b.WriteString("    type ipv4_addr\n")
+	b.WriteString("    flags interval\n")
+	b.WriteString("    elements = { ")
+	for i, d := range domains {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(d)
+	}
+	b.WriteString(" }\n")
+	b.WriteString("  }\n")
+	b.WriteString("  chain forward {\n")
+	b.WriteString("    type filter hook forward priority 0; policy accept;\n")
+	b.WriteString("    ip daddr @blocked_domains drop\n")
+	b.WriteString("  }\n")
+	b.WriteString("}\n")
+	script := b.String()
+	_, err := r.RunWithInput(script, "nft", "-f", "-")
+	if err != nil {
+		return script, err
+	}
+	return script, nil
+}

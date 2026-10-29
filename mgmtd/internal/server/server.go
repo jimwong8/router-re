@@ -21,7 +21,6 @@ import (
 
 	"github.com/jimwong/router-re/mgmtd/internal/account"
 	"github.com/jimwong/router-re/mgmtd/internal/acl"
-	"github.com/jimwong/router-re/mgmtd/internal/frp"
 	"github.com/jimwong/router-re/mgmtd/internal/audit"
 	"github.com/jimwong/router-re/mgmtd/internal/auth"
 	"github.com/jimwong/router-re/mgmtd/internal/billing"
@@ -35,6 +34,7 @@ import (
 	"github.com/jimwong/router-re/mgmtd/internal/dpiflow"
 	"github.com/jimwong/router-re/mgmtd/internal/execx"
 	"github.com/jimwong/router-re/mgmtd/internal/firewall"
+	"github.com/jimwong/router-re/mgmtd/internal/frp"
 	"github.com/jimwong/router-re/mgmtd/internal/iface"
 	"github.com/jimwong/router-re/mgmtd/internal/iperf"
 	"github.com/jimwong/router-re/mgmtd/internal/ips"
@@ -48,15 +48,17 @@ import (
 	"github.com/jimwong/router-re/mgmtd/internal/radius"
 	"github.com/jimwong/router-re/mgmtd/internal/rbac"
 	"github.com/jimwong/router-re/mgmtd/internal/route"
+	"github.com/jimwong/router-re/mgmtd/internal/sms"
 	"github.com/jimwong/router-re/mgmtd/internal/snmp"
-	"github.com/jimwong/router-re/mgmtd/internal/svcmgr"
-	"github.com/jimwong/router-re/mgmtd/internal/taskq"
 	"github.com/jimwong/router-re/mgmtd/internal/stats"
+	"github.com/jimwong/router-re/mgmtd/internal/svcmgr"
 	"github.com/jimwong/router-re/mgmtd/internal/system"
+	"github.com/jimwong/router-re/mgmtd/internal/taskq"
 	"github.com/jimwong/router-re/mgmtd/internal/threat"
 	"github.com/jimwong/router-re/mgmtd/internal/traffic"
 	"github.com/jimwong/router-re/mgmtd/internal/vpn"
 	"github.com/jimwong/router-re/mgmtd/internal/wan"
+	"github.com/jimwong/router-re/mgmtd/internal/webfilter"
 	"github.com/jimwong/router-re/mgmtd/internal/wireless"
 )
 
@@ -135,6 +137,8 @@ type Server struct {
 	// 不加锁时并发回来的探测结果互相覆盖，故障切换拿着旧状态判断：
 	// 挂掉的链路显示 up（流量继续打死链路），或恢复的显示 down（白白不用）。
 	multiwanMu sync.Mutex
+	// smsStore 是短信验证码的内存存储（发送频次限制、码的生效/作废）。
+	smsStore *sms.MemoryStore
 	// storeErr 记录配置存储初始化失败的原因（仅当 MGM_CONFIG_FILE 配了却打不开）。
 	// main 检查它并拒绝启动——不能让"配置写进内存、重启全丢"静默发生。
 	storeErr error
@@ -208,13 +212,14 @@ func New(cfg Config) *Server {
 		portalMgr:    portal.NewManager(),
 		statsRing:    stats.NewRing(720),
 		aclApplier:   execx.DefaultRunner{},
-		rebootRunner:  execx.DefaultRunner{},
-		iperfRunner:   execx.DefaultRunner{},
+		rebootRunner: execx.DefaultRunner{},
+		iperfRunner:  execx.DefaultRunner{},
 		svcMgr:       svcmgr.New(execx.DefaultRunner{}),
 		accountMgr:   account.NewManager(),
 		billingPlans: billing.DefaultPlans(),
 		rbacMgr:      rbac.NewManagerWithFile(cfg.AdminUser, cfg.AdminPassword, cfg.UserFile),
 		threatList:   threat.NewList(),
+		smsStore:     sms.NewMemoryStore(),
 	}
 	s.frp()
 
@@ -399,6 +404,11 @@ func (s *Server) routes() {
 	// P6-5 系统重启 + 子网换算工具（仅本区块）
 	s.mux.HandleFunc("POST /api/v1/system/reboot", s.auth(s.auditWrap("system.reboot", s.handleSystemReboot)))
 	s.mux.HandleFunc("GET /api/v1/tools/subnet", s.auth(s.handleSubnetCalc))
+	s.mux.HandleFunc("GET /api/v1/ha/config", s.auth(s.handleGetHAConfig))
+	s.mux.HandleFunc("POST /api/v1/ha/sync", s.auth(s.auditWrap("ha.sync", s.handleHASync)))
+	s.mux.HandleFunc("POST /api/v1/ha/config", s.auth(s.auditWrap("ha.config", s.handleSetHAConfig)))
+	s.mux.HandleFunc("POST /api/v1/ha/import", s.auth(s.handleHAImport))
+	s.mux.HandleFunc("GET /api/v1/ha/status", s.auth(s.handleHAStatus))
 	s.mux.HandleFunc("POST /api/v1/tools/iperf/run", s.auth(s.auditWrap("tools.iperf.run", s.handleIperfRun)))
 	s.mux.HandleFunc("GET /api/v1/tools/iperf/status", s.auth(s.handleIperfStatus))
 	// P12: background task queue
@@ -409,8 +419,11 @@ func (s *Server) routes() {
 	// P6-6 抓包工具（仅本区块）
 	s.mux.HandleFunc("POST /api/v1/tools/capture/start", s.auth(s.auditWrap("tools.capture.start", s.handleCaptureStart)))
 	s.mux.HandleFunc("GET /api/v1/tools/capture/status", s.auth(s.handleCaptureStatus))
-	s.mux.HandleFunc("GET /api/v1/tools/capture/", s.auth(s.handleCaptureDownload)) // {id}/download
+	s.mux.HandleFunc("GET /api/v1/tools/capture/", s.auth(s.handleCaptureDownload))                                 // {id}/download
 	s.mux.HandleFunc("POST /api/v1/tools/capture/", s.auth(s.auditWrap("tools.capture.stop", s.handleCaptureStop))) // {id}/stop
+	// P14: 短信验证码网关（P113-sms-gateway）
+	s.mux.HandleFunc("POST /api/v1/auth/sms/send", s.auth(s.handleSMSSend))
+	s.mux.HandleFunc("POST /api/v1/auth/sms/verify", s.auth(s.handleSMSVerify))
 	// P7-4 威胁情报与 IP 封禁（仅本区块）
 	s.mux.HandleFunc("GET /api/v1/threat/list", s.auth(s.handleThreatList))
 	s.mux.HandleFunc("POST /api/v1/threat/block", s.auth(s.auditWrap("threat.block", s.handleThreatBlock)))
@@ -555,6 +568,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/security/arp/neighbors", s.auth(s.handleGetNeighbors))
 	s.mux.HandleFunc("GET /api/v1/webfilter/rules", s.auth(s.handleGetWebfilterRules))
 	s.mux.HandleFunc("POST /api/v1/webfilter/rules", s.auth(s.auditWrap("webfilter.rules.set", s.handleSetWebfilterRules)))
+	s.mux.HandleFunc("POST /api/v1/webfilter/apply", s.auth(s.auditWrap("webfilter.apply", s.handleWebfilterApply)))
+	s.mux.HandleFunc("GET /api/v1/webfilter/apply-status", s.auth(s.handleWebfilterApplyStatus))
 	s.mux.HandleFunc("GET /api/v1/security/attack-guard", s.auth(s.handleGetAttackGuard))
 	s.mux.HandleFunc("POST /api/v1/security/attack-guard", s.auth(s.auditWrap("security.attackguard.set", s.handleSetAttackGuard)))
 	s.mux.HandleFunc("GET /api/v1/ipv6/addresses", s.auth(s.handleGetIPv6Addresses))
@@ -4277,7 +4292,7 @@ func (s *Server) handleSubnetCalc(w http.ResponseWriter, r *http.Request) {
 	networkUint := ip4ToUint(networkAddr)
 	maskUint := uint32(0xFFFFFFFF) << (32 - bits)
 	broadcastUint := networkUint | ^maskUint
-	broadcastAddr := netip.AddrFrom4([4]byte{byte(broadcastUint>>24), byte(broadcastUint>>16), byte(broadcastUint>>8), byte(broadcastUint)})
+	broadcastAddr := netip.AddrFrom4([4]byte{byte(broadcastUint >> 24), byte(broadcastUint >> 16), byte(broadcastUint >> 8), byte(broadcastUint)})
 	firstUint := networkUint + 1
 	lastUint := broadcastUint - 1
 	if bits >= 31 {
@@ -4288,8 +4303,8 @@ func (s *Server) handleSubnetCalc(w http.ResponseWriter, r *http.Request) {
 		firstUint = networkUint
 		lastUint = networkUint
 	}
-	firstHost := netip.AddrFrom4([4]byte{byte(firstUint>>24), byte(firstUint>>16), byte(firstUint>>8), byte(firstUint)})
-	lastHost := netip.AddrFrom4([4]byte{byte(lastUint>>24), byte(lastUint>>16), byte(lastUint>>8), byte(lastUint)})
+	firstHost := netip.AddrFrom4([4]byte{byte(firstUint >> 24), byte(firstUint >> 16), byte(firstUint >> 8), byte(firstUint)})
+	lastHost := netip.AddrFrom4([4]byte{byte(lastUint >> 24), byte(lastUint >> 16), byte(lastUint >> 8), byte(lastUint)})
 	hostCount := 0
 	if bits < 31 {
 		hostCount = (1 << (32 - bits)) - 2
@@ -4331,4 +4346,37 @@ func loadDPIMarkRules(s *Server) map[string][]int {
 		_ = json.Unmarshal([]byte(raw), &appPorts)
 	}
 	return appPorts
+}
+
+var (
+	webfilterLastOK     bool
+	webfilterLastErr    string
+	webfilterLastScript string
+)
+
+func (s *Server) handleWebfilterApply(w http.ResponseWriter, r *http.Request) {
+	// load rules from store? For simplicity, accept rules in body
+	var req struct {
+		Rules []webfilter.Rule `json:"rules"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	script, err := webfilter.ApplyWebfilter(execx.DefaultRunner{}, req.Rules)
+	webfilterLastScript = script
+	if err != nil {
+		webfilterLastOK = false
+		webfilterLastErr = err.Error()
+		writeJSON(w, 500, errBody(10501, "apply failed", err.Error()))
+		return
+	}
+	webfilterLastOK = true
+	webfilterLastErr = ""
+	writeJSON(w, 200, map[string]interface{}{"ok": true, "script": script})
+}
+
+func (s *Server) handleWebfilterApplyStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]interface{}{
+		"ok":     webfilterLastOK,
+		"error":  webfilterLastErr,
+		"script": webfilterLastScript,
+	})
 }

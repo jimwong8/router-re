@@ -22,6 +22,8 @@ type Rule struct {
 	Name    string `json:"name"`
 	SrcIP   string `json:"src_ip"`
 	DstIP   string `json:"dst_ip"`
+	SrcMAC  string `json:"src_mac"`
+	DstMAC  string `json:"dst_mac"`
 	DstPort int    `json:"dst_port"`
 	Proto   string `json:"proto"`
 	Action  string `json:"action"`
@@ -51,6 +53,16 @@ func Validate(rs []Rule) error {
 		}
 		if r.DstIP != "" && !isValidNet(r.DstIP) {
 			return fmt.Errorf("rule[%d] invalid dst_ip %q: must be IP or CIDR", i, r.DstIP)
+		}
+		if r.SrcMAC != "" {
+			if _, err := net.ParseMAC(r.SrcMAC); err != nil {
+				return fmt.Errorf("rule[%d] invalid src_mac %q", i, r.SrcMAC)
+			}
+		}
+		if r.DstMAC != "" {
+			if _, err := net.ParseMAC(r.DstMAC); err != nil {
+				return fmt.Errorf("rule[%d] invalid dst_mac %q", i, r.DstMAC)
+			}
 		}
 	}
 	return nil
@@ -115,6 +127,12 @@ func renderRule(r Rule) string {
 	}
 	if r.DstPort > 0 {
 		parts = append(parts, "dport "+strconv.Itoa(r.DstPort))
+	}
+	if r.SrcMAC != "" {
+		parts = append(parts, "ether saddr "+r.SrcMAC)
+	}
+	if r.DstMAC != "" {
+		parts = append(parts, "ether daddr "+r.DstMAC)
 	}
 	parts = append(parts, action)
 	return strings.Join(parts, " ")

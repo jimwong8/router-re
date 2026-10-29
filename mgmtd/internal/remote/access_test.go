@@ -185,3 +185,44 @@ func TestAccessWarningsTelnetNotError(t *testing.T) {
 		t.Fatalf("Telnet 不应被 ValidateAccess 拒绝, got %v", err)
 	}
 }
+
+// FTP 端口和 SSH/Web 撞时必须拒绝：撞了就是一个服务静默抢不到端口，
+// 面板显示 enabled、实际连不上。
+func TestValidateAccessFtpPortConflict(t *testing.T) {
+	base := Access{SSHEnabled: true, SSHPort: 22, WebEnabled: true, WebPort: 80}
+
+	a := base
+	a.FtpEnabled, a.FtpPort = true, 22
+	if err := ValidateAccess(a); err == nil || !strings.Contains(err.Error(), "ftp_port 与 ssh_port") {
+		t.Fatalf("ftp 与 ssh 同端口应被拒，got err=%v", err)
+	}
+
+	a = base
+	a.FtpEnabled, a.FtpPort = true, 80
+	if err := ValidateAccess(a); err == nil || !strings.Contains(err.Error(), "ftp_port 与 web_port") {
+		t.Fatalf("ftp 与 web 同端口应被拒，got err=%v", err)
+	}
+
+	a = base
+	a.FtpEnabled, a.FtpPort = true, 2121
+	if err := ValidateAccess(a); err != nil {
+		t.Fatalf("2121 应合法，got %v", err)
+	}
+}
+
+// FTP 打开时必须有明文协议警告（和 Telnet 同级）。
+func TestAccessWarningsFtpPlaintext(t *testing.T) {
+	ws := AccessWarnings(Access{FtpEnabled: true})
+	found := false
+	for _, w := range ws {
+		if strings.Contains(w, "FTP") && strings.Contains(w, "明文") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("FtpEnabled=true 时应有 FTP 明文警告，got %v", ws)
+	}
+	if len(AccessWarnings(Access{})) != 0 {
+		t.Fatalf("全关时不应有警告")
+	}
+}

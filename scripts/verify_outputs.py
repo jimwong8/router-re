@@ -329,7 +329,15 @@ def static_check(paths: list[Path]) -> tuple[list[str], list[str]]:
     也会出现（"// TODO: 支持 IPv6"），拿它判死会把完成度高的产出误杀掉。
     """
     hard, soft = [], []
+    # expect 里可以写目录（如 mgmtd/internal/ha/）——曾经直接 read_text 会报
+    # "Is a directory" 判成空壳，把做完的任务连判 3 次 giveup。目录要展开。
+    expanded: list[Path] = []
     for p in paths:
+        if p.is_dir():
+            expanded.extend(sorted(x for x in p.rglob("*") if x.is_file()))
+        else:
+            expanded.append(p)
+    for p in expanded:
         if p.suffix in (".md", ".txt", ".json"):
             continue
         try:
@@ -348,6 +356,29 @@ def static_check(paths: list[Path]) -> tuple[list[str], list[str]]:
                 line_no = text[:m.start()].count("\n") + 1
                 soft.append(f"{p.name}:{line_no} {label}")
     return hard, soft
+
+
+def route_dup_check() -> list[str]:
+    """扫描 server.go 里重复注册的路由。
+
+    为什么单独查：Go 的 ServeMux 在重复 pattern 时是**启动 panic**，编译和
+    单测都可能照样绿（测试如果没走到完整注册路径就发现不了）。p114 的返工
+    就往 server.go 里塞了两份 /api/v1/ha/config，肉眼扫过三次才看出来。
+    """
+    p = ROOT / "mgmtd/internal/server/server.go"
+    if not p.exists():
+        return []
+    try:
+        text = p.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    pats = re.findall(r'"((?:GET|POST|PUT|DELETE|PATCH) /api/v1/[^"]+)"', text)
+    seen, dups = set(), []
+    for pat in pats:
+        if pat in seen and pat not in dups:
+            dups.append(pat)
+        seen.add(pat)
+    return [f"重复注册路由 {d}（ServeMux 启动会 panic）" for d in dups]
 
 
 def build_check() -> tuple[bool, str]:
@@ -496,6 +527,16 @@ def verify_one(task: dict, key: str, dry: bool, verifier: str,
         log(f"FAIL  {tid}  产出文件缺失: {', '.join(missing)}")
         return "fail"
 
+    # expect 允许写目录（如 mgmtd/internal/ha/）：在源头展开成文件，否则下游
+    # 三个消费者（空壳检测/送审抽取/must_contain）都会把目录当文件读而误判。
+    expanded: list[Path] = []
+    for p in paths:
+        if p.is_dir():
+            expanded.extend(sorted(x for x in p.rglob("*.go") if x.is_file()))
+        else:
+            expanded.append(p)
+    paths = expanded
+
     # expect 空 = 运维类任务（verify_cmd 验收）：约定与 produced() 一致，
     # verify_cmd 跑过 rc=0 才能 done，而 done 的前提就是 verify_cmd 已过，
     # 所以这里直接 pass。没有 verify_cmd 也没有 expect 的任务调度器根本
@@ -519,6 +560,8 @@ def verify_one(task: dict, key: str, dry: bool, verifier: str,
 
     # 1) 静态空壳检测（硬问题判 FAIL，软提示只记录）
     hard, soft = static_check(paths)
+    # 1b) 路由重复注册（ServeMux 启动 panic，编译/单测都可能漏）
+    hard += route_dup_check()
     if soft:
         log(f"NOTE  {tid}  软提示（不影响判定）: {'; '.join(soft[:3])}")
     if hard:
@@ -529,6 +572,15 @@ def verify_one(task: dict, key: str, dry: bool, verifier: str,
     # 2) 编译
     ok, detail = build_check()
     if not ok:
+        # 归因：并行开发时兄弟任务正在编辑别的文件，全局 build 会红。
+        # 只要报错文件都不是本任务的产出，就不能判本任务死（曾经 p112/p114
+        # 因为 p113 的 sms.go 半成品被连判 3 次 FAIL/giveup）。
+        bad = set(re.findall(r"([\w./\-]+\.go):\d+:\d+:", detail))
+        own = {str(p.relative_to(ROOT)) for p in paths}
+        if bad and not (bad & own):
+            log(f"SKIP  {tid}  编译错误来自其它任务文件 {sorted(bad)[:2]}，本次不判死")
+            task["verify_notes"] = "推迟: 兄弟任务编译中间态 " + ", ".join(sorted(bad)[:3])
+            return "skip"
         log(f"FAIL  {tid}  编译未过: {detail[:150]}")
         task["verify_notes"] = "编译: " + detail[:200]
         return "fail"
