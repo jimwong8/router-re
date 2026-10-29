@@ -1,10 +1,16 @@
 import axios from 'axios';
 
-const api = axios.create({
-  baseURL: '',
-  headers: {
-    Authorization: `Bearer ${localStorage.getItem('router_token') || ''}`,
-  },
+const api = axios.create({ baseURL: '' });
+
+// 关键：token 必须在每次请求时读取，不能在模块加载时算一次。
+// 登录页写 localStorage 后是 SP-alternative 路由跳转（不重新加载页面），
+// 如果 Authorization 用模块级静态头，登录后所有请求带的仍是登录前的空 token
+// → 全部 401 → 拦截器清 token 跳回登录页，表现为"登录成功立刻被踢回登录界面"。
+api.interceptors.request.use((cfg) => {
+  const token = localStorage.getItem('router_token') || '';
+  if (token) cfg.headers.Authorization = `Bearer ${token}`;
+  else delete cfg.headers.Authorization;
+  return cfg;
 });
 
 // 后端错误体是 {code, message, detail}：message 是英文类别（forbidden /
