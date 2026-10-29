@@ -28,6 +28,7 @@ type Class struct {
 	Priority    int      `json:"priority"`      // 1-7，数字越小越优先
 	MatchPorts  []int    `json:"match_ports"`   // 匹配的层4目的端口
 	MatchDstIPs []string `json:"match_dst_ips"` // 匹配的目的 IP/CIDR
+	MatchMark   int      `json:"match_mark"`    // 匹配的 fwmark（nft 打标后用 fw 过滤）
 }
 
 // Config 是一份 HTB 整形配置：挂在某个出口接口上的根带宽 + 一组叶子类。
@@ -157,6 +158,12 @@ func RenderScript(c Config) string {
 			b.WriteString(fmt.Sprintf("tc filter add dev %s protocol ip parent 1:0 prio %d u32 match ip dst %s flowid 1:%d\n",
 				c.Iface, cl.Priority, ip, classID))
 		}
+		// 7) fwmark 匹配（DPI 按应用打标后在此整形）
+		if cl.MatchMark > 0 {
+			b.WriteString(fmt.Sprintf("#   %s: fwmark %d → classid 1:%d\n", cl.Name, cl.MatchMark, classID))
+			b.WriteString(fmt.Sprintf("tc filter add dev %s protocol ip parent 1:0 prio %d handle %d fw flowid 1:%d\n",
+				c.Iface, cl.Priority, cl.MatchMark, classID))
+		}
 	}
 	return b.String()
 }
@@ -254,9 +261,13 @@ func Show(r execx.Runner, iface string) (string, error) {
 // the rule's fwmark.
 func LimitRulesToHTB(rules []dpi.MarkRule, iface string, rootMbit float64) Config {
 	classes := []Class{}
-	for _, r := range rules {
+	for i, r := range rules {
 		if r.Action != "limit" {
 			continue
+		}
+		mark := r.Mark
+		if mark <= 0 {
+			mark = 200 + i
 		}
 		classes = append(classes, Class{
 			Name:        r.App,
@@ -264,6 +275,7 @@ func LimitRulesToHTB(rules []dpi.MarkRule, iface string, rootMbit float64) Confi
 			CeilMbit:    float64(r.RateMbit),
 			Priority:    5,
 			MatchDstIPs: []string{},
+			MatchMark:   mark,
 		})
 	}
 	return Config{

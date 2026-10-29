@@ -68,12 +68,12 @@ func ValidateName(name string) error {
 type Result struct {
 	Host       string            `json:"host,omitempty"`
 	ResolvedIP string            `json:"resolved_ip,omitempty"`
-	Sent       int               `json:"sent,omitempty"`
-	Received   int               `json:"received,omitempty"`
-	LossPct    float64           `json:"loss_pct,omitempty"`
-	MinMs      float64           `json:"min_ms,omitempty"`
-	AvgMs      float64           `json:"avg_ms,omitempty"`
-	MaxMs      float64           `json:"max_ms,omitempty"`
+	Sent       int               `json:"sent"`
+	Received   int               `json:"received"`
+	LossPct    float64           `json:"loss_pct"`
+	MinMs      float64           `json:"min_ms"`
+	AvgMs      float64           `json:"avg_ms"`
+	MaxMs      float64           `json:"max_ms"`
 	HopCount   int               `json:"hop_count,omitempty"`
 	Records    []string          `json:"records,omitempty"`
 	Raw        string            `json:"raw"`

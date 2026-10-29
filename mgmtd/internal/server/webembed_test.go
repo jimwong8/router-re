@@ -16,30 +16,28 @@ func newWebTestServer() *Server {
 	})
 }
 
-// webDist must actually contain the built front-end.
+// webdist 必须真的把构建产物嵌进来。
 func TestWebEmbedFSExists(t *testing.T) {
-	ents, err := webDist.ReadDir("dist")
+	idx, err := webDist.ReadFile("webdist/index.html")
 	if err != nil {
-		t.Fatalf("embed dist 不存在: %v", err)
+		t.Fatalf("嵌入 index.html 不存在: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(string(idx)), "<html") {
+		t.Fatalf("嵌入 index.html 内容异常: %.60s", string(idx))
+	}
+	ents, err := webDist.ReadDir("webdist/assets")
+	if err != nil {
+		t.Fatalf("嵌入 assets 目录不存在: %v", err)
 	}
 	if len(ents) == 0 {
-		t.Fatal("embed dist 为空")
+		t.Fatal("嵌入 assets 为空")
 	}
-	found := false
-	for _, e := range ents {
-		if e.Name() == "index.html" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("embed dist 内没有 index.html")
-	}
-	if _, err := webDist.ReadFile("dist/index.html"); err != nil {
-		t.Fatalf("读取嵌入 index.html 失败: %v", err)
+	if _, err := webDist.ReadFile("webdist/assets/" + ents[0].Name()); err != nil {
+		t.Fatalf("读取嵌入资产失败: %v", err)
 	}
 }
 
-// API 路由必须优先于 SPA fallback，不能被 handleWeb 吞掉。
+// API 优先：/api/v1/health 不能被 SPA fallback 吞掉。
 func TestWebEmbedDoesNotSwallowAPI(t *testing.T) {
 	s := newWebTestServer()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
@@ -51,14 +49,14 @@ func TestWebEmbedDoesNotSwallowAPI(t *testing.T) {
 	}
 	body := rec.Body.String()
 	if strings.Contains(strings.ToLower(body), "<html") {
-		t.Fatalf("API 被 SPA fallback 吞掉，返回了 HTML: %s", body)
+		t.Fatalf("API 被 SPA fallback 吞掉: %s", body)
 	}
 	if !strings.Contains(body, `"ok"`) {
 		t.Fatalf("health body 异常: %s", body)
 	}
 }
 
-// 浏览器根路径返回 index.html，SPA 未知路径也回落到 index.html。
+// 根路径与未知 SPA 路径返回 index.html；缺失静态资源必须 404。
 func TestWebEmbedServesIndexAndFallback(t *testing.T) {
 	s := newWebTestServer()
 
@@ -70,11 +68,10 @@ func TestWebEmbedServesIndexAndFallback(t *testing.T) {
 			t.Fatalf("%s 状态 %d", p, rec.Code)
 		}
 		if !strings.Contains(strings.ToLower(rec.Body.String()), "<html") {
-			t.Fatalf("%s 未返回 index.html: %s", p, rec.Body.String()[:80])
+			t.Fatalf("%s 未返回 index.html", p)
 		}
 	}
 
-	// 不存在的静态资源必须 404，不能回落到 index.html
 	req := httptest.NewRequest(http.MethodGet, "/assets/nope-does-not-exist.js", nil)
 	rec := httptest.NewRecorder()
 	s.mux.ServeHTTP(rec, req)

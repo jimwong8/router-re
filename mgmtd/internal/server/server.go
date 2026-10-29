@@ -1153,7 +1153,9 @@ func (s *Server) handleGetDPIRules(w http.ResponseWriter, r *http.Request) {
 // never show a green state for a rule that was not installed.
 func (s *Server) handleSetDPIMarks(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Rules []dpi.MarkRule `json:"rules"`
+		Rules    []dpi.MarkRule `json:"rules"`
+		Iface    string         `json:"iface"`
+		RootMbit float64        `json:"root_mbit"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
@@ -1174,6 +1176,35 @@ func (s *Server) handleSetDPIMarks(w http.ResponseWriter, r *http.Request) {
 		applied = false
 		applyErr = err.Error()
 	}
+	// limit 规则在 nft 里只打 fwmark（nft 的 `limit rate` 只是匹配，不限速），
+	// 真正的整形必须由 tc/HTB 按 mark 完成，否则界面会显示"已下发"而实际不限速。
+	tcDetail := ""
+	hasLimit := false
+	for _, rl := range req.Rules {
+		if rl.Action == "limit" {
+			hasLimit = true
+			break
+		}
+	}
+	if hasLimit {
+		iface := req.Iface
+		if iface == "" {
+			iface = "eth0"
+		}
+		root := req.RootMbit
+		if root <= 0 {
+			root = 1000
+		}
+		ok, detail := htb.Apply(execx.DefaultRunner{}, htb.LimitRulesToHTB(req.Rules, iface, root))
+		tcDetail = detail
+		if !ok {
+			applied = false
+			if applyErr != "" {
+				applyErr += "; "
+			}
+			applyErr += "tc htb: " + detail
+		}
+	}
 	if raw, mErr := json.Marshal(req.Rules); mErr == nil {
 		_ = s.store.Set("dpi", "marks", string(raw))
 	}
@@ -1181,6 +1212,7 @@ func (s *Server) handleSetDPIMarks(w http.ResponseWriter, r *http.Request) {
 		"rules":   req.Rules,
 		"nft":     nftText,
 		"tc":      dpi.MarkRulesForTC(req.Rules),
+		"tc_htb":  tcDetail,
 		"applied": applied,
 		"error":   applyErr,
 	})
@@ -1201,7 +1233,9 @@ func (s *Server) handleGetDPIMarks(w http.ResponseWriter, r *http.Request) {
 // handleSetDPIRules applies DPI mark rules to the data plane (real execution).
 func (s *Server) handleSetDPIRules(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Rules []dpi.MarkRule `json:"rules"`
+		Rules    []dpi.MarkRule `json:"rules"`
+		Iface    string         `json:"iface"`
+		RootMbit float64        `json:"root_mbit"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
@@ -1222,6 +1256,35 @@ func (s *Server) handleSetDPIRules(w http.ResponseWriter, r *http.Request) {
 		applied = false
 		applyErr = err.Error()
 	}
+	// limit 规则在 nft 里只打 fwmark（nft 的 `limit rate` 只是匹配，不限速），
+	// 真正的整形必须由 tc/HTB 按 mark 完成，否则界面会显示"已下发"而实际不限速。
+	tcDetail := ""
+	hasLimit := false
+	for _, rl := range req.Rules {
+		if rl.Action == "limit" {
+			hasLimit = true
+			break
+		}
+	}
+	if hasLimit {
+		iface := req.Iface
+		if iface == "" {
+			iface = "eth0"
+		}
+		root := req.RootMbit
+		if root <= 0 {
+			root = 1000
+		}
+		ok, detail := htb.Apply(execx.DefaultRunner{}, htb.LimitRulesToHTB(req.Rules, iface, root))
+		tcDetail = detail
+		if !ok {
+			applied = false
+			if applyErr != "" {
+				applyErr += "; "
+			}
+			applyErr += "tc htb: " + detail
+		}
+	}
 	if raw, mErr := json.Marshal(req.Rules); mErr == nil {
 		_ = s.store.Set("dpi", "marks", string(raw))
 	}
@@ -1229,6 +1292,7 @@ func (s *Server) handleSetDPIRules(w http.ResponseWriter, r *http.Request) {
 		"rules":   req.Rules,
 		"nft":     nftText,
 		"tc":      dpi.MarkRulesForTC(req.Rules),
+		"tc_htb":  tcDetail,
 		"applied": applied,
 		"error":   applyErr,
 	})

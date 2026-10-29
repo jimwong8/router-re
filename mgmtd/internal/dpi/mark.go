@@ -51,7 +51,7 @@ func RenderMarkNft(rules []MarkRule) (string, error) {
 	b.WriteString("  chain classify {\n")
 	b.WriteString("    type filter hook forward priority mangle;\n")
 
-	for _, r := range rules {
+	for i, r := range rules {
 		var match string
 		// nftables rejects `meta l4proto tcp tcp dport {...}` — the protocol
 		// keyword already implies the L4 match. Use either `<proto> dport {...}`
@@ -75,10 +75,14 @@ func RenderMarkNft(rules []MarkRule) (string, error) {
 		case "drop":
 			b.WriteString("drop\n")
 		case "limit":
-			rate := r.RateMbit
-			if rate <= 0 { rate = r.RateMbps }
-			if rate <= 0 { rate = 10 }
-			b.WriteString(fmt.Sprintf("limit rate %d mbytes/second\n", rate))
+			// 注意：nft 的 `limit rate` 是"匹配限速"而非"执行限速"——超过阈值
+			// 后只是不再命中，不会丢包。真正限速必须由 tc/HTB 按 fwmark 做整形，
+			// 所以这里只打 mark，由 htb.LimitRulesToHTB 生成对应的类与 fw 过滤器。
+			mark := r.Mark
+			if mark <= 0 {
+				mark = 200 + i
+			}
+			b.WriteString(fmt.Sprintf("meta mark set %d\n", mark))
 		default: // mark
 			if r.Mark > 0 {
 				b.WriteString(fmt.Sprintf("meta mark set %d\n", r.Mark))

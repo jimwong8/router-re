@@ -89,7 +89,7 @@ func renderOne(b *strings.Builder, p Policy, appMark map[string]int) {
 		b.WriteString(fmt.Sprintf("\t\t# app %q: nft 无法直接按应用名匹配，由 DPI 模块对命中该应用的流量打此 mark 后匹配（meta mark 0x%x）。\n", p.App, appMark[p.App]))
 		if p.RateMbit > 0 {
 			pps := rateMbitToPPS(p.RateMbit)
-			b.WriteString(fmt.Sprintf("\t\t%s limit rate over %d/second burst %s drop\n", expr, pps, burstPackets(p.BurstKB)))
+			b.WriteString(fmt.Sprintf("\t\t%s limit rate over %d/second burst %s packets drop\n", expr, pps, burstPackets(p.BurstKB)))
 		}
 		if p.MaxConns > 0 {
 			b.WriteString(fmt.Sprintf("\t\t%s ct count over %d drop\n", expr, p.MaxConns))
@@ -103,7 +103,7 @@ func renderOne(b *strings.Builder, p Policy, appMark map[string]int) {
 	// 非 app：限速（rate_mbit>0）
 	if p.RateMbit > 0 {
 		pps := rateMbitToPPS(p.RateMbit)
-		b.WriteString(fmt.Sprintf("\t\t%s limit rate over %d/second burst %s drop\n", expr, pps, burstPackets(p.BurstKB)))
+		b.WriteString(fmt.Sprintf("\t\t%s limit rate over %d/second burst %s packets drop\n", expr, pps, burstPackets(p.BurstKB)))
 	}
 	// 连接数
 	if p.MaxConns > 0 {

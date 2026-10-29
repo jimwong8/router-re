@@ -188,7 +188,11 @@ async function load() {
 }
 
 async function save(list: Policy[]) {
-  const res = await api.post('/api/v1/quota/policies', { policies: list });
+  // 清空所有策略是破坏性操作，后端要求显式 confirm；删除最后一条时如果不带
+  // confirm，后端会 422，界面表现为"点了删除但列表没变"。
+  const body: any = { policies: list };
+  if (list.length === 0) body.confirm = true;
+  const res = await api.post('/api/v1/quota/policies', body);
   policies.value = res.data?.policies || [];
   report.value = res.data?.report || '';
 }
