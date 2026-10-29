@@ -269,8 +269,6 @@ func New(cfg Config) *Server {
 }
 
 func (s *Server) routes() {
-	s.mux.HandleFunc("GET /assets/", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200); w.Write([]byte("assets")) })
-	s.mux.HandleFunc("GET /", handleWebEmbed())
 	s.mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]string{"status": "ok"})
 	})
@@ -568,9 +566,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/htb/limit-rules", s.auth(s.handleHTBLimitRules))
 	s.mux.HandleFunc("GET /api/v1/htb/show", s.auth(s.handleHTBShow))
 	s.mux.HandleFunc("GET /api/v1/htb/report", s.auth(s.handleHTBReport))
-	s.mux.HandleFunc("GET /assets/", s.handleWeb)
-	s.mux.HandleFunc("GET /", s.handleWeb)
-	s.mux.HandleFunc("GET /{path...}", s.handleWeb)
 
 	s.mux.HandleFunc("GET /api/v1/quota/policies", s.auth(s.handleGetQuotaPolicies))
 	s.mux.HandleFunc("POST /api/v1/quota/policies", s.auth(s.auditWrap("quota.policies.set", s.handleSetQuotaPolicies)))
@@ -2836,6 +2831,10 @@ func (s *Server) frp() {
 	s.mux.HandleFunc("POST /api/v1/frp/apply", s.auth(s.auditWrap("frp.apply", s.handleFrpApply)))
 	s.mux.HandleFunc("GET /api/v1/frp/status", s.auth(s.handleFrpStatus))
 	s.mux.HandleFunc("POST /api/v1/frp/stop", s.auth(s.auditWrap("frp.stop", s.handleFrpStop)))
+	// p153 web embed
+	s.mux.HandleFunc("GET /assets/", s.handleWeb)
+	s.mux.HandleFunc("GET /", s.handleWeb)
+	// P153 web embed
 }
 
 // handleGetFrpConfig returns the stored frp client config.

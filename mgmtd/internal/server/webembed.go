@@ -1,14 +1,11 @@
 package server
 
 import (
-	"embed"
 	"net/http"
-	"path"
+	"os"
+	"path/filepath"
 	"strings"
 )
-
-//go:embed ../../web/dist/*
-var webDist embed.FS
 
 func (s *Server) handleWeb(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path
@@ -16,28 +13,27 @@ func (s *Server) handleWeb(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	base := "../web/dist"
 	f := p
 	if f == "/" || f == "" {
 		f = "/index.html"
 	}
-	// embed names include the relative prefix
-	name := "../../web/dist" + f
-	data, err := webDist.ReadFile(name)
+	f = strings.TrimPrefix(f, "/")
+	full := filepath.Join(base, f)
+	_, err := os.Stat(full)
 	if err != nil {
-		if !strings.HasPrefix(f, "/assets/") {
-			name = "../../web/dist/index.html"
-			data, err = webDist.ReadFile(name)
+		if !strings.HasPrefix(p, "/assets/") {
+			f = "index.html"
+			full = filepath.Join(base, f)
+		} else {
+			http.NotFound(w, r)
+			return
 		}
 	}
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	if f == "/index.html" || f == "/" {
+	if p == "/" || p == "/index.html" {
 		w.Header().Set("Cache-Control", "no-cache")
-	} else if strings.HasPrefix(f, "/assets/") {
+	} else if strings.HasPrefix(p, "/assets/") {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(data)
+	http.ServeFile(w, r, full)
 }
