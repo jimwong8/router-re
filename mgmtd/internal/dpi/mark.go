@@ -16,6 +16,8 @@ type MarkRule struct {
 	Protocol string `json:"protocol"` // "tcp" / "udp"
 	DPorts   []int  `json:"dports"`   // 目标端口列表，可为空
 	Mark     int    `json:"mark"`     // fwmark 值（mark/drop 动作使用）
+	RateMbit int    `json:"rate_mbit"` // limit 时速率 Mbit
+	RateMbps int    `json:"rate_mbps"` // alias
 	Action   string `json:"action"`   // "mark" / "drop" / "limit"
 }
 
@@ -25,6 +27,9 @@ func (r MarkRule) validate() error {
 	}
 	if r.Action != "mark" && r.Action != "drop" && r.Action != "limit" {
 		return fmt.Errorf("invalid action %q (mark|drop|limit)", r.Action)
+	}
+	if r.Action == "limit" && r.RateMbit <= 0 && r.RateMbps <= 0 {
+		return fmt.Errorf("limit requires rate > 0")
 	}
 	return nil
 }
@@ -69,7 +74,12 @@ func RenderMarkNft(rules []MarkRule) (string, error) {
 		switch r.Action {
 		case "drop":
 			b.WriteString("drop\n")
-		default: // mark / limit break 只打 mark，tc 侧限速
+		case "limit":
+			rate := r.RateMbit
+			if rate <= 0 { rate = r.RateMbps }
+			if rate <= 0 { rate = 10 }
+			b.WriteString(fmt.Sprintf("limit rate %d mbytes/second\n", rate))
+		default: // mark
 			if r.Mark > 0 {
 				b.WriteString(fmt.Sprintf("meta mark set %d\n", r.Mark))
 			} else {

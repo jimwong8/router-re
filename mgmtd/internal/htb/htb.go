@@ -16,6 +16,7 @@ import (
 	"net"
 	"strings"
 
+	"github.com/jimwong/router-re/mgmtd/internal/dpi"
 	"github.com/jimwong/router-re/mgmtd/internal/execx"
 )
 
@@ -246,4 +247,30 @@ func Show(r execx.Runner, iface string) (string, error) {
 		return "", err
 	}
 	return r.Run("tc", "-s", "class", "show", "dev", iface)
+}
+
+// LimitRulesToHTB converts dpi limit rules into an HTB Config. Each limit rule
+// becomes one leaf class with rate=ceil=RateMbit and priority 5, matched by
+// the rule's fwmark.
+func LimitRulesToHTB(rules []dpi.MarkRule, iface string, rootMbit float64) Config {
+	classes := []Class{}
+	for _, r := range rules {
+		if r.Action != "limit" {
+			continue
+		}
+		classes = append(classes, Class{
+			Name:        r.App,
+			RateMbit:    float64(r.RateMbit),
+			CeilMbit:    float64(r.RateMbit),
+			Priority:    5,
+			MatchDstIPs: []string{},
+		})
+	}
+	return Config{
+		Iface:        iface,
+		RootRateMbit: rootMbit,
+		DefaultClass: "",
+		Classes:      classes,
+		Enabled:      true,
+	}
 }

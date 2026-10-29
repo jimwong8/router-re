@@ -39,6 +39,9 @@
             <el-option label="limit" value="limit" />
           </el-select>
         </el-form-item>
+        <el-form-item v-if="newRule.action === 'limit'" label="限速(Mbps)">
+          <el-input-number v-model="newRule.rate_mbps" :min="1" :max="1000" />
+        </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="addRule">添加</el-button>
         </el-form-item>
@@ -94,10 +97,11 @@ interface MarkRule {
   dports: number[];
   mark: number;
   action: string;
+  rate_mbps?: number;
 }
 
 function emptyRule(): MarkRule {
-  return { app: '', protocol: 'tcp', dports: [], mark: 200, action: 'mark' };
+  return { app: '', protocol: 'tcp', dports: [], mark: 200, action: 'mark', rate_mbps: 10 };
 }
 
 const newRule = ref<MarkRule>(emptyRule());

@@ -25,7 +25,7 @@ func TestRenderMarkNft(t *testing.T) {
 		{App: "netflix", Protocol: "tcp", DPorts: []int{443, 8080}, Mark: 10, Action: "mark"},
 		{App: "dns", Protocol: "udp", DPorts: []int{53}, Mark: 11, Action: "mark"},
 		{App: "p2p", Protocol: "tcp", DPorts: []int{6881}, Action: "drop"},
-		{App: "game", Protocol: "udp", Mark: 12, Action: "limit"},
+		{App: "game", Protocol: "udp", Mark: 12, Action: "limit", RateMbit: 10},
 	}
 	out, err := RenderMarkNft(rules)
 	if err != nil {
