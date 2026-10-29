@@ -244,6 +244,11 @@ function logout() {
   color: #e8e8f5;
 }
 
+/* 子项处于激活态时，父分组标题也点亮，否则左侧只剩一条竖线看不出归属 */
+.nav-menu :deep(.el-sub-menu.is-active > .el-sub-menu__title) {
+  color: #ffffff;
+}
+
 .group-title {
   flex: 1;
 }
