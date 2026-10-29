@@ -33,6 +33,29 @@ def load(path: Path) -> dict:
         return {}
 
 
+def classify(r: dict) -> tuple[str, str]:
+    """把一个 pane 判成「闲置 / 干活中 / 卡住 / 死了」。
+
+    为什么不能只看 state：状态栏的 idle 有四种完全不同的含义——
+    手上没活（可派）、活干完了等 lane 结算、活没干完就停了、agent 在等一个
+    永远不会来的回答。必须结合「有没有任务」和「内容多久没变」才分得开。
+    """
+    if r["lane_dead"]:
+        return "lane停", "dead"
+    has_task = bool(r["task"])
+    state = r["state"] or "?"
+    stalled = r["stalled"]
+    if has_task and state == "idle":
+        return ("有任务·停滞" if stalled else "收尾中"), ("stuck" if stalled else "busy")
+    if state == "blocked":
+        return "等回应·卡住", "stuck"
+    if has_task:
+        return ("卡住·输出不动" if stalled else "干活中"), ("stuck" if stalled else "busy")
+    if state == "idle":
+        return "闲置·可派活", "idle"
+    return f"无任务但{state}", "busy"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--json", action="store_true", help="输出 JSON 而不是表格")
@@ -85,7 +108,7 @@ def main() -> int:
     if not rows:
         print("没有 lane 状态文件（ops/lane-*.json）——lane 没起，或还没跑过一轮")
     else:
-        print(f"{'pane':8} {'状态':10} {'任务':26} {'用时':>7} {'停滞':>7}  最后一行")
+        print(f"{'pane':8} {'判定':14} {'状态':8} {'任务':24} {'停滞':>6}  最后一行")
         print("-" * 110)
         for r in rows:
             task = (r["task"] or "-")[:24]
@@ -97,11 +120,18 @@ def main() -> int:
                 state += "(lane停)"
             elif r["busy_long"]:
                 state += "(长操作)"
-            print(f"{r['pane']:8} {state:10} {task:26} {el:>7} {st:>7} {flag} {r['last_line'][:52]}")
+            label, _ = classify(r)
+            print(f"{r['pane']:8} {label:14} {state:8} {task:24} {st:>6} {flag} {r['last_line'][:46]}")
 
     print()
+    labels = [classify(r)[0] for r in rows]
+    n_idle = sum(1 for l in labels if l.startswith("闲置"))
+    n_busy = sum(1 for l in labels if l in ("干活中", "收尾中"))
+    n_stuck = sum(1 for l in labels if "卡" in l or "停滞" in l or "lane停" in l)
+    print(f"窗口：{n_idle} 个闲置可派 · {n_busy} 个在忙 · {n_stuck} 个有问题")
     print(f"待派 {len(pending)} 条 · 进行中 {len(dispatched)} 条 · 待验证 {len(vq)} 条")
-    stalled = [r["pane"] for r in rows if r["stalled"]]
+    # 只报「有任务却不动」的；没任务的窗口本来就不该有输出变化
+    stalled = [r["pane"] for r in rows if r["stalled"] and r["task"]]
     dead = [r["pane"] for r in rows if r["lane_dead"]]
     if stalled:
         print(f"⚠ 停滞（尾部长时间无变化）：{', '.join(stalled)}")

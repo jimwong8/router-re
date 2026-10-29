@@ -80,15 +80,39 @@ _DECOR_MARKERS = ("☤", "type to redirect this turn", "Tab queues it")
 _SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 
+def _is_noise(line: str) -> bool:
+    """TUI 装饰行判定。两个分支必须共用同一套规则——
+
+    原来「☤ Hermes 汇报块」那条分支自己写了一套，结果把回合统计行
+    「─ 32.8s · 1:24 PM」当成工人的回答返回出去，而真正的回答「收到」
+    因为只有两个字被 len>=6 挡掉。
+    """
+    t = line.strip()
+    if not t:
+        return True
+    if any(m in t for m in _DECOR_MARKERS):
+        return True
+    if any(ch in t for ch in _SPIN):
+        return True
+    if set(t) <= set("─━═-_· "):                       # 纯分隔线
+        return True
+    if t.startswith("❯"):                               # 输入提示占位
+        return True
+    if re.fullmatch(r"\d{1,2}:\d{2}(\s*[AP]M)?", t):     # 时间戳
+        return True
+    if re.match(r"^\d+(\.\d+)?[sm]\s*·", t):            # 回合统计
+        return True
+    if "· edited " in t or "· ran " in t:
+        return True
+    return False
+
+
 def _content_line(text: str, state: str = "", limit: int = 110) -> str:
     """从 pane 尾部取一行**能说明它在干什么**的话。
 
-    TUI 底部是输入建议面板（"─── Help with question ───" / "❯ Explain this error…"），
-    整块切掉；剩下的内容再按状态挑：
-
-      - 非 busy 且有 `☤ Hermes` 汇报块 → 取汇报第一行（"p104 完成。新增：…"）
-      - busy → 取最后一条 `💻 $ ...`（正在跑什么）
-      - 都不满足 → 取最后一行像样的内容（跳过折行碎片和时间戳）
+    底部是 TUI 的输入建议面板（"─── Help with question ───" / "❯ Explain this
+    error…"），整块切掉；剩下的按状态挑：非 busy 且有 `☤ Hermes` 汇报块就取
+    汇报第一行，busy 就取最后一条 `💻 $ ...`，兜底取最后一行内容。
     """
     lines = (text or "").splitlines()
     cut = len(lines)
@@ -100,47 +124,23 @@ def _content_line(text: str, state: str = "", limit: int = 110) -> str:
 
     if state != "busy":
         for i, l in enumerate(body):
-            if "☤ Hermes" in l:
-                for nxt in body[i + 1:]:
-                    t = nxt.strip()
-                    if t and not set(t) <= set("─━═-_ ") and len(t) >= 6:
-                        return t[:limit]
-                break
+            if "☤ Hermes" not in l:
+                continue
+            for nxt in body[i + 1:]:
+                if _is_noise(nxt):
+                    continue
+                return nxt.strip().strip("─━═-_· ").strip()[:limit]
+            break
 
     for raw in reversed(body[-14:]):
         if "💻 $" in raw:
             return raw.strip().strip("─━═-_· ").strip()[:limit]
 
     for raw in reversed(body):
-        if "· edited " in raw or "· ran " in raw:
+        if _is_noise(raw):
             continue
-        line = raw.strip().strip("─━═-_· ").strip()
-        if not line or len(line) < 6:            # 折行碎片没有信息量
-            continue
-        if any(m in line for m in _DECOR_MARKERS):
-            continue
-        if any(ch in line for ch in _SPIN):
-            continue
-        if line.startswith("❯"):
-            continue
-        if re.fullmatch(r"\d{1,2}:\d{2}(\s*[AP]M)?", line):   # 时间戳
-            continue
-        return line[:limit]
+        return raw.strip().strip("─━═-_· ").strip()[:limit]
     return ""
-
-def _heartbeat_loop(pane: str) -> None:
-    """守护线程：只要进程活着就每 HEARTBEAT_SECONDS 写一次时间戳。
-
-    单独一个文件而不是复用 lane-*.json：JSON 由主循环整份重写，
-    两个线程同时写会互相覆盖（还容易写出半截 JSON）。
-    """
-    path = ROOT / "ops" / f"lane-{lane_name(pane)}.hb"
-    while True:
-        try:
-            path.write_text(f"{time.time():.0f}", encoding="utf-8")
-        except OSError:
-            pass
-        time.sleep(HEARTBEAT_SECONDS)
 
 
 def _content_signature(text: str) -> str:
@@ -290,7 +290,15 @@ def run(pane: str) -> int:
                 stall_warned = False
             if task is None:
                 idle_hits = 0
-                write_lane_status(pane, state="idle", task=None)
+                # 必须显式清空停滞字段：write_lane_status 是合并写，不传的字段
+                # 会保留上一轮的值，结果一条早已闲置的 lane 在 pane_brief 里
+                # 永远挂着「停滞 76s ⚠」，和同一行的「闲置·可派活」自相矛盾。
+                # 顺手读一次尾部：空窗也有「最后说了什么」这件事值得看
+                # （比如它刚汇报完、或者卡在一句没人回答的话上）。
+                tail = dw.read_tail(pane, 20)
+                write_lane_status(pane, state="idle", task=None, stall_sec=0,
+                                  stalled=False, elapsed_min=None,
+                                  last_line=_content_line(tail, "idle"))
                 dispatch_next(pane)
                 time.sleep(POLL_SECONDS)
                 continue
