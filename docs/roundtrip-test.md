@@ -1,6 +1,6 @@
 # 写端点 Round-trip 测试报告
 
-> 生成: 2026-10-29 19:40:13  BASE=http://127.0.0.1:9090
+> 生成: 2026-10-29 20:00:26  BASE=http://127.0.0.1:9090
 
 **汇总**: 测了 5 个写端点 / PASS 5 / FAIL 0
 
@@ -36,12 +36,12 @@
   "note": "卡密明文只返回这一次，请立即保存；之后查询只能看到打码版本",
   "vouchers": [
     {
-      "code": "AB2PTA9UZ6",
-      "password": "QQFE2NCYPV",
+      "code": "BFM9YEEP4R",
+      "password": "25ZFYA5Y5F",
       "minutes": 30,
       "traffic_mb": 0,
       "device_limit": 1,
-      "created_at": 1793274013,
+      "created_at": 1793275226,
       "expires_at": 0,
       "used_at": 0,
       "used": false,
@@ -57,9 +57,9 @@
 
 ```json
 {
-  "count": 64,
-  "unused": 35,
-  "used": 29,
+  "count": 66,
+  "unused": 36,
+  "used": 30,
   "vouchers": [
     {
       "code": "R4VTY4YKNE",
@@ -898,7 +898,7 @@
       "used_at": 1793272412,
       "used": true,
       "note": "p47 roundtrip",
-      "remaining_min": 4,
+      "remaining_min": 0,
       "expired": false
     },
     {
@@ -926,7 +926,7 @@
       "used_at": 1793272896,
       "used": true,
       "note": "p47 roundtrip",
-      "remaining_min": 12,
+      "remaining_min": 0,
       "expired": false
     },
     {
@@ -940,7 +940,7 @@
       "used_at": 1793273834,
       "used": true,
       "note": "p47 roundtrip",
-      "remaining_min": 28,
+      "remaining_min": 7,
       "expired": false
     },
     {
@@ -950,6 +950,34 @@
       "traffic_mb": 0,
       "device_limit": 1,
       "created_at": 1793274013,
+      "expires_at": 0,
+      "used_at": 0,
+      "used": false,
+      "note": "roundtrip-test",
+      "remaining_min": 30,
+      "expired": false
+    },
+    {
+      "code": "RVHT9ASV9N",
+      "password": "CH******44",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793274020,
+      "expires_at": 0,
+      "used_at": 1793274020,
+      "used": true,
+      "note": "p47 roundtrip",
+      "remaining_min": 10,
+      "expired": false
+    },
+    {
+      "code": "BFM9YEEP4R",
+      "password": "25******5F",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793275226,
       "expires_at": 0,
       "used_at": 0,
       "used": false,
@@ -1294,7 +1322,7 @@
 ```json
 {
   "count": 1,
-  "now": "2026-10-29 19:40:13 Thu",
+  "now": "2026-10-29 20:00:26 Thu",
   "rules": [
     {
       "id": "rt-rule-1",

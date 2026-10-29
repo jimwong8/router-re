@@ -25,7 +25,7 @@
 | `/ipv6` | OK   | 4 | 8 | IPv6 地址(可为空) |
 | `/l7` | OK   | 0 | 0 | L7 规则(可为空) |
 | `/logs` | OK   | 100 | 100 | 日志条目(可为空) |
-| `/voucher` | OK   | 65 | 65 | 卡密列表(可为空) |
+| `/voucher` | OK   | 67 | 67 | 卡密列表(可为空) |
 | `/nac` | SKIP | - | - | SKIP: NAC 多表格分页 (devices/limits/top/neighbors)，接口 neighbors=45 非可见表，无法准确比对 |
 | `/network` | SKIP | - | - | SKIP: portmap/rules.rules=None(主机无 NAT 规则) |
 | `/pppoe` | OK   | 0 | 0 | PPPoE 会话(可为空) |
