@@ -118,7 +118,13 @@ type Server struct {
 	// 不加锁时并发回来的探测结果互相覆盖，故障切换拿着旧状态判断：
 	// 挂掉的链路显示 up（流量继续打死链路），或恢复的显示 down（白白不用）。
 	multiwanMu sync.Mutex
+	// storeErr 记录配置存储初始化失败的原因（仅当 MGM_CONFIG_FILE 配了却打不开）。
+	// main 检查它并拒绝启动——不能让"配置写进内存、重启全丢"静默发生。
+	storeErr error
 }
+
+// InitError 返回启动阶段不可继续的错误（目前只有配置存储打不开）。nil 表示正常。
+func (s *Server) InitError() error { return s.storeErr }
 
 // trafficSampler 保存上一次接口计数器采样，供 /api/v1/traffic/rates 计算差值。
 // 内嵌互斥锁：并发请求只会有一个拿到"上一帧"，避免把两次请求的间隔算错。
@@ -135,17 +141,24 @@ type trafficSampler struct {
 // MGM_CONFIG_FILE selects a JSON file that survives restarts (the production
 // path). When it is unset the server falls back to the in-memory MockStore,
 // which keeps local development and the test suite free of disk side effects.
-func newConfigStore() config.Store {
+func newConfigStore() (config.Store, error) {
 	path := os.Getenv("MGM_CONFIG_FILE")
 	if path == "" {
-		return config.NewMockStore()
+		// 没配路径 = 只是本地跑着玩/测试，内存存储是明确的选择，不算降级。
+		return config.NewMockStore(), nil
 	}
 	fs, err := config.NewFileStore(path)
 	if err != nil {
-		log.Printf("mgmtd: filestore unavailable (%v); falling back to in-memory store", err)
-		return config.NewMockStore()
+		// 配了路径却打不开，绝不能悄悄退回内存：服务会照常启动、照常接受
+		// 配置变更、返回 200，重启后全部消失，而运行期间没有任何迹象。
+		// 调试时确实想要这个行为，必须显式开 MGM_ALLOW_EPHEMERAL_STORE=1。
+		if os.Getenv("MGM_ALLOW_EPHEMERAL_STORE") == "1" {
+			log.Printf("mgmtd: ⚠ 配置存储打不开（%v），按 MGM_ALLOW_EPHEMERAL_STORE=1 退回内存——重启会丢全部配置", err)
+			return config.NewMockStore(), nil
+		}
+		return nil, fmt.Errorf("配置存储打不开（MGM_CONFIG_FILE=%s）: %w", path, err)
 	}
-	return fs
+	return fs, nil
 }
 
 func New(cfg Config) *Server {
@@ -156,10 +169,15 @@ func New(cfg Config) *Server {
 		// Development default. Production must set MGM_ADMIN_PASSWORD.
 		cfg.AdminPassword = "admin123"
 	}
+	store, storeErr := newConfigStore()
+	if store == nil {
+		store = config.NewMockStore()
+	}
 	s := &Server{
 		cfg:          cfg,
 		mux:          http.NewServeMux(),
-		store:        newConfigStore(),
+		store:        store,
+		storeErr:     storeErr,
 		pppoeUsers:   []pppoe.User{},
 		tm:           auth.NewTokenManager(cfg.SecretKey, 15*time.Minute),
 		cloudMgr:     cloud.NewManager(),

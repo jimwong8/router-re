@@ -31,7 +31,12 @@ func main() {
 	}
 	log.Printf("账号表: %s（重启后账号从这里恢复）", userFile)
 	s := server.New(cfg)
-	log.Printf("mgmtd listening on %s", cfg.Addr)
+	// 配置存储打不开就别启动。以前这里会静默退回内存存储：服务照常跑、
+	// 所有配置变更返回 200，重启后全部消失，运行期间一点迹象都没有。
+	if err := s.InitError(); err != nil {
+		log.Fatalf("mgmtd: %v\n提示：修好配置文件，或显式设 MGM_ALLOW_EPHEMERAL_STORE=1 接受「重启丢配置」", err)
+	}
+	log.Printf("mgmtd listening on %s（配置存储: %s）", cfg.Addr, os.Getenv("MGM_CONFIG_FILE"))
 	if err := s.Run(); err != nil {
 		log.Fatal(err)
 	}
