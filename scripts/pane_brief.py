@@ -84,53 +84,62 @@ def classify(r: dict) -> tuple[str, str]:
     return f"无任务但{state}", "busy"
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--json", action="store_true", help="输出 JSON 而不是表格")
-    args = ap.parse_args()
+def collect() -> dict:
+    """采集所有 lane 的状态并分类。
 
+    单独暴露出来是给 lane_watch.py 用的——通知器和人工视图必须走**同一套**
+    判定，否则会出现「面板说卡住、通知说正常」这种两边打架的情况。
+    """
     lanes = [load(p) for p in sorted(OPS.glob("lane-*.json"))]
     lanes = [l for l in lanes if l.get("pane")]
-
-    tasks = [json.loads(l) for l in (OPS / "tasks.jsonl").read_text(encoding="utf-8").splitlines()
-             if l.strip()] if (OPS / "tasks.jsonl").exists() else []
-    pending = [t for t in tasks if t.get("status") == "pending"]
-    dispatched = [t for t in tasks if t.get("status") == "dispatched"]
-
-    vq = []
-    if (OPS / "verify-queue.jsonl").exists():
-        vq = [json.loads(l) for l in (OPS / "verify-queue.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
-
+    tasks = []
+    if (OPS / "tasks.jsonl").exists():
+        tasks = [json.loads(l) for l in (OPS / "tasks.jsonl").read_text(encoding="utf-8").splitlines()
+                 if l.strip()]
     rows = []
     for l in lanes:
-        age = time.time() - (l.get("updated") or 0)
         pane = l.get("pane") or ""
+        age = time.time() - (l.get("updated") or 0)
         hb_path = OPS / f"lane-{pane.replace(':', '-')}.hb"
         try:
             hb_age = time.time() - float(hb_path.read_text().strip())
         except Exception:  # noqa: BLE001
             hb_age = None
         rows.append({
-            "pane": l.get("pane"),
+            "pane": pane,
             "state": l.get("state"),
             "task": l.get("task"),
             "elapsed_min": l.get("elapsed_min"),
             "stall_sec": l.get("stall_sec"),
             "stalled": bool(l.get("stalled")),
             "last_line": l.get("last_line") or "",
-            "heartbeat_age_sec": round(age, 1),
             "hb_age_sec": None if hb_age is None else round(hb_age, 1),
-            # 存活看心跳（每 3 秒一次，15 秒没有就是真死了）。
-            # 不能用循环进度（age）判死：一轮里 go build 最长 240 秒不写状态。
             "unit": unit_state(pane),
             "lane_dead": hb_age is None or hb_age > 15,
-            # 心跳在、循环很久没更新 = 卡在长操作（构建/测试），不是死了
             "busy_long": (hb_age is not None and hb_age <= 15) and age > 45,
         })
+    for r in rows:
+        r["label"], r["kind"] = classify(r)
+    return {
+        "panes": rows,
+        "pending": sum(1 for t in tasks if t.get("status") == "pending"),
+        "dispatched": sum(1 for t in tasks if t.get("status") == "dispatched"),
+        "verify_queue": sum(1 for l in (OPS / "verify-queue.jsonl").read_text(encoding="utf-8").splitlines()
+                            if l.strip()) if (OPS / "verify-queue.jsonl").exists() else 0,
+    }
 
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--json", action="store_true", help="输出 JSON 而不是表格")
+    args = ap.parse_args()
+
+    d = collect()
+    rows = d["panes"]
+    pending_n, dispatched_n, vq = d["pending"], d["dispatched"], d["verify_queue"]
     if args.json:
-        print(json.dumps({"panes": rows, "pending": len(pending),
-                          "dispatched": len(dispatched), "verify_queue": len(vq)},
+        print(json.dumps({"panes": rows, "pending": pending_n,
+                          "dispatched": dispatched_n, "verify_queue": vq},
                          ensure_ascii=False, indent=2))
         return 0
 
@@ -158,7 +167,7 @@ def main() -> int:
     n_busy = sum(1 for k in kinds if k == "busy")
     n_stuck = sum(1 for k in kinds if k in ("stuck", "dead"))
     print(f"窗口：{n_idle} 个闲置可派 · {n_busy} 个在忙 · {n_stuck} 个有问题")
-    print(f"待派 {len(pending)} 条 · 进行中 {len(dispatched)} 条 · 待验证 {len(vq)} 条")
+    print(f"待派 {pending_n} 条 · 进行中 {dispatched_n} 条 · 待验证 {vq} 条")
     # 只报「有任务却不动」的；没任务的窗口本来就不该有输出变化
     stalled = [r["pane"] for r in rows if r["stalled"] and r["task"]]
     dead = [r["pane"] for r in rows if r["lane_dead"]]
