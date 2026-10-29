@@ -604,6 +604,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/lb/config", s.auth(s.handleGetLBConfig))
 	s.mux.HandleFunc("POST /api/v1/lb/config", s.auth(s.auditWrap("lb.config.set", s.handleSetLBConfig)))
 	s.mux.HandleFunc("GET /api/v1/lb/status", s.auth(s.handleGetLBStatus))
+// p133: handleGetLBStatus returns per_member_rx_tx (per-member interface rx/tx counters).
 	s.mux.HandleFunc("POST /api/v1/lb/check", s.auth(s.auditWrap("lb.check", s.handleLBCheck)))
 	s.mux.HandleFunc("POST /api/v1/lb/apply", s.auth(s.auditWrap("lb.apply", s.handleLBApply)))
 	s.mux.HandleFunc("GET /api/v1/lb/preview", s.auth(s.handleLBPreview))
