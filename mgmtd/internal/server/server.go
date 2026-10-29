@@ -317,6 +317,8 @@ func (s *Server) routes() {
 	// P5-1 DHCP 服务端补强：整段 ServerConfig 存取 + 应用/状态
 	s.mux.HandleFunc("GET /api/v1/dhcp/server", s.auth(s.handleGetDHCPServer))
 	s.mux.HandleFunc("POST /api/v1/dhcp/server", s.auth(s.auditWrap("dhcp.server.set", s.handleSetDHCPServer)))
+	s.mux.HandleFunc("GET /api/v1/dhcp/v6", s.auth(s.handleGetDHCPv6))
+	s.mux.HandleFunc("POST /api/v1/dhcp/v6", s.auth(s.auditWrap("dhcp.v6.set", s.handleSetDHCPv6)))
 	s.mux.HandleFunc("GET /api/v1/dhcp/status", s.auth(s.handleGetDHCPStatus))
 	// P6-1 SNMP 服务端
 	s.mux.HandleFunc("GET /api/v1/snmp/config", s.auth(s.handleGetSNMPConfig))
@@ -3789,6 +3791,39 @@ func (s *Server) handleSetDHCPServer(w http.ResponseWriter, r *http.Request) {
 		"dnsmasq": dnsmasq,
 		"detail":  detail,
 	})
+}
+
+// handleGetDHCPv6 returns the DHCPv6 portion of the server config.
+func (s *Server) handleGetDHCPv6(w http.ResponseWriter, r *http.Request) {
+	raw, _ := s.store.Get("dhcp", dhcpServerStoreKey)
+	if raw == "" {
+		writeJSON(w, 200, map[string]interface{}{
+			"config": dhcp.ServerConfig{Enabled: false},
+		})
+		return
+	}
+	var cfg dhcp.ServerConfig
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		writeJSON(w, 500, errBody(10010, "config unmarshal error", err.Error()))
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{"config": cfg})
+}
+
+// handleSetDHCPv6 validates and stores DHCPv6 config.
+func (s *Server) handleSetDHCPv6(w http.ResponseWriter, r *http.Request) {
+	var cfg dhcp.ServerConfig
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		writeJSON(w, 422, errBody(10012, "invalid body", err.Error()))
+		return
+	}
+	if err := dhcp.ValidateV6Config(cfg); err != nil {
+		writeJSON(w, 422, errBody(10014, "invalid dhcp v6 config", err.Error()))
+		return
+	}
+	b, _ := json.Marshal(cfg)
+	s.store.Set("dhcp", dhcpServerStoreKey, string(b))
+	writeJSON(w, 200, map[string]interface{}{"config": cfg, "applied": true})
 }
 
 // handleGetDHCPStatus 查询 dnsmasq 运行状态。
