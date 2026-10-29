@@ -388,6 +388,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/portmap/rules", s.auth(s.auditWrap("portmap.apply", s.handleSetPortmapRules)))
 	s.mux.HandleFunc("DELETE /api/v1/portmap/rules/{id}", s.auth(s.auditWrap("portmap.apply", s.handleDeletePortmapRule)))
 	s.mux.HandleFunc("GET /api/v1/policyroute/rules", s.auth(s.handleGetPolicyRouteRules))
+	s.mux.HandleFunc("GET /api/v1/policyroute/hits", s.auth(s.handleGetPolicyRouteHits))
 	s.mux.HandleFunc("POST /api/v1/policyroute/rules", s.auth(s.auditWrap("policyroute.apply", s.handleSetPolicyRouteRules)))
 	s.mux.HandleFunc("DELETE /api/v1/policyroute/rules/{id}", s.auth(s.auditWrap("policyroute.apply", s.handleDeletePolicyRouteRule)))
 	// P2-1 系统监控历史与趋势（仅本区块）

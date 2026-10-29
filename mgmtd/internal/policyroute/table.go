@@ -20,13 +20,16 @@ import (
 	"net"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // Table 是独立于 main 的一张策略路由表（ID 1-252）。
 type Table struct {
-	ID     int     `json:"id"`   // 路由表 ID，1-252（253/254/255 内核保留）
-	Name   string  `json:"name"` // 表名，如 wan1table
-	Routes []Route `json:"routes"`
+	ID       int                 `json:"id"`   // 路由表 ID，1-252（253/254/255 内核保留）
+	Name     string              `json:"name"` // 表名，如 wan1table
+	Routes   []Route             `json:"routes"`
+	Hits     map[string]uint64   `json:"-"` // 规则命中计数
+	hitsMu   sync.Mutex          `json:"-"`
 }
 
 // Route 是表内的一条路由。
@@ -86,4 +89,15 @@ func ValidateRoute(r Route) error {
 		return fmt.Errorf("route metric 必须 >= 0, got %d", r.Metric)
 	}
 	return nil
+}
+
+
+// Hit 原子递增指定 ruleID 的命中计数。
+func (t *Table) Hit(ruleID string) {
+	t.hitsMu.Lock()
+	defer t.hitsMu.Unlock()
+	if t.Hits == nil {
+		t.Hits = map[string]uint64{}
+	}
+	t.Hits[ruleID]++
 }

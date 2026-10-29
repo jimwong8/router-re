@@ -320,3 +320,18 @@ func (s *Server) handleSetPolicyRules(w http.ResponseWriter, r *http.Request) {
 	s.store.Set("policyroute", prRulesKey, string(b))
 	writeJSON(w, 200, map[string]interface{}{"rules": body.Rules, "count": len(body.Rules)})
 }
+
+
+func (s *Server) handleGetPolicyRouteHits(w http.ResponseWriter, r *http.Request) {
+	raw, _ := s.store.Get("policyroute", prRulesKey)
+	rules := []policyroute.Rule{}
+	if raw != "" {
+		_ = json.Unmarshal([]byte(raw), &rules)
+	}
+	// Return each rule's hits keyed by priority string for simplicity
+	out := []map[string]interface{}{}
+	for _, rl := range rules {
+		out = append(out, map[string]interface{}{"rule": rl, "hits": rl.Hits})
+	}
+	writeJSON(w, 200, map[string]interface{}{"hits": out, "count": len(out)})
+}

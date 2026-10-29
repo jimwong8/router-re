@@ -6,6 +6,7 @@ import (
 
 	"github.com/jimwong/router-re/mgmtd/internal/execx"
 	"github.com/jimwong/router-re/mgmtd/internal/lb"
+	"github.com/jimwong/router-re/mgmtd/internal/stats"
 )
 
 func (s *Server) handleGetLBConfig(w http.ResponseWriter, r *http.Request) {
@@ -64,9 +65,27 @@ func (s *Server) handleGetLBStatus(w http.ResponseWriter, r *http.Request) {
 			ch.Check(execx.DefaultRunner{}, m)
 		}
 	}
+	// per-member traffic from interface counters (null if unavailable)
+	var perMember map[string]interface{}
+	if ifaces, err := stats.ReadInterfaces(); err == nil {
+		perMember = map[string]interface{}{}
+		byName := map[string]stats.IfaceStats{}
+		for _, ifc := range ifaces {
+			byName[ifc.Name] = ifc
+		}
+		for _, m := range cfg.Members {
+			if v, ok := byName[m.Iface]; ok {
+				vv := v
+				perMember[m.Name] = &vv
+			} else {
+				perMember[m.Name] = nil
+			}
+		}
+	}
 	writeJSON(w, 200, map[string]interface{}{
-		"config": cfg,
-		"status": ch.Snapshot(),
+		"config":            cfg,
+		"status":            ch.Snapshot(),
+		"per_member_rx_tx":  perMember,
 	})
 }
 

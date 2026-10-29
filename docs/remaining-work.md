@@ -22,5 +22,6 @@
 | 终端列表 | `server.go` L298-299：`GET /api/v1/terminals` + `GET /api/v1/conntrack/terminals`；9090 实测返回 32 台（arp 源） | 9090 真实 HTTP |
 | 固件升级 confirm 门禁 | apply 需 confirm=true，plan 只计划不执行（设计保留，非缺口） | 代码审阅 |
 | p99-p124 批次 (2026-10-29) | IPv6/VLAN/DHCP静态绑定/DNS/静态路由/DDNS/VPN客户端/连接数限制/ARP绑定/MAC黑白名单/网址过滤/流量审计/iPerf/WOL/抓包/SNMP/内网穿透/路由器重启/子网换算/FTP开关/任务队列/双机热备/SMS网关/错误码去重/模糊测试 全部落地 | 9090 真实 HTTP + go test 全包通过 |
+| DHCPv6 server (p128/p130/p131) | `internal/dhcp` V6RangeStart/V6RangeEnd/V6PrefixLen/EnableRA + ValidateV6Config + GET/POST /api/v1/dhcp/v6 (200/422) + RenderDnsmasq dhcp-range v6 + enable-ra | 9090 三连验证通过 (POST 200/422/GET回读) |
 
 说明：对比文档 `ikuai-vs-routerre-feature-comparison.md` 列出的许多「❌」项（IPv6、静态路由、DHCP 静态绑定、DDNS、WireGuard 客户端、无线 SSID 等）**已在代码中实现**（`internal/ipv6`、`internal/route/static.go`、`internal/dhcp`、`internal/ddnsup`、`internal/vpn`、`internal/wireless`），文档为旧版，勿按文档判定。不确定项标「未核实」。

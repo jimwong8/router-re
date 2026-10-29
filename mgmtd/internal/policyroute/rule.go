@@ -14,6 +14,7 @@ type Rule struct {
 	FWMark   int    `json:"fwmark"`   // 防火墙标记，0=不用
 	Table    int    `json:"table"`    // 目标表 ID
 	Iif      string `json:"iif"`      // 入接口，可空
+	Hits     uint64 `json:"hits,omitempty"` // 命中计数
 }
 
 // ValidateRule 校验一条路由规则。

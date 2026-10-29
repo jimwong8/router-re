@@ -336,7 +336,7 @@
 | 功能 | iKuai | router-re | 说明 |
 |---|---|---|---|
 | WAN/LAN 配置 | ✅ | ⚠ | `/interfaces` **只读**，无接口 IP/网关写入 |
-| IPv6（接入/路由/DHCPv6） | ✅ | ✅ | `internal/ipv6` + nd/pd/addresses/ra，GET /api/v1/ipv6/status → 200 |
+| IPv6（接入/路由/DHCPv6） | ✅ | ✅ | `internal/ipv6` + nd/pd/addresses/ra + DHCPv6 server (GET/POST /api/v1/dhcp/v6 → 200/422)，GET /api/v1/ipv6/status → 200 |
 | VLAN 管理 | ✅ | ✅ | `internal/l2/vlan.go` + GET/POST /api/v1/vlan |
 | DHCP 服务 | ✅ | ⚠ | `POST /dhcp/config` 生成 dnsmasq 配置**文本**，不重启服务、无租约表 |
 | DHCP 静态绑定 | ✅ | ✅ | `internal/dhcp` StaticLease{MAC,IP} + GET/POST /api/v1/dhcp/config |
