@@ -21,3 +21,5 @@ docs/write-endpoint-audit.md
 .p*-done
 ops/lane-*.json
 ops/.lane-watch-state.json
+ops/backlog.jsonl
+ops/*.hb
