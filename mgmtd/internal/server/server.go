@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -427,6 +428,8 @@ func (s *Server) routes() {
 	// P14: 短信验证码网关（P113-sms-gateway）
 	s.mux.HandleFunc("POST /api/v1/auth/sms/send", s.auth(s.handleSMSSend))
 	s.mux.HandleFunc("POST /api/v1/auth/sms/verify", s.auth(s.handleSMSVerify))
+	s.mux.HandleFunc("GET /api/v1/auth/sms/config", s.auth(s.handleGetSMSConfig))
+	s.mux.HandleFunc("POST /api/v1/auth/sms/config", s.auth(s.auditWrap("sms.config.set", s.handleSetSMSConfig)))
 	s.mux.HandleFunc("GET /api/v1/auth/wechat/config", s.auth(s.handleGetWechatConfig))
 	s.mux.HandleFunc("POST /api/v1/auth/wechat/config", s.auth(s.auditWrap("wechat.config", s.handleSetWechatConfig)))
 	s.mux.HandleFunc("POST /api/v1/auth/wechat/login", s.auth(s.auditWrap("wechat.login", s.handleWechatLogin)))
@@ -4488,4 +4491,57 @@ func (s *Server) handleSMSVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]interface{}{"verified": true})
+}
+
+// handleGetSMSConfig 读取短信网关配置（store: section=sms, option=config）。
+func (s *Server) handleGetSMSConfig(w http.ResponseWriter, r *http.Request) {
+	var cfg smsConfig
+	if !s.loadJSON(sms.Section(), sms.Option(), &cfg) {
+		writeJSON(w, 200, map[string]interface{}{"configured": false})
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"configured":    strings.TrimSpace(cfg.URL) != "",
+		"url":           cfg.URL,
+		"method":        cfg.Method,
+		"body_template": cfg.BodyTmpl,
+		"headers":       cfg.Headers,
+	})
+}
+
+// handleSetSMSConfig 保存短信网关配置到 store。
+// 只有 admin 能改网关地址/模板/头 —— 否则普通账号能把短信请求劫持到自己的服务器。
+func (s *Server) handleSetSMSConfig(w http.ResponseWriter, r *http.Request) {
+	if s.requireAdmin(w, r) == "" {
+		return
+	}
+	var cfg smsConfig
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		writeJSON(w, 400, errBody(11013, "invalid body", err.Error()))
+		return
+	}
+	cfg.URL = strings.TrimSpace(cfg.URL)
+	if cfg.URL == "" {
+		writeJSON(w, 422, errBody(11014, "missing url", "url is required"))
+		return
+	}
+	if u, err := url.Parse(cfg.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		writeJSON(w, 422, errBody(11015, "invalid url", "url 必须是 http/https 绝对地址"))
+		return
+	}
+	if cfg.Method == "" {
+		cfg.Method = "POST"
+	}
+	cfg.Method = strings.ToUpper(cfg.Method)
+	switch cfg.Method {
+	case "POST", "GET", "PUT":
+	default:
+		writeJSON(w, 422, errBody(11016, "invalid method", "method 仅支持 GET/POST/PUT"))
+		return
+	}
+	if cfg.BodyTmpl == "" {
+		cfg.BodyTmpl = `{"phone":"{phone}","content":"{content}"}`
+	}
+	s.storeJSON(sms.Section(), sms.Option(), cfg)
+	writeJSON(w, 200, map[string]interface{}{"ok": true, "configured": true})
 }

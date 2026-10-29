@@ -1,6 +1,6 @@
 # 写端点 Round-trip 测试报告
 
-> 生成: 2026-10-29 11:25:02  BASE=http://127.0.0.1:9090
+> 生成: 2026-10-29 19:40:13  BASE=http://127.0.0.1:9090
 
 **汇总**: 测了 5 个写端点 / PASS 5 / FAIL 0
 
@@ -36,12 +36,12 @@
   "note": "卡密明文只返回这一次，请立即保存；之后查询只能看到打码版本",
   "vouchers": [
     {
-      "code": "J5PUJV3B2D",
-      "password": "SK2NE3U69X",
+      "code": "AB2PTA9UZ6",
+      "password": "QQFE2NCYPV",
       "minutes": 30,
       "traffic_mb": 0,
       "device_limit": 1,
-      "created_at": 1793244302,
+      "created_at": 1793274013,
       "expires_at": 0,
       "used_at": 0,
       "used": false,
@@ -57,9 +57,9 @@
 
 ```json
 {
-  "count": 57,
-  "unused": 32,
-  "used": 25,
+  "count": 64,
+  "unused": 35,
+  "used": 29,
   "vouchers": [
     {
       "code": "R4VTY4YKNE",
@@ -858,6 +858,104 @@
       "note": "roundtrip-test",
       "remaining_min": 30,
       "expired": false
+    },
+    {
+      "code": "5VXX89VAM8",
+      "password": "V7******JS",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793244308,
+      "expires_at": 0,
+      "used_at": 1793244308,
+      "used": true,
+      "note": "p47 roundtrip",
+      "remaining_min": 0,
+      "expired": false
+    },
+    {
+      "code": "WJMAS3NPJW",
+      "password": "4H******QT",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793272411,
+      "expires_at": 0,
+      "used_at": 0,
+      "used": false,
+      "note": "roundtrip-test",
+      "remaining_min": 30,
+      "expired": false
+    },
+    {
+      "code": "K38UTPNNUT",
+      "password": "BR******QR",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793272412,
+      "expires_at": 0,
+      "used_at": 1793272412,
+      "used": true,
+      "note": "p47 roundtrip",
+      "remaining_min": 4,
+      "expired": false
+    },
+    {
+      "code": "CSXUY8JAZ5",
+      "password": "3N******KV",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793272890,
+      "expires_at": 0,
+      "used_at": 0,
+      "used": false,
+      "note": "roundtrip-test",
+      "remaining_min": 30,
+      "expired": false
+    },
+    {
+      "code": "3D4K4K8F5A",
+      "password": "KP******CH",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793272896,
+      "expires_at": 0,
+      "used_at": 1793272896,
+      "used": true,
+      "note": "p47 roundtrip",
+      "remaining_min": 12,
+      "expired": false
+    },
+    {
+      "code": "PHQMDDG85A",
+      "password": "TY******HW",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793273834,
+      "expires_at": 0,
+      "used_at": 1793273834,
+      "used": true,
+      "note": "p47 roundtrip",
+      "remaining_min": 28,
+      "expired": false
+    },
+    {
+      "code": "AB2PTA9UZ6",
+      "password": "QQ******PV",
+      "minutes": 30,
+      "traffic_mb": 0,
+      "device_limit": 1,
+      "created_at": 1793274013,
+      "expires_at": 0,
+      "used_at": 0,
+      "used": false,
+      "note": "roundtrip-test",
+      "remaining_min": 30,
+      "expired": false
     }
   ]
 }
@@ -1181,8 +1279,9 @@
 
 ```json
 {
-  "applied": true,
+  "applied": false,
   "count": 1,
+  "error": "/usr/sbin/nft -f -: netlink: Error: cache initialization failed: Operation not permitted",
   "nft": "table inet timesched {\n\tchain forward {\n\t\ttype filter hook forward priority filter; policy accept;\n\t\t# no active rules\n\t}\n}\n",
   "output": ""
 }
@@ -1195,7 +1294,7 @@
 ```json
 {
   "count": 1,
-  "now": "2026-10-29 11:25:02 Thu",
+  "now": "2026-10-29 19:40:13 Thu",
   "rules": [
     {
       "id": "rt-rule-1",

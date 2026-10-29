@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -216,5 +217,88 @@ func TestSMSSendToVerifyEndToEnd(t *testing.T) {
 	code := m[1]
 	if wr := smsVerify(t, s, token, "13800138000", code); wr.Code != http.StatusOK {
 		t.Fatalf("verify extracted code expected 200, got %d %s", wr.Code, wr.Body.String())
+	}
+}
+
+// TestSMSConfigEndpoint 覆盖短信网关配置的读写（配置走 store）。
+func TestSMSConfigEndpoint(t *testing.T) {
+	s := New(Config{Addr: ":0", SecretKey: []byte("0123456789abcdef0123456789abcdef")})
+	token := smsLogin(t, s)
+
+	// 未配置时 GET 返回 configured=false
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/v1/auth/sms/config", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	s.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"configured":false`) {
+		t.Fatalf("未配置时应 configured=false，got %d %s", rr.Code, rr.Body.String())
+	}
+
+	// 非法 url → 422
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest("POST", "/api/v1/auth/sms/config", strings.NewReader(`{"url":"not-a-url"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("非法 url 应 422，got %d %s", rr.Code, rr.Body.String())
+	}
+
+	// 正常保存 → store 落库，GET 可读回
+	cfgBody, _ := json.Marshal(map[string]interface{}{
+		"url":           "http://127.0.0.1:18080/sms",
+		"method":        "POST",
+		"body_template": `{"phone":"{phone}","content":"{content}"}`,
+		"headers":       map[string]string{"X-Token": "abc"},
+	})
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest("POST", "/api/v1/auth/sms/config", bytes.NewReader(cfgBody))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("保存配置应 200，got %d %s", rr.Code, rr.Body.String())
+	}
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/api/v1/auth/sms/config", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	s.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"configured":true`) ||
+		!strings.Contains(rr.Body.String(), "127.0.0.1:18080") {
+		t.Fatalf("配置未持久化，got %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestSMSVerifyExpiredEndpoint 端点级验证：验证码过期后 verify 返回 422/11010。
+func TestSMSVerifyExpiredEndpoint(t *testing.T) {
+	s, _, _ := newSMSTestServer(t)
+	token := smsLogin(t, s)
+	s.smsStore.SaveCode("13800138000", "123456")
+
+	// 把时钟推过 5 分钟 TTL
+	s.smsStore.Now = func() time.Time { return time.Now().Add(6 * time.Minute) }
+
+	wr := smsVerify(t, s, token, "13800138000", "123456")
+	if wr.Code != http.StatusUnprocessableEntity || !strings.Contains(wr.Body.String(), "11010") {
+		t.Fatalf("过期码应 422/11010，got %d %s", wr.Code, wr.Body.String())
+	}
+}
+
+// TestSMSVerifyWrongCountEndpoint 端点级验证：连续错码达上限后验证码作废。
+func TestSMSVerifyWrongCountEndpoint(t *testing.T) {
+	s, _, _ := newSMSTestServer(t)
+	token := smsLogin(t, s)
+	s.smsStore.SaveCode("13800138000", "123456")
+
+	for i := 0; i < 5; i++ {
+		wr := smsVerify(t, s, token, "13800138000", "000000")
+		if wr.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("错码应 422，got %d", wr.Code)
+		}
+	}
+	// 达到错码上限后，正确码也不再可用
+	wr := smsVerify(t, s, token, "13800138000", "123456")
+	if wr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("错码达上限后应失效，got %d %s", wr.Code, wr.Body.String())
 	}
 }

@@ -88,10 +88,24 @@ def main() -> int:
                  if t.get("status") == "pending"
                  and (t.get("retries") or 0) >= t.get("max_retries", 3)]
     for t in exhausted:
-        print(f"标记 giveup {t['id']}：重试 {(t.get('retries') or 0)} 次仍未通过")
-        if args.apply:
-            ql.settle_task(t["id"], "giveup",
-                           fail_reason=t.get("fail_reason") or "retries exhausted")
+        # 只按重试次数判死会误杀：工人最后一次可能真的把活干完了，只是验证
+        # 环节因为别的原因失败（编译中间态、验证者抽风）。先看产出成立不成立。
+        import dispatch_workers as _dw
+        try:
+            done = _dw.produced(t)
+        except Exception as e:  # noqa: BLE001
+            done = False
+            print(f"  {t['id']} 产出检查异常：{e}")
+        if done:
+            print(f"判定已完成 {t['id']}：产出成立，转入验证（而不是 giveup）")
+            if args.apply:
+                ql.settle_task(t["id"], "done", pane=None, verified=None)
+                ql.push_verify(t["id"])
+        else:
+            print(f"标记 giveup {t['id']}：重试 {(t.get('retries') or 0)} 次且产出不成立")
+            if args.apply:
+                ql.settle_task(t["id"], "giveup",
+                               fail_reason=t.get("fail_reason") or "retries exhausted")
     if exhausted:
         tasks = ql.read_queue()
 

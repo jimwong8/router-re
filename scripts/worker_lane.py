@@ -222,7 +222,12 @@ def eligible(task: dict, tasks: list[dict]) -> bool:
         return False
     if not dw.retry_ready(task, dw.now()):
         return False
-    if task.get("retries", 0) >= task.get("max_retries", 3):
+    # max_retries=None（旧任务漏字段）视为缺省 3，不能让 None 参与比较
+    # （int >= None 抛 TypeError，会杀死整个 lane 循环）。
+    max_r = task.get("max_retries")
+    if max_r is None:
+        max_r = 3
+    if (task.get("retries") or 0) >= max_r:
         return False
     return True
 

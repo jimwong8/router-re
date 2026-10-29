@@ -1,0 +1,3 @@
+{
+  "p16.go:handleSetVPNClient": "完整文档写入（body 即期望全量）+ 私钥继承为唯读携带，不构成「改一条→写整份」丢失：saveVPNClient = json.Marshal(全量)+store.Set；handler 内注释与 rmw_concurrency_test.go#5 固化为单键覆盖(LWW)语义，最终态必为完整文档无字段撕裂；加锁前后均 PASS，锁不必要。注意：LWW 不等于无并发安全，只是不丢字段 —— 若后续改为「只修改单条 peer」合并语义，必须删出白名单并加锁。"
+}

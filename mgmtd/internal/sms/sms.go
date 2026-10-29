@@ -5,10 +5,11 @@
 package sms
 
 import (
+	cryptorand "crypto/rand"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
 	"net/http"
 	"strings"
 	"sync"
@@ -142,9 +143,15 @@ func NewMemoryStore() *MemoryStore {
 	}
 }
 
-// generateCode 生成 6 位数字验证码。
+// GenerateCode 生成 6 位数字验证码（000000-999999）。
+// 用 crypto/rand 而非 math/rand：验证码是安全凭证，可预测就等于没有验证码。
 func (s *MemoryStore) GenerateCode() int {
-	return rand.Intn(1000000)
+	var b [4]byte
+	if _, err := cryptorand.Read(b[:]); err != nil {
+		// 随机源不可用时退化为时间派生值（仍在 6 位范围内）。
+		return int(time.Now().UnixNano() % 1000000)
+	}
+	return int(binary.BigEndian.Uint32(b[:]) % 1000000)
 }
 
 // CanSend 检查该手机号是否可发送；不可发送返回需等待时间。

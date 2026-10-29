@@ -1,11 +1,12 @@
 # Regression Summary
 
-- Generated: 2026-10-29 11:31:38
+- Generated: 2026-10-29 19:47:06
 - Base: http://127.0.0.1:9090
-- Commit: 6242b09 (+未提交改动)
-- 未提交改动: 9 个文件
+- Commit: 8f02520 (+未提交改动)
+- 未提交改动: 17 个文件
 
   > 注意：以下文件在本次回归运行时处于未提交状态，相关模块的结果只代表当时的工作区快照：
+  >  M docs/ikuai-vs-routerre-feature-comparison.md
   >  M docs/linkcheck-ddns-test.md
   >  M docs/portal-flow-test.md
   >  M docs/regression-summary.md
@@ -13,41 +14,41 @@
   >  M docs/smoke-new-routes.md
   >  M docs/ui-coverage-extended.md
   >  M docs/ui-terminals-acceptance.md
-  >  M ops/tasks.jsonl
-  >  M scripts/run_all_tests.sh
-- Total modules: 17
-- PASS: 17 / FAIL: 0 / SKIP: 0 / UNSTABLE: 0
+  >  M mgmtd/internal/server/server.go
+  >  D mgmtd/internal/server/sms.go
+- Total modules: 19
+- PASS: 19 / FAIL: 0 / SKIP: 0 / UNSTABLE: 0
 
 ## Module Results
 
 | # | Module | Status | Duration |
 |---|--------|--------|----------|
 | 1 | e2e_test | PASS | — |
-| 2 | smoke_new_routes | PASS | 1554ms |
-| 3 | roundtrip_test | PASS | 548ms |
-| 4 | portal_flow_test | PASS | 545ms |
-| 5 | linkcheck_ddns_test | PASS | 3354ms |
-| 6 | rbac_e2e | PASS | 2307ms |
-| 7 | guard_race_rw | PASS | 225ms |
-| 8 | go_test | PASS | 35754ms |
-| 9 | vue_typecheck | PASS | 18867ms |
-| 10 | ui_acceptance | PASS | 32592ms |
-| 11 | ui_acceptance_ext | PASS | 92221ms |
-| 12 | ui_acceptance_terminals | PASS | 10363ms |
-| 13 | users_edit_e2e | PASS | 10721ms |
-| 14 | dialog_smoke | PASS | 35972ms |
-| 15 | form_submit_e2e | PASS | 23808ms |
-| 16 | rbac_ui_e2e | PASS | 25457ms |
-| 17 | voucher_concurrent | PASS | 562ms |
+| 2 | smoke_new_routes | PASS | 1498ms |
+| 3 | roundtrip_test | PASS | 609ms |
+| 4 | portal_flow_test | PASS | 1048ms |
+| 5 | linkcheck_ddns_test | PASS | 3422ms |
+| 6 | rbac_e2e | PASS | 2597ms |
+| 7 | guard_race_rw | PASS | 279ms |
+| 8 | lane_watch_dryrun | PASS | 157ms |
+| 9 | guard_route_dup | PASS | 133ms |
+| 10 | go_test | PASS | 52058ms |
+| 11 | vue_typecheck | PASS | 17249ms |
+| 12 | ui_acceptance | PASS | 33110ms |
+| 13 | ui_acceptance_ext | PASS | 92242ms |
+| 14 | ui_acceptance_terminals | PASS | 10020ms |
+| 15 | users_edit_e2e | PASS | 10579ms |
+| 16 | dialog_smoke | PASS | 35641ms |
+| 17 | form_submit_e2e | PASS | 23441ms |
+| 18 | rbac_ui_e2e | PASS | 25401ms |
+| 19 | voucher_concurrent | PASS | 670ms |
 
 ## Details (tail of each log)
 
 ### e2e_test — PASS
 
 ```
-OK     200      0.01s /api/v1/diag/interfaces 
-OK     200      0.00s /api/v1/nac/config 
-OK     200      0.00s /api/v1/nac/neighbors 
+OK     200      0.01s /api/v1/nac/neighbors 
 OK     200      0.00s /api/v1/nac/connlimits (空: limits)
 OK     200      0.03s /api/v1/nac/top-connections 
 OK     200      0.00s /api/v1/lb/config 
@@ -61,8 +62,10 @@ OK     200      0.00s /api/v1/users
 OK     200      0.00s /api/v1/ips/rules 
 OK     200      0.00s /api/v1/ips/stats 
 OK     200      0.00s /api/v1/ips/blocklist 
+OK     200      0.00s /api/v1/frp/config 
+OK     200      0.00s /api/v1/frp/status 
 ------------------------------------------------------------------------------
-通过 140 / 空数据 20 / 失败 0
+通过 154 / 空数据 21 / 失败 0
 
 E2E: PASS
 ```
@@ -114,13 +117,13 @@ PASS policy/timeschedule→timeschedule: write=200 read=200 verified=True
 
 ```
 PASS 1. 选/保存 portal 模板 — GET templates 200 (count=4); POST template 200 saved=true id=roundtrip
-PASS 2. voucher/generate 测试卡 — HTTP 200 generated=1 code=5VXX89VAM8
+PASS 2. voucher/generate 测试卡 — HTTP 200 generated=1 code=RVHT9ASV9N
 SKIP 3. portal/login 用卡登录 — 路由未注册 (mgmtd 无 /api/v1/portal/login；门户认证走 /portal/auth 表单，非 mgmtd REST API) probe=GET=404 POST=404 HTTP 404
-SKIP 4. portal/status 查会话 — 路由未注册 (mgmtd 无 /api/v1/portal/status) probe=GET=404 POST=404 HTTP 404
-PASS 5. voucher list/verify 确认已用 — redeem HTTP 200 ok; list HTTP 200; card 5VXX89VAM8 used=True
-SKIP 6. portal/logout 登出+status消失 — 路由未注册 (mgmtd 无 /api/v1/portal/logout) probe=GET=404 POST=404 HTTP 404
+PASS 4. portal/status 查会话 — HTTP 200: {'clients': [], 'online': False, 'online_count': 0}
+PASS 5. voucher list/verify 确认已用 — redeem HTTP 200 ok; list HTTP 200; card RVHT9ASV9N used=True
+PASS 6. portal/logout 登出+status消失 — logout HTTP 200; status-after HTTP 200
 
-汇总: 6 步 / PASS 3 / FAIL 0 / SKIP 3
+汇总: 6 步 / PASS 5 / FAIL 0 / SKIP 1
 报告: /home/jimwong/projects/router-re/docs/portal-flow-test.md
 ```
 
@@ -161,18 +164,29 @@ Scanned internal/server: 1 load+save functions examined.
 PASS: all load+save functions are guarded by a lock (or whitelisted).
 ```
 
+### lane_watch_dryrun — PASS
+
+```
+全部正常
+```
+
+### guard_route_dup — PASS
+
+```
+no duplicate routes
+```
+
 ### go_test — PASS
 
 ```
-ok  	github.com/jimwong/router-re/mgmtd/internal/radius	(cached)
-ok  	github.com/jimwong/router-re/mgmtd/internal/rbac	(cached)
-ok  	github.com/jimwong/router-re/mgmtd/internal/remote	(cached)
-ok  	github.com/jimwong/router-re/mgmtd/internal/route	(cached)
-ok  	github.com/jimwong/router-re/mgmtd/internal/server	33.964s
+ok  	github.com/jimwong/router-re/mgmtd/internal/server	50.057s
+ok  	github.com/jimwong/router-re/mgmtd/internal/sms	0.013s
 ok  	github.com/jimwong/router-re/mgmtd/internal/snmp	(cached)
 ok  	github.com/jimwong/router-re/mgmtd/internal/stats	(cached)
+ok  	github.com/jimwong/router-re/mgmtd/internal/svcmgr	(cached)
 ok  	github.com/jimwong/router-re/mgmtd/internal/sysctl	(cached)
 ok  	github.com/jimwong/router-re/mgmtd/internal/system	(cached)
+ok  	github.com/jimwong/router-re/mgmtd/internal/taskq	(cached)
 ok  	github.com/jimwong/router-re/mgmtd/internal/threat	(cached)
 ok  	github.com/jimwong/router-re/mgmtd/internal/timesched	(cached)
 ok  	github.com/jimwong/router-re/mgmtd/internal/traffic	(cached)
@@ -183,6 +197,7 @@ ok  	github.com/jimwong/router-re/mgmtd/internal/vpnclient	(cached)
 ok  	github.com/jimwong/router-re/mgmtd/internal/wan	(cached)
 ok  	github.com/jimwong/router-re/mgmtd/internal/webadmin	(cached)
 ok  	github.com/jimwong/router-re/mgmtd/internal/webfilter	(cached)
+ok  	github.com/jimwong/router-re/mgmtd/internal/wechat	0.014s
 ok  	github.com/jimwong/router-re/mgmtd/internal/wireless	(cached)
 ```
 
@@ -194,12 +209,12 @@ ok  	github.com/jimwong/router-re/mgmtd/internal/wireless	(cached)
 ### ui_acceptance — PASS
 
 ```
-  OK   /services          接口  527 条 -> 页面   50 行   systemd 单元列表 [分页]
-  OK   /online-users      接口   22 条 -> 页面   22 行   在线会话
+  OK   /services          接口  534 条 -> 页面   50 行   systemd 单元列表 [分页]
+  OK   /online-users      接口    2 条 -> 页面    2 行   在线会话
   OK   /routing-policy    接口    1 条 -> 页面    2 行   策略路由规则(可为空)
   SKIP /cert              接口取数失败: 没有可识别的列表字段: detail,exists,path
   OK   /alerts            接口    1 条 -> 页面    1 行   告警规则(可为空)
-  OK   /voucher           接口   58 条 -> 页面   58 行   卡密列表(可能为空)
+  OK   /voucher           接口   65 条 -> 页面   65 行   卡密列表(可能为空)
   OK   /ddns              接口    0 条 -> 页面    0 行   DDNS 记录(可为空)
   OK   /vpn-client        接口    0 条 -> 页面    0 行   VPN 客户端 peers(可为空)
   OK   /security-plus     接口    1 条 -> 页面    2 行   时间段策略 rules(可为空)
@@ -215,7 +230,7 @@ ok  	github.com/jimwong/router-re/mgmtd/internal/wireless	(cached)
   OK   /ipv6              接口    4 条 -> 页面    8 行   IPv6 地址(可为空)
   OK   /l7                接口    0 条 -> 页面    0 行   L7 规则(可为空)
   OK   /logs              接口  100 条 -> 页面  100 行   日志条目(可为空)
-  OK   /voucher           接口   58 条 -> 页面   58 行   卡密列表(可为空)
+  OK   /voucher           接口   65 条 -> 页面   65 行   卡密列表(可为空)
   SKIP /nac               SKIP: NAC 多表格分页 (devices/limits/top/neighbors)，接口 neighbors=45 非可见表，无法准确比对
   SKIP /network           SKIP: portmap/rules.rules=None(主机无 NAT 规则)
   OK   /pppoe             接口    0 条 -> 页面    0 行   PPPoE 会话(可为空)
@@ -238,7 +253,7 @@ ok  	github.com/jimwong/router-re/mgmtd/internal/wireless	(cached)
 
 ```
   OK   /terminals       接口   20 条 -> 页面   20 行   终端列表
-  OK   /online-users    接口   20 条 -> 页面   21 行   字节统计块=存在
+  OK   /online-users    接口    2 条 -> 页面    2 行   字节统计块=存在
 
 ✅ terminals 验收通过（2 个页面 OK，0 个 FAIL）
 报告已写 docs/ui-terminals-acceptance.md
@@ -275,8 +290,8 @@ PASS 7/7
 ```
 OK   告警规则保存后后端有这条 — rules=2
 OK   告警页表格出现新规则
-OK   批量生成后卡密多了 2 条 — 58 → 60
-OK   生成的卡密已清理 — 58 条（基线 58）
+OK   批量生成后卡密多了 2 条 — 65 → 67
+OK   生成的卡密已清理 — 65 条（基线 65）
 OK   链路目标保存后后端有这条 — targets=1
 OK   链路检测页显示新目标
 

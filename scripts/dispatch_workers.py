@@ -298,6 +298,14 @@ def pane_state_from(out: str) -> str:
         return "busy"
     if any(m.lower() in low for m in IDLE_MARKERS):
         return "idle"
+    # 兜底：TUI 的输入建议行（"❯ Turn these notes into a to-do list"、
+    # "❯ What changed in this repo recently?"）每版文案都不一样，逐个加标记
+    # 永远追不上。但它们的形状是稳定的：以 ❯ 开头 = 已经在等输入 = idle。
+    # 实测 p107/p108 的工人早就干完在问"需要我继续推进下一个任务吗"，
+    # 却因为状态判成 unknown，结算分支永远进不去，白等到 20 分钟超时。
+    for line in out.splitlines():
+        if line.strip().startswith("❯"):
+            return "idle"
     return "unknown"
 
 

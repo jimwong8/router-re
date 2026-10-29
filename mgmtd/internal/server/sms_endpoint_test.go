@@ -32,27 +32,27 @@ func TestSMSEndpoints(t *testing.T) {
 		t.Fatalf("无 token 应 401，got %d %s", rr.Code, rr.Body.String())
 	}
 
-	// 2) 缺手机号：422 / 10519
+	// 2) 缺手机号：422 / 11004
 	rr := do("/api/v1/auth/sms/send", `{}`, token)
-	if rr.Code != 422 || !strings.Contains(rr.Body.String(), "10519") {
-		t.Fatalf("缺手机号应 422/10519，got %d %s", rr.Code, rr.Body.String())
+	if rr.Code != 422 || !strings.Contains(rr.Body.String(), "11004") {
+		t.Fatalf("缺手机号应 422/11004，got %d %s", rr.Code, rr.Body.String())
 	}
 
-	// 3) 网关未配置：503 / 10520（不能假装发送成功）
+	// 3) 网关未配置：503 / 11005（不能假装发送成功）
 	rr = do("/api/v1/auth/sms/send", `{"phone":"13800138000"}`, token)
-	if rr.Code != 503 || !strings.Contains(rr.Body.String(), "10520") {
-		t.Fatalf("未配置网关应 503/10520，got %d %s", rr.Code, rr.Body.String())
+	if rr.Code != 503 || !strings.Contains(rr.Body.String(), "11005") {
+		t.Fatalf("未配置网关应 503/11005，got %d %s", rr.Code, rr.Body.String())
 	}
 
-	// 4) 校验：缺参 422 / 10523
+	// 4) 校验：缺参 422 / 11009
 	rr = do("/api/v1/auth/sms/verify", `{"phone":"13800138000"}`, token)
-	if rr.Code != 422 || !strings.Contains(rr.Body.String(), "10523") {
-		t.Fatalf("缺 code 应 422/10523，got %d %s", rr.Code, rr.Body.String())
+	if rr.Code != 422 || !strings.Contains(rr.Body.String(), "11009") {
+		t.Fatalf("缺 code 应 422/11009，got %d %s", rr.Code, rr.Body.String())
 	}
 
-	// 5) 校验：从未发过码 → 10526「未找到」（10503 是 p27 的 invalid body，别混）
+	// 5) 校验：从未发过码 → 11012「未找到」（10503 是 p27 的 invalid body，别混）
 	rr = do("/api/v1/auth/sms/verify", `{"phone":"13900139000","code":"123456"}`, token)
-	if rr.Code != 422 || !strings.Contains(rr.Body.String(), "10526") {
-		t.Fatalf("无码应 422/10526，got %d %s", rr.Code, rr.Body.String())
+	if rr.Code != 422 || !strings.Contains(rr.Body.String(), "11012") {
+		t.Fatalf("无码应 422/11012，got %d %s", rr.Code, rr.Body.String())
 	}
 }
