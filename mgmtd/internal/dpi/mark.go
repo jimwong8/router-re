@@ -111,6 +111,10 @@ func ApplyMarks(r execx.Runner, rules []MarkRule) error {
 	return err
 }
 
+// LimitRulesToHTB is implemented in internal/htb/htb.go and converts limit
+// rules into an HTB Config (one class per limit rule, rate=ceil=RateMbit,
+// prio 5). Use htb.LimitRulesToHTB(rules, iface, rootMbit).
+
 // MarkRulesForTC generates tc filter commands that route marked flows to a
 // classid. Each mark rule becomes: tc filter replace dev <dev> parent 1:
 // protocol ip handle <mark> fw classid 1:<i>.
