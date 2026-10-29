@@ -164,6 +164,16 @@ run_module "guard_race_rw" bash -c "cd mgmtd && go run ../scripts/guard_race_rw.
 # 导致通知器整条挂掉」——它跑在 systemd timer 里，坏了不会有人立刻发现。
 run_module "lane_watch_dryrun" python3 scripts/lane_watch.py
 
+# 路由重复注册守卫：Go 的 ServeMux 在重复 pattern 时是**启动 panic**，
+# 但 go build/go test 都可能照样绿（测试没走到完整注册路径就发现不了）。
+# p114 的返工往 server.go 里塞了两份 /api/v1/ha/config，肉眼扫了三遍才看见。
+run_module "guard_route_dup" bash -c "python3 -c \"
+import sys; sys.path.insert(0, 'scripts')
+import verify_outputs as v
+d = v.route_dup_check()
+print('\\n'.join(d) if d else 'no duplicate routes')
+sys.exit(1 if d else 0)\" 2>&1"
+
 # ---------- 6b. Go 单测 ----------
 run_module "go_test" bash -c "cd mgmtd && CGO_ENABLED=1 go test ./... 2>&1"
 # 类型检查是独立的一道门：`npm run build` 用的是 esbuild，**不做类型检查**。
