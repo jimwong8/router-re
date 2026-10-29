@@ -17,8 +17,8 @@ import (
 	"time"
 )
 
-// captureJob 是一次抓包任务的运行时状态。
-type captureJob struct {
+// CaptureJob 是一次抓包任务的运行时状态。
+type CaptureJob struct {
 	mu           sync.Mutex
 	ID           string    `json:"id"`
 	Interface    string    `json:"interface"`
@@ -35,8 +35,8 @@ type captureJob struct {
 }
 
 var (
-	captureMu   sync.Mutex
-	captureJobs = map[string]*captureJob{}
+	captureJobsMu   sync.Mutex
+	captureJobs = map[string]*CaptureJob{}
 )
 
 // 硬上限：即使调用方传更大的值也不接受，避免一次抓包把磁盘写满。
@@ -79,14 +79,14 @@ func (s *Server) handleCaptureStart(w http.ResponseWriter, r *http.Request) {
 	out := filepath.Join(os.TempDir(), "capture-"+id+".pcap")
 	ctx, cancel := context.WithCancel(context.Background())
 
-	job := &captureJob{
+	job := &CaptureJob{
 		ID: id, Interface: req.Interface, Filter: req.Filter,
 		MaxSeconds: sec, MaxBytes: maxBytes, OutputPath: out,
 		StartTime: time.Now(), Status: "running", cancel: cancel,
 	}
-	captureMu.Lock()
+	captureJobsMu.Lock()
 	captureJobs[id] = job
-	captureMu.Unlock()
+	captureJobsMu.Unlock()
 
 	go func() {
 		args := []string{"-i", req.Interface, "-w", out, "-B", "4096", "-U", "-s", "0"}
@@ -147,19 +147,19 @@ func (s *Server) handleCaptureStart(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCaptureStatus(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
 	if id == "" {
-		captureMu.Lock()
+		captureJobsMu.Lock()
 		list := make([]map[string]interface{}, 0, len(captureJobs))
 		for _, j := range captureJobs {
 			list = append(list, captureSnapshot(j))
 		}
-		captureMu.Unlock()
+		captureJobsMu.Unlock()
 		writeJSON(w, 200, map[string]interface{}{"captures": list, "count": len(list)})
 		return
 	}
 
-	captureMu.Lock()
+	captureJobsMu.Lock()
 	job, ok := captureJobs[id]
-	captureMu.Unlock()
+	captureJobsMu.Unlock()
 	if !ok {
 		writeJSON(w, 404, errBody(10493, "capture not found", "no such capture id"))
 		return
@@ -167,7 +167,7 @@ func (s *Server) handleCaptureStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, captureSnapshot(job))
 }
 
-func captureSnapshot(j *captureJob) map[string]interface{} {
+func captureSnapshot(j *CaptureJob) map[string]interface{} {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	return map[string]interface{}{
@@ -189,9 +189,9 @@ func (s *Server) handleCaptureDownload(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, errBody(10494, "bad path", "expected /{id}/download"))
 		return
 	}
-	captureMu.Lock()
+	captureJobsMu.Lock()
 	job, ok := captureJobs[id]
-	captureMu.Unlock()
+	captureJobsMu.Unlock()
 	if !ok {
 		writeJSON(w, 404, errBody(10493, "capture not found", "no such capture id"))
 		return
@@ -223,9 +223,9 @@ func (s *Server) handleCaptureStop(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, errBody(10494, "bad path", "expected /{id}/stop"))
 		return
 	}
-	captureMu.Lock()
+	captureJobsMu.Lock()
 	job, ok := captureJobs[id]
-	captureMu.Unlock()
+	captureJobsMu.Unlock()
 	if !ok {
 		writeJSON(w, 404, errBody(10493, "capture not found", "no such capture id"))
 		return

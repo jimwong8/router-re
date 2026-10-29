@@ -4357,37 +4357,44 @@ func loadDPIMarkRules(s *Server) map[string][]int {
 	return appPorts
 }
 
-var (
-	webfilterLastOK     bool
-	webfilterLastErr    string
-	webfilterLastScript string
-)
 
 func (s *Server) handleWebfilterApply(w http.ResponseWriter, r *http.Request) {
-	// load rules from store? For simplicity, accept rules in body
 	var req struct {
 		Rules []webfilter.Rule `json:"rules"`
 	}
-	_ = json.NewDecoder(r.Body).Decode(&req)
-	script, err := webfilter.ApplyWebfilter(execx.DefaultRunner{}, req.Rules)
-	webfilterLastScript = script
+	// 原来这里吞掉 decode 错误：body 写错会被当成"规则为空"，
+	// 于是一次手滑的请求就把过滤规则清空了，而且返回 200。
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10504, "invalid body", err.Error()))
+		return
+	}
+	confPath := webfilterConfPath()
+	if err := checkConfWritable(confPath); err != nil {
+		recordWebfilterResult(false, "", err.Error())
+		writeJSON(w, 403, errBody(10503, "webfilter config not writable", err.Error()))
+		return
+	}
+	script, err := webfilter.ApplyWebfilterTo(execx.DefaultRunner{}, req.Rules, confPath)
 	if err != nil {
-		webfilterLastOK = false
-		webfilterLastErr = err.Error()
+		recordWebfilterResult(false, script, err.Error())
 		writeJSON(w, 500, errBody(10501, "apply failed", err.Error()))
 		return
 	}
-	webfilterLastOK = true
-	webfilterLastErr = ""
+	recordWebfilterResult(true, script, "")
 	writeJSON(w, 200, map[string]interface{}{"ok": true, "script": script})
 }
 
 func (s *Server) handleWebfilterApplyStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]interface{}{
-		"ok":     webfilterLastOK,
-		"error":  webfilterLastErr,
-		"script": webfilterLastScript,
-	})
+	ok, script, errMsg, at := webfilterResult()
+	body := map[string]interface{}{
+		"ok":     ok,
+		"error":  errMsg,
+		"script": script,
+	}
+	if at > 0 {
+		body["applied_at"] = at
+	}
+	writeJSON(w, 200, body)
 }
 
 // ---------------------------------------------------------------------------
