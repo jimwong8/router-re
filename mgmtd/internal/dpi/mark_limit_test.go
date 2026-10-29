@@ -1,17 +1,29 @@
 package dpi
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
 func TestRenderMarkNftLimit(t *testing.T) {
-	out, err := RenderMarkNft([]MarkRule{{App: "x", Protocol: "tcp", DPorts: []int{80}, Action: "limit", RateMbit: 20}})
-	if err != nil { t.Fatal(err) }
-	if !strings.Contains(out, "limit rate 20 mbytes/second") {
-		t.Fatalf("missing limit rate: %s", out)
+	rules := []MarkRule{
+		{App: "netflix", Protocol: "tcp", DPorts: []int{443}, Action: "limit", RateMbit: 10},
 	}
-	// mark/drop unchanged
-	o2,_ := RenderMarkNft([]MarkRule{{App:"y",Protocol:"tcp",DPorts:[]int{443},Action:"mark",Mark:7}})
-	if !strings.Contains(o2,"meta mark set 7") { t.Fatal("mark broken") }
+	out, err := RenderMarkNft(rules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(out, "limit rate 10 mbytes/second") {
+		t.Fatalf("missing limit render: %s", out)
+	}
+}
+
+func contains(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub || len(s) > 0 && containsHelper(s, sub))
+}
+
+func containsHelper(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
 }

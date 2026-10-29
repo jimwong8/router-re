@@ -568,6 +568,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/htb/limit-rules", s.auth(s.handleHTBLimitRules))
 	s.mux.HandleFunc("GET /api/v1/htb/show", s.auth(s.handleHTBShow))
 	s.mux.HandleFunc("GET /api/v1/htb/report", s.auth(s.handleHTBReport))
+	s.mux.HandleFunc("GET /assets/", s.handleWeb)
+	s.mux.HandleFunc("GET /", s.handleWeb)
+	s.mux.HandleFunc("GET /{path...}", s.handleWeb)
 
 	s.mux.HandleFunc("GET /api/v1/quota/policies", s.auth(s.handleGetQuotaPolicies))
 	s.mux.HandleFunc("POST /api/v1/quota/policies", s.auth(s.auditWrap("quota.policies.set", s.handleSetQuotaPolicies)))
