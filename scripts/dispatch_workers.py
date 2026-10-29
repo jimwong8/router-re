@@ -454,6 +454,94 @@ def dispatch(pane: str, prompt: str) -> bool:
     return True
 
 
+def _recent_work_files(since: float) -> list[Path]:
+    """列出私有仓库里最近被改过/新增的源文件（git status 的 M/?/A，排除文档日志）。"""
+    try:
+        out = subprocess.run(["git", "status", "--porcelain"], cwd=ROOT,
+                             capture_output=True, text=True, timeout=30).stdout
+    except Exception:  # noqa: BLE001
+        return []
+    files = []
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        path = line[3:].strip()
+        if " -> " in path:            # rename
+            path = path.split(" -> ", 1)[1]
+        if not path or path.startswith(("docs/", "ops/", "logs/")):
+            continue
+        f = ROOT / path
+        if not f.is_file():
+            continue
+        try:
+            if f.stat().st_mtime >= since - 60:
+                files.append(f)
+        except OSError:
+            continue
+    return files
+
+
+def _stem_sim(a: str, b: str) -> float:
+    import difflib
+    return difflib.SequenceMatcher(None, a, b).ratio()
+
+
+def _adopt_actual_paths(task: dict, missing: list[str]) -> bool:
+    """expect 里的路径不存在时，按证据在实际改动过的文件里认领真实产出。
+
+    为什么需要：任务模板的 expect 是规划器按提示词猜的路径，工人实现时合理选择了
+    别的文件名或目录（p103 在 server/ 建 handler——prompt 明确允许；p104 建了
+    acl/macfilter.go 而 expect 写的是 acl/mac.go）。路径不存在 → produced() 永远
+    为假 → 白等到 20 分钟 wall limit 才返工，而活其实早干完了。
+
+    认领依据，按优先级：
+      1. must_contain 关键词**全部**出现（有内容证据时最可靠）
+      2. 没有关键词的路径（通常是 *_test.go）：同目录 + 同后缀 + 名字相似度最高
+    认领成功后把 expect / must_contain 改写成真实路径——验证器随后才能拿到正确
+    证据集，否则它只会看到 handler 看不到路由注册，判「没实现」。
+    """
+    since = float(task.get("dispatched_at") or 0)
+    cands = _recent_work_files(since)
+    if not cands:
+        return False
+
+    adopt: dict[str, str] = {}
+    for miss in missing:
+        want = ROOT / miss
+        needles = (task.get("must_contain") or {}).get(miss) or []
+        hits = [f for f in cands
+                if all(n in f.read_text(encoding="utf-8", errors="replace") for n in needles)] \
+               if needles else []
+        if not hits:
+            # 没有内容关键词（或关键词没命中）：按形状认领——同目录、同后缀、
+            # 名字最像。只接受相似度还过得去的，避免把无关文件认成产出。
+            same_shape = [f for f in cands
+                          if f.parent == want.parent and f.suffix == want.suffix]
+            if not same_shape:
+                return False
+            same_shape.sort(key=lambda f: -_stem_sim(f.stem, want.stem))
+            if _stem_sim(same_shape[0].stem, want.stem) < 0.4:
+                return False
+            hits = same_shape[:1]
+        else:
+            # 排序依据：名字包含关系 > 同目录 > 相似度 > 路径短。
+            # 只按相似度排会把 mac.go 认到 acl.go 上（"mac" 与 "acl" 的字符重合
+            # 比 "macfilter" 还高），而真正的实现明明叫 macfilter。
+            hits.sort(key=lambda f: (0 if (want.stem in f.stem or f.stem in want.stem) else 1,
+                                     f.parent != want.parent,
+                                     -_stem_sim(f.stem, want.stem), len(str(f))))
+        adopt[miss] = str(hits[0].relative_to(ROOT))
+
+    new_expect = [adopt.get(p, p) for p in (task.get("expect") or [])]
+    new_mc = {adopt.get(path, path): needles
+              for path, needles in (task.get("must_contain") or {}).items()}
+    import queue_lib as _ql
+    _ql.update_task(task["id"], expect=new_expect, must_contain=new_mc)
+    task["expect"], task["must_contain"] = new_expect, new_mc
+    log(f"ADOPT {task['id']}: expect 改写为实际产出 {adopt}")
+    return True
+
+
 def produced(task: dict) -> bool:
     """产出验收。三道关，缺一不可。
 
@@ -488,8 +576,12 @@ def produced(task: dict) -> bool:
                 f"{(r.stderr or r.stdout or '')[:120]}")
             return False
         return True
-    if not all((ROOT / p).exists() for p in expect):
-        return False
+    missing = [p for p in expect if not (ROOT / p).exists()]
+    if missing:
+        # 路径对不上时先尝试按内容认领实际产出，认不到才算没干完。
+        if not _adopt_actual_paths(task, missing):
+            return False
+        expect = task.get("expect") or expect
 
     for path, need in (task.get("min_lines") or {}).items():
         f = ROOT / path
