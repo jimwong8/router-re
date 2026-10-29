@@ -56,6 +56,11 @@ POLL_SECONDS = float(os.environ.get("LANE_POLL_SECONDS", "3"))
 # 永远等不到的回答时，状态栏一直显示 busy，只有 wall limit 超时才被发现——
 # 而 wall limit 是 20 分钟起步。这里改成看**对话尾部有没有变化**。
 STALL_WARN_SECONDS = float(os.environ.get("LANE_STALL_SECONDS", "240"))
+# 心跳：独立线程每 3 秒写一次，只表示「进程还活着」，与循环进度无关。
+# 不能拿状态文件的 updated 当心跳：一轮循环里 produced() 可能跑 go build
+# （超时 240s）、verify_cmd 可能跑测试（超时 180s），这期间不写状态，
+# 用 30 秒阈值判死会把活着的 lane 全标成「lane停」。
+HEARTBEAT_SECONDS = float(os.environ.get("LANE_HEARTBEAT_SECONDS", "3"))
 # 刚判定 idle 时不一定真的写完了（TUI 落盘有一两秒延迟），给一个稳定窗口：
 # 连续 N 次看到 idle 且 produced 才结算，避免把"写完但还没刷盘"判成没做完。
 IDLE_STABLE_HITS = int(os.environ.get("LANE_IDLE_STABLE_HITS", "2"))
@@ -122,6 +127,21 @@ def _content_line(text: str, state: str = "", limit: int = 110) -> str:
             continue
         return line[:limit]
     return ""
+
+def _heartbeat_loop(pane: str) -> None:
+    """守护线程：只要进程活着就每 HEARTBEAT_SECONDS 写一次时间戳。
+
+    单独一个文件而不是复用 lane-*.json：JSON 由主循环整份重写，
+    两个线程同时写会互相覆盖（还容易写出半截 JSON）。
+    """
+    path = ROOT / "ops" / f"lane-{lane_name(pane)}.hb"
+    while True:
+        try:
+            path.write_text(f"{time.time():.0f}", encoding="utf-8")
+        except OSError:
+            pass
+        time.sleep(HEARTBEAT_SECONDS)
+
 
 def _content_signature(text: str) -> str:
     """对「去装饰后的内容」取指纹，用于判断输出是否真的在推进。
@@ -234,6 +254,8 @@ def dispatch_next(pane: str) -> bool:
 
 def run(pane: str) -> int:
     lane_log(pane, f"lane 启动 poll={POLL_SECONDS}s idle_stable={IDLE_STABLE_HITS}")
+    import threading
+    threading.Thread(target=_heartbeat_loop, args=(pane,), daemon=True).start()
     write_lane_status(pane, state="starting")
     idle_hits = 0
     dead_since: float | None = None

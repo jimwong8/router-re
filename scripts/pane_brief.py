@@ -53,6 +53,12 @@ def main() -> int:
     rows = []
     for l in lanes:
         age = time.time() - (l.get("updated") or 0)
+        pane = l.get("pane") or ""
+        hb_path = OPS / f"lane-{pane.replace(':', '-')}.hb"
+        try:
+            hb_age = time.time() - float(hb_path.read_text().strip())
+        except Exception:  # noqa: BLE001
+            hb_age = None
         rows.append({
             "pane": l.get("pane"),
             "state": l.get("state"),
@@ -62,8 +68,12 @@ def main() -> int:
             "stalled": bool(l.get("stalled")),
             "last_line": l.get("last_line") or "",
             "heartbeat_age_sec": round(age, 1),
-            # lane 自己超过 3 个轮询没写状态 = lane 进程可能死了
-            "lane_dead": age > 30,
+            "hb_age_sec": None if hb_age is None else round(hb_age, 1),
+            # 存活看心跳（每 3 秒一次，15 秒没有就是真死了）。
+            # 不能用循环进度（age）判死：一轮里 go build 最长 240 秒不写状态。
+            "lane_dead": hb_age is None or hb_age > 15,
+            # 心跳在、循环很久没更新 = 卡在长操作（构建/测试），不是死了
+            "busy_long": (hb_age is not None and hb_age <= 15) and age > 45,
         })
 
     if args.json:
@@ -85,6 +95,8 @@ def main() -> int:
             state = r["state"] or "-"
             if r["lane_dead"]:
                 state += "(lane停)"
+            elif r["busy_long"]:
+                state += "(长操作)"
             print(f"{r['pane']:8} {state:10} {task:26} {el:>7} {st:>7} {flag} {r['last_line'][:52]}")
 
     print()
@@ -95,6 +107,9 @@ def main() -> int:
         print(f"⚠ 停滞（尾部长时间无变化）：{', '.join(stalled)}")
     if dead:
         print(f"⚠ lane 心跳过期（进程可能已死）：{', '.join(dead)}")
+    longops = [r["pane"] for r in rows if r["busy_long"]]
+    if longops:
+        print(f"… 循环超过 45s 未更新（多半在构建/测试，心跳正常）：{', '.join(longops)}")
     return 0
 
 
