@@ -5,9 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // TLS 客户端指纹（JA3 / JA4）。
@@ -407,13 +410,65 @@ func min(a, b int) int {
 // 网上抄来的数字。认证信息只有这几条，其余一律不猜。
 // 只收录本机实测过的值：抓真实握手算出、并复验过同一客户端多次连接结果稳定。
 // 不同版本的 OpenSSL/浏览器会给不同指纹，所以不做"猜"的映射。
-var KnownClient = map[string]string{
+var builtinClients = map[string]string{
 	"t13d3013h2_1d37bd780c83_8537cf56674e": "curl / OpenSSL 3.5",
 	"t13d301200_1d37bd780c83_ecd0401ec68b": "Python ssl / OpenSSL 3.5",
 	"t13d131000_f57a46bbacb6_e7c285222651": "Go crypto/tls",
 }
 
+var (
+	clientMu    sync.RWMutex
+	knownClient = copyMap(builtinClients)
+)
+
+func copyMap(m map[string]string) map[string]string {
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+// LoadKnownClients 读取运维维护的指纹名单，覆盖在内置表之上。
+//
+// 文件不存在不算错误——出厂时只有内置的几条，运维抓到自己环境里的指纹后
+// 追加进去，不用重新编译。格式：{"t13d…": "Chrome 141 / Windows"}。
+func LoadKnownClients(path string) (int, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	var m map[string]string
+	if err := json.Unmarshal(b, &m); err != nil {
+		return 0, fmt.Errorf("解析 %s: %w", path, err)
+	}
+	clientMu.Lock()
+	defer clientMu.Unlock()
+	knownClient = copyMap(builtinClients)
+	n := 0
+	for k, v := range m {
+		if strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
+			continue
+		}
+		knownClient[strings.TrimSpace(k)] = strings.TrimSpace(v)
+		n++
+	}
+	return n, nil
+}
+
+// KnownClientCount 返回当前生效的指纹条目数。
+func KnownClientCount() int {
+	clientMu.RLock()
+	defer clientMu.RUnlock()
+	return len(knownClient)
+}
+
 // DescribeClient 返回已知客户端名，未知则返回空。
 func DescribeClient(ja4 string) string {
-	return KnownClient[ja4]
+	clientMu.RLock()
+	defer clientMu.RUnlock()
+	return knownClient[ja4]
 }

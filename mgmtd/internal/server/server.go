@@ -2724,6 +2724,13 @@ func (s *Server) handleGetLogSources(w http.ResponseWriter, r *http.Request) {
 // loadAppidLibrary 启动时装载应用特征库。
 // 库文件不存在或损坏都只记日志、退回空库，不影响管理面启动。
 func loadAppidLibrary() {
+	// 指纹名单：内置几条实测值，运维可用 /var/lib/router-re/ja4_clients.json 覆盖
+	if cnt, err := dpi.LoadKnownClients("/var/lib/router-re/ja4_clients.json"); err != nil {
+		log.Printf("加载 JA4 客户端名单失败：%v", err)
+	} else if cnt > 0 {
+		log.Printf("JA4 客户端名单：来自文件的 %d 条", cnt)
+	}
+
 	n, err := appid.LoadFrom(appid.Path())
 	if err != nil {
 		log.Printf("appid library load failed (starting empty): %v", err)

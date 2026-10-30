@@ -96,6 +96,19 @@
         <span v-if="pcapSum.quic_streams">QUIC 重组 <b>{{ pcapSum.quic_streams.solved }}/{{ pcapSum.quic_streams.active }}</b></span>
       </div>
 
+      <!-- 指纹归并：同一客户端连不同站点，SNI 不同但 JA4 一致 -->
+      <div v-if="pcapFps.length" class="fps">
+        <div class="fps-title">
+          客户端指纹 <span class="muted small">（同一 JA4 = 同一客户端，SNI 不同也算一个）</span>
+        </div>
+        <div v-for="fp in pcapFps" :key="fp.ja4" class="fp-row">
+          <span class="mono ja4" :title="fp.ja4">{{ fp.ja4 }}</span>
+          <span class="fp-client">{{ fp.client || '未标注' }}</span>
+          <span class="muted small">{{ fp.flows }} 条流 / {{ fp.packets }} 包</span>
+          <span class="muted small fp-hosts">{{ (fp.hosts || []).join(' · ') || '-' }}</span>
+        </div>
+      </div>
+
       <el-table v-if="pcapFlows.length" :data="pcapFlows" size="small" max-height="420" style="margin-top:10px">
         <el-table-column label="目标" min-width="200">
           <template #default="{ row }"><span class="mono small">{{ row.dst_ip }}:{{ row.dst_port }}</span></template>
@@ -185,6 +198,7 @@ const pcapInput = ref<HTMLInputElement | null>(null);
 const analyzing = ref(false);
 const pcapSum = ref<any>(null);
 const pcapFlows = ref<any[]>([]);
+const pcapFps = ref<any[]>([]);
 
 const dlg = ref(false);
 const mode = ref('paste');
@@ -266,6 +280,7 @@ async function onPcap(e: Event) {
     });
     const d = res.data || {};
     pcapSum.value = d;
+    pcapFps.value = d.fingerprints || [];
     // 已识别的排在前面，未识别的沉底，便于一眼看出识别率
     pcapFlows.value = (d.flows || []).slice().sort((a: any, b: any) => {
       const rank = (x: any) => (x.app ? 0 : x.host ? 1 : x.protocol !== 'Unknown' ? 2 : 3);
@@ -341,6 +356,11 @@ onMounted(() => { load(); probe(); });
 .cat.on { border-color: #58a6ff; background: #16202e; }
 .cat-n { color: #8b91a5; font-size: 12px; font-variant-numeric: tabular-nums; }
 /* 指纹是定长字符串，折行会让人以为值被截断，所以强制单行 */
+.fps { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--el-border-color-lighter); border-radius: 6px; }
+.fps-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.fp-row { display: flex; align-items: center; gap: 12px; padding: 3px 0; font-size: 12px; }
+.fp-client { min-width: 150px; }
+.fp-hosts { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ja4 { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
 .pcap-sum { display: flex; gap: 22px; flex-wrap: wrap; font-size: 13px; color: #cfd3da; }
 .pcap-sum b { color: #e6e9ef; font-variant-numeric: tabular-nums; }

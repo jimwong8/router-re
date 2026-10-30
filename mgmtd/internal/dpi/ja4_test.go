@@ -192,3 +192,44 @@ func TestJA4GreaseIgnored(t *testing.T) {
 		t.Fatal("正常值被误判为 GREASE")
 	}
 }
+
+// TestLoadKnownClients 覆盖文件缺失、合并与非法 JSON 三种情况。
+func TestLoadKnownClients(t *testing.T) {
+	dir := t.TempDir()
+
+	// 文件不存在不是错误
+	if n, err := LoadKnownClients(dir + "/nope.json"); err != nil || n != 0 {
+		t.Fatalf("缺文件应静默跳过，得到 n=%d err=%v", n, err)
+	}
+
+	p := dir + "/ja4_clients.json"
+	if err := os.WriteFile(p, []byte(`{"q13d0000h3_aaaabbbbcccc_ddddeeeeffff":"测试客户端"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	n, err := LoadKnownClients(p)
+	if err != nil || n != 1 {
+		t.Fatalf("期望载入 1 条，得到 n=%d err=%v", n, err)
+	}
+	if got := DescribeClient("q13d0000h3_aaaabbbbcccc_ddddeeeeffff"); got != "测试客户端" {
+		t.Fatalf("覆盖未生效，得到 %q", got)
+	}
+	// 内置条目不能被覆盖文件清掉
+	if got := DescribeClient("t13d131000_f57a46bbacb6_e7c285222651"); got == "" {
+		t.Fatal("内置条目应保留")
+	}
+	// 未知指纹返回空，不能瞎猜
+	if got := DescribeClient("t13d9999h9_000000000000_000000000000"); got != "" {
+		t.Fatalf("未知指纹应返回空，得到 %q", got)
+	}
+
+	// 坏 JSON 要报错，而不是把名单清空
+	if err := os.WriteFile(p, []byte(`{oops`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadKnownClients(p); err == nil {
+		t.Fatal("非法 JSON 应返回错误")
+	}
+	if got := DescribeClient("t13d131000_f57a46bbacb6_e7c285222651"); got == "" {
+		t.Fatal("解析失败后不应清空已有名单")
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"sort"
 
 	"github.com/jimwong/router-re/mgmtd/internal/appid"
 	"github.com/jimwong/router-re/mgmtd/internal/dpi"
@@ -57,6 +58,10 @@ func (s *Server) handleAnalyzePcap(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]enriched, 0, len(flows))
 	identified, appMatched := 0, 0
+	// 按指纹归并：同一客户端连不同站点，SNI 不同但 JA4 相同。
+	// 这是「这台设备在用什么软件」这件事的唯一线索——尤其在没有 SNI 的时候。
+	fpIndex := map[string]*fpSummary{}
+	var fpOrder []string
 	for _, f := range flows {
 		if f.Protocol != "Unknown" {
 			identified++
@@ -70,8 +75,37 @@ func (s *Server) handleAnalyzePcap(w http.ResponseWriter, r *http.Request) {
 				appMatched++
 			}
 		}
+		if f.JA4 != "" {
+			fp, ok := fpIndex[f.JA4]
+			if !ok {
+				fp = &fpSummary{
+					JA4:    f.JA4,
+					JA3:    f.JA3,
+					Client: f.Client,
+					ALPN:   f.ALPN,
+				}
+				fpIndex[f.JA4] = fp
+				fpOrder = append(fpOrder, f.JA4)
+			}
+			fp.Flows++
+			fp.Packets += f.Packets
+			if e.Hostname != "" && len(fp.Hosts) < 3 && !containsStr(fp.Hosts, e.Hostname) {
+				fp.Hosts = append(fp.Hosts, e.Hostname)
+			}
+		}
 		out = append(out, e)
 	}
+
+	fps := make([]*fpSummary, 0, len(fpOrder))
+	for _, k := range fpOrder {
+		fps = append(fps, fpIndex[k])
+	}
+	sort.SliceStable(fps, func(i, j int) bool {
+		if fps[i].Flows != fps[j].Flows {
+			return fps[i].Flows > fps[j].Flows
+		}
+		return fps[i].JA4 < fps[j].JA4
+	})
 
 	writeJSON(w, 200, map[string]interface{}{
 		"packets":      len(pkts),
@@ -79,11 +113,33 @@ func (s *Server) handleAnalyzePcap(w http.ResponseWriter, r *http.Request) {
 		"flow_count":   len(flows),
 		"identified":   identified,
 		"app_matched":  appMatched,
+		"fingerprints": fps,
+		"fp_known":     dpi.KnownClientCount(),
 		"flow_table":   dpi.Stats(),
 		"quic_streams": dpi.QUICStreamStats(),
 		"note": "识别来自 nDPI 的跨包累积：单包往往只能得到 Unknown，同一连接的后续包才会定性。" +
 			"应用名来自特征库（域名/SNI -> 应用），库为空时只显示协议不显示应用。",
 	})
+}
+
+// fpSummary 是按 JA4 归并后的指纹视图。
+type fpSummary struct {
+	JA4     string   `json:"ja4"`
+	JA3     string   `json:"ja3,omitempty"`
+	Client  string   `json:"client,omitempty"`
+	ALPN    string   `json:"alpn,omitempty"`
+	Flows   int      `json:"flows"`
+	Packets int      `json:"packets"`
+	Hosts   []string `json:"hosts,omitempty"`
+}
+
+func containsStr(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 // handleDPIStats 返回 nDPI 流表状态。
