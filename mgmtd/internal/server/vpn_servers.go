@@ -46,6 +46,19 @@ func writeFileSafe(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o600)
 }
 
+// tunUsable 判断本机能不能建 TUN 设备。
+//
+// 容器里常见两种失败：/dev/net/tun 不存在（device cgroup 没放行，mknod 出来也打不开），
+// 或者存在但 open 返回 EPERM。两种都会让 openvpn 立刻退出，所以要在界面上先讲清楚。
+func tunUsable() bool {
+	f, err := os.OpenFile("/dev/net/tun", os.O_RDWR, 0)
+	if err != nil {
+		return false
+	}
+	_ = f.Close()
+	return true
+}
+
 // ensureOpenVPNPKI 保证 server.conf 引用的四份文件真实存在。
 //
 // 之前没有任何代码负责生成它们：conf 里写着 rr-ca.crt / rr-server.crt /
@@ -331,6 +344,8 @@ func (s *Server) handleGetOpenVPN(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]interface{}{
 		"config": out,
 		"status": serviceActive(execx.DefaultRunner{}, "openvpn-server@router-re"),
+		// tun 不可用时界面要提前告知：否则用户点"启用"只能看到一条 systemd 报错
+		"tun": tunUsable(),
 	})
 }
 

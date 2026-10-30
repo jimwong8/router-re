@@ -44,7 +44,20 @@
           </el-form-item>
         </template>
 
-        <template v-if="proto === 'openvpn'">
+        <el-alert
+        v-if="proto === 'openvpn' && tunOk === false"
+        type="error"
+        show-icon
+        :closable="false"
+        title="本机不能创建 TUN 设备，OpenVPN 连不起来"
+        style="margin-top:10px"
+      >
+        配置可以保存，但服务启动会立即失败。LXC 容器需要在宿主机放行 tun：
+        <code>lxc.cgroup2.devices.allow: c 10:200 rwm</code> 与
+        <code>lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file</code>
+      </el-alert>
+
+      <template v-if="proto === 'openvpn'">
           <el-form-item label="隧道网段" required>
             <el-input v-model="cfg.subnet" placeholder="10.8.0.0" style="width:160px" />
             <el-input v-model="cfg.mask" placeholder="255.255.255.0" style="width:160px; margin-left:8px" />
@@ -187,6 +200,7 @@ const forceIPSec = ref(true);
 const newClient = ref('');
 const remoteHost = ref('');
 const issuing = ref(false);
+const tunOk = ref<boolean | null>(null);
 const ovpnClients = ref<OvpnClient[]>([]);
 let poll: number | undefined;
 
@@ -256,6 +270,15 @@ function defaults(): any {
   return { enabled: false, subnet: '10.8.0.0', mask: '255.255.255.0', proto: 'udp', port: 1194, tun_mtu: 1420, cipher: 'AES-256-GCM', dev_type: 'tun', topology: 'subnet', method: 0, dns1: '223.5.5.5', dns2: '119.29.29.29' };
 }
 
+async function loadTun() {
+  try {
+    const res = await api.get('/api/v1/vpn/openvpn/services');
+    if (typeof res.data?.tun === 'boolean') tunOk.value = res.data.tun;
+  } catch {
+    tunOk.value = null;
+  }
+}
+
 async function load() {
   lastConf.value = '';
   try {
@@ -280,6 +303,7 @@ async function load() {
 
 function onTab() {
   load();
+  loadTun();
   refreshClients();
 }
 
@@ -306,6 +330,7 @@ async function save() {
 
 onMounted(async () => {
   await load();
+  await loadTun();
   await refreshClients();
   poll = window.setInterval(refreshClients, 10000);
 });
