@@ -93,6 +93,28 @@ PID 落 `state.json`。理由：路由器的启停要能被 mgmtd 完全观测�
 
 ## 状态（2026-10-30）
 
-    pki.go / status.go   两个工人在写，接到即评审
-    接线（server.go/ovpn.go/VpnServer.vue）  等两包绿了再做，避免接口猜测
+    pki.go    已验收并合并 6067eda（补了 ValidateCN、去掉重复字段）
+    status.go 已修复并合并 7ff05be（原本只认 management 前缀格式，真机 parse 出 0 个客户端）
+    vpn 服务端配置面  已合并 7a2b8e5（client-conf 改为按 name 现签证书）
+    页面（VpnServer.vue）  未做——后端接口先稳定
+
+## 真机验证记录（10.100.1.18，openvpn 2.6.14）
+
+本机自签 PKI 起服务端，客户端放独立 netns 里连回来：
+
+    tunrrs  10.8.0.1/24 (服务端)   tunrrns 10.8.0.2/24 (netns 内客户端)
+    客户端日志   Peer Connection Initiated / Initialization Sequence Completed
+    服务端日志   PUSH_REPLY,route-gateway 10.8.0.1,...  Data Channel: AES-256-GCM
+    netns ping  3 packets transmitted, 3 received, 0% loss, rtt avg 1.097 ms
+    status.log  alice,172.30.99.2:54089,5059,7748,...
+    解析结果    cn=alice real=172.30.99.2:54089 virt=10.8.0.2 in=5059 out=7748
+
+两个坑，重跑这份验证时别再踩：
+
+1. **服务端和客户端在同一台机、同一个 netns 里跑，ping 一定不通**（3/3 丢包）。
+   两个 10.8.0.x 都是本机地址，内核直接把包投给本地接口，不走隧道。
+   必须把客户端放进独立 netns（veth 互连）。我第一次就是这么误判的。
+2. **两个客户端用同一个 CN 会拿到同一个虚拟地址 10.8.0.2**，之后 ping 会跑到错的那条 tun。
+   服务端配置应显式写 `duplicate-cn` 关闭（默认关闭，但同一个证书重连要留意），
+   客户端侧一个 CN 一个证书，别复用。
 
