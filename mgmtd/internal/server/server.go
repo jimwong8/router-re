@@ -23,6 +23,7 @@ import (
 
 	"github.com/jimwong/router-re/mgmtd/internal/account"
 	"github.com/jimwong/router-re/mgmtd/internal/acl"
+	"github.com/jimwong/router-re/mgmtd/internal/appid"
 	"github.com/jimwong/router-re/mgmtd/internal/audit"
 	"github.com/jimwong/router-re/mgmtd/internal/auth"
 	"github.com/jimwong/router-re/mgmtd/internal/billing"
@@ -32,12 +33,12 @@ import (
 	"github.com/jimwong/router-re/mgmtd/internal/conntrack"
 	"github.com/jimwong/router-re/mgmtd/internal/ddns"
 	"github.com/jimwong/router-re/mgmtd/internal/dhcp"
-	"github.com/jimwong/router-re/mgmtd/internal/htb"
 	"github.com/jimwong/router-re/mgmtd/internal/dpi"
 	"github.com/jimwong/router-re/mgmtd/internal/dpiflow"
 	"github.com/jimwong/router-re/mgmtd/internal/execx"
 	"github.com/jimwong/router-re/mgmtd/internal/firewall"
 	"github.com/jimwong/router-re/mgmtd/internal/frp"
+	"github.com/jimwong/router-re/mgmtd/internal/htb"
 	"github.com/jimwong/router-re/mgmtd/internal/iface"
 	"github.com/jimwong/router-re/mgmtd/internal/iperf"
 	"github.com/jimwong/router-re/mgmtd/internal/ips"
@@ -213,7 +214,7 @@ func New(cfg Config) *Server {
 		loginLimiter: newLoginLimiter(5, time.Minute),
 		taskQ:        taskq.New(taskStorePath, 2, 50),
 		portalMgr:    portal.NewManager(),
-		statsRing:    stats.NewRing(720),
+		statsRing:    loadStatsRing(),
 		aclApplier:   execx.DefaultRunner{},
 		rebootRunner: execx.DefaultRunner{},
 		iperfRunner:  execx.DefaultRunner{},
@@ -354,6 +355,60 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/radius/test", s.auth(s.handleRadiusTest))
 	s.mux.HandleFunc("POST /api/v1/vpn/wireguard/keypair", s.auth(s.auditWrap("vpn.wireguard.keypair", s.handleWireGuardKeypair)))
 	s.mux.HandleFunc("POST /api/v1/vpn/wireguard/config", s.auth(s.auditWrap("vpn.wireguard.config", s.handleWireGuardConfig)))
+	// PPTP / L2TP / OpenVPN 服务端：路径与字段对齐 iKuai，便于迁移与对照
+	s.mux.HandleFunc("GET /api/v1/vpn/pptp/services", s.auth(s.handleGetPPTP))
+	s.mux.HandleFunc("POST /api/v1/vpn/pptp/services", s.auth(s.auditWrap("vpn.pptp.save", s.handleSetPPTP)))
+	s.mux.HandleFunc("GET /api/v1/vpn/l2tp/services", s.auth(s.handleGetL2TP))
+	s.mux.HandleFunc("POST /api/v1/vpn/l2tp/services", s.auth(s.auditWrap("vpn.l2tp.save", s.handleSetL2TP)))
+	s.mux.HandleFunc("GET /api/v1/vpn/openvpn/services", s.auth(s.handleGetOpenVPN))
+	s.mux.HandleFunc("POST /api/v1/vpn/openvpn/services", s.auth(s.auditWrap("vpn.openvpn.save", s.handleSetOpenVPN)))
+	s.mux.HandleFunc("POST /api/v1/vpn/openvpn/client-conf", s.auth(s.auditWrap("vpn.openvpn.clientconf", s.handleOpenVPNClientConf)))
+	// 对象管理（IP/MAC/终端分组）、多线路 DNS、域名分流、行为记录
+	s.mux.HandleFunc("GET /api/v1/objects/groups", s.auth(s.handleGetGroups))
+	s.mux.HandleFunc("POST /api/v1/objects/groups", s.auth(s.auditWrap("objects.groups.save", s.handleSetGroups)))
+	s.mux.HandleFunc("GET /api/v1/objects/groups/nft", s.auth(s.handleRenderGroupSet))
+	s.mux.HandleFunc("GET /api/v1/dns/multiline", s.auth(s.handleGetMultiLineDNS))
+	s.mux.HandleFunc("POST /api/v1/dns/multiline", s.auth(s.auditWrap("dns.multiline.save", s.handleSetMultiLineDNS)))
+	s.mux.HandleFunc("GET /api/v1/policy/domain-rules", s.auth(s.handleGetDomainRules))
+	s.mux.HandleFunc("POST /api/v1/policy/domain-rules", s.auth(s.auditWrap("policy.domain.save", s.handleSetDomainRules)))
+	s.mux.HandleFunc("GET /api/v1/behavior/records", s.auth(s.handleBehaviorRecords))
+	s.mux.HandleFunc("POST /api/v1/behavior/records", s.auth(s.handlePostBehaviorRecord))
+	s.mux.HandleFunc("GET /api/v1/behavior/stats", s.auth(s.handleBehaviorStats))
+	s.mux.HandleFunc("GET /api/v1/behavior/exempt", s.auth(s.handleGetBehaviorExempt))
+	s.mux.HandleFunc("POST /api/v1/behavior/exempt", s.auth(s.auditWrap("behavior.exempt.save", s.handleSetBehaviorExempt)))
+	// 磁盘管理 / 文件管理 / 内核参数（路径对齐 iKuai 的 system/*）
+	s.mux.HandleFunc("GET /api/v1/system/disks", s.auth(s.handleGetDisks))
+	s.mux.HandleFunc("POST /api/v1/system/disks/mount", s.auth(s.auditWrap("system.disk.mount", s.handleMountDisk)))
+	s.mux.HandleFunc("POST /api/v1/system/disks/umount", s.auth(s.auditWrap("system.disk.umount", s.handleUmountDisk)))
+	s.mux.HandleFunc("POST /api/v1/system/disks/format", s.auth(s.auditWrap("system.disk.format", s.handleFormatDisk)))
+	s.mux.HandleFunc("POST /api/v1/system/disks/partition", s.auth(s.auditWrap("system.disk.partition", s.handlePartitionDisk)))
+	s.mux.HandleFunc("GET /api/v1/system/files", s.auth(s.handleListFiles))
+	s.mux.HandleFunc("POST /api/v1/system/files", s.auth(s.auditWrap("system.files.op", s.handleFileOp)))
+	s.mux.HandleFunc("GET /api/v1/system/kernel-params", s.auth(s.handleGetKernelParams))
+	s.mux.HandleFunc("POST /api/v1/system/kernel-params", s.auth(s.auditWrap("system.kernel.save", s.handleSetKernelParams)))
+	// 应用商店 / 插件管理
+	s.mux.HandleFunc("GET /api/v1/plugins", s.auth(s.handleListPlugins))
+	s.mux.HandleFunc("POST /api/v1/plugins/{id}", s.auth(s.auditWrap("plugins.action", s.handlePluginAction)))
+	s.mux.HandleFunc("GET /api/v1/plugins/{id}/log", s.auth(s.handlePluginLog))
+	s.mux.HandleFunc("GET /api/v1/plugins/{id}/version", s.auth(s.handlePluginVersion))
+	// 虚拟机（KVM）
+	s.mux.HandleFunc("GET /api/v1/vms", s.auth(s.handleListVMs))
+	s.mux.HandleFunc("POST /api/v1/vms", s.auth(s.auditWrap("vms.create", s.handleCreateVM)))
+	s.mux.HandleFunc("POST /api/v1/vms/{name}", s.auth(s.auditWrap("vms.action", s.handleVMAction)))
+	// 跨三层应用
+	s.mux.HandleFunc("GET /api/v1/l3-apps", s.auth(s.handleGetL3Apps))
+	// 应用特征库
+	// DPI 抓包回放与流表
+	s.mux.HandleFunc("POST /api/v1/dpi/analyze-pcap", s.auth(s.auditWrap("dpi.analyze.pcap", s.handleAnalyzePcap)))
+	s.mux.HandleFunc("GET /api/v1/dpi/flow-stats", s.auth(s.handleDPIStats))
+	s.mux.HandleFunc("GET /api/v1/appid/stats", s.auth(s.handleAppidStats))
+	s.mux.HandleFunc("GET /api/v1/appid/lookup", s.auth(s.handleAppidLookup))
+	s.mux.HandleFunc("GET /api/v1/appid/categories", s.auth(s.handleAppidCategories))
+	s.mux.HandleFunc("POST /api/v1/appid/import", s.auth(s.auditWrap("appid.import", s.handleAppidImport)))
+	s.mux.HandleFunc("POST /api/v1/l3-apps", s.auth(s.auditWrap("l3apps.save", s.handleSetL3Apps)))
+	// FTP / Samba / HTTP 文件服务
+	s.mux.HandleFunc("GET /api/v1/services/filesvc/{kind}", s.auth(s.handleGetFileService))
+	s.mux.HandleFunc("POST /api/v1/services/filesvc/{kind}", s.auth(s.auditWrap("services.filesvc.save", s.handleSetFileService)))
 	s.mux.HandleFunc("GET /api/v1/interfaces/config", s.auth(s.handleGetInterfacesConfig))
 	s.mux.HandleFunc("POST /api/v1/interfaces/config", s.auth(s.auditWrap("iface.config.set", s.handleSetInterfacesConfig)))
 	s.mux.HandleFunc("GET /api/v1/route/static", s.auth(s.handleGetStaticRoutes))
@@ -384,6 +439,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/conntrack/terminals", s.auth(s.handleListTerminals))
 	s.mux.HandleFunc("GET /api/v1/logs", s.auth(s.handleGetLogs))
 	s.mux.HandleFunc("GET /api/v1/logs/sources", s.auth(s.handleGetLogSources))
+	// 分类日志（ARP/DDNS/拨号/推送/认证/DHCP/系统事件/webadmin/weblogin）
+	s.mux.HandleFunc("GET /api/v1/logs/categories", s.auth(s.handleGetLogCategories))
+	s.mux.HandleFunc("GET /api/v1/logs/by-category", s.auth(s.handleGetLogsByCategory))
 	// P3-3 端口映射 + 策略路由（仅本区块）
 	s.mux.HandleFunc("GET /api/v1/portmap/rules", s.auth(s.handleGetPortmapRules))
 	s.mux.HandleFunc("POST /api/v1/portmap/rules", s.auth(s.auditWrap("portmap.apply", s.handleSetPortmapRules)))
@@ -466,6 +524,11 @@ func (s *Server) routes() {
 	// ---- P16: WireGuard 客户端 / DDNS ----
 	s.mux.HandleFunc("GET /api/v1/vpn/client", s.auth(s.handleGetVPNClient))
 	s.mux.HandleFunc("POST /api/v1/vpn/client", s.auth(s.handleSetVPNClient))
+	// VPN 客户端多连接（PPTP / L2TP / OpenVPN）
+	s.mux.HandleFunc("GET /api/v1/vpn/clients", s.auth(s.handleListVPNClients))
+	s.mux.HandleFunc("POST /api/v1/vpn/clients", s.auth(s.auditWrap("vpn.clients.save", s.handleSaveVPNClientEntry)))
+	s.mux.HandleFunc("DELETE /api/v1/vpn/clients", s.auth(s.auditWrap("vpn.clients.delete", s.handleDeleteVPNClientEntry)))
+	s.mux.HandleFunc("GET /api/v1/vpn/clients/plan", s.auth(s.handleVPNClientPlan))
 	s.mux.HandleFunc("GET /api/v1/ddns/records", s.auth(s.handleListDDNS))
 	s.mux.HandleFunc("POST /api/v1/ddns/records", s.auth(s.handleSetDDNS))
 	s.mux.HandleFunc("DELETE /api/v1/ddns/records/{id}", s.auth(s.auditWrap("ddns.records.delete", s.handleDeleteDDNSRecord)))
@@ -608,7 +671,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/lb/config", s.auth(s.handleGetLBConfig))
 	s.mux.HandleFunc("POST /api/v1/lb/config", s.auth(s.auditWrap("lb.config.set", s.handleSetLBConfig)))
 	s.mux.HandleFunc("GET /api/v1/lb/status", s.auth(s.handleGetLBStatus))
-// p133: handleGetLBStatus returns per_member_rx_tx (per-member interface rx/tx counters).
+	// p133: handleGetLBStatus returns per_member_rx_tx (per-member interface rx/tx counters).
 	s.mux.HandleFunc("POST /api/v1/lb/check", s.auth(s.auditWrap("lb.check", s.handleLBCheck)))
 	s.mux.HandleFunc("POST /api/v1/lb/apply", s.auth(s.auditWrap("lb.apply", s.handleLBApply)))
 	s.mux.HandleFunc("GET /api/v1/lb/preview", s.auth(s.handleLBPreview))
@@ -1453,6 +1516,8 @@ func (s *Server) handlePostWirelessSSIDs(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) Run() error {
+	// 特征库是包级全局状态，服务开始接请求前装载一次
+	loadAppidLibrary()
 	return http.ListenAndServe(s.cfg.Addr, s.mux)
 }
 
@@ -2656,6 +2721,54 @@ func (s *Server) handleGetLogSources(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// loadAppidLibrary 启动时装载应用特征库。
+// 库文件不存在或损坏都只记日志、退回空库，不影响管理面启动。
+func loadAppidLibrary() {
+	n, err := appid.LoadFrom(appid.Path())
+	if err != nil {
+		log.Printf("appid library load failed (starting empty): %v", err)
+		return
+	}
+	if n > 0 {
+		log.Printf("appid library loaded: %d apps from %s", n, appid.Path())
+	} else {
+		log.Printf("appid library empty: 导入域名分类数据后才会识别具体应用（%s）", appid.Path())
+	}
+}
+
+// statsHistoryPath 是监控历史的落盘位置。
+// 允许用环境变量覆盖，测试和其他部署形态可以不写系统目录。
+func statsHistoryPath() string {
+	if v := os.Getenv("ROUTER_RE_STATS_HISTORY"); v != "" {
+		return v
+	}
+	return "/var/lib/router-re/stats-history.json"
+}
+
+// SaveStatsHistory 把监控历史落盘。进程退出前调用，
+// 否则最近 5 分钟（两次定期落盘之间）的样本会随重启一起丢。
+func (s *Server) SaveStatsHistory() {
+	if err := s.statsRing.SaveFile(statsHistoryPath()); err != nil {
+		log.Printf("stats history save on exit failed: %v", err)
+	}
+}
+
+// loadStatsRing 启动时恢复历史样本。
+//
+// 读不到或文件损坏都不阻止服务启动——监控历史不是配置，
+// 丢了大不了从当前时刻重新积累，但不该让路由器管理面起不来。
+func loadStatsRing() *stats.Ring {
+	path := statsHistoryPath()
+	ring, n, err := stats.LoadFile(path, 720)
+	if err != nil {
+		log.Printf("stats history load failed (starting empty): %v", err)
+	}
+	if n > 0 {
+		log.Printf("stats history restored: %d samples from %s", n, path)
+	}
+	return ring
+}
+
 // collectStatsLoop samples host metrics every 30s and feeds statsRing.
 func (s *Server) collectStatsLoop() {
 	// 先立即采一次，否则服务刚起来的 30 秒内 /stats/current 一直是 503，
@@ -2665,9 +2778,18 @@ func (s *Server) collectStatsLoop() {
 	}
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
+	n := 0
 	for range ticker.C {
 		if sm, err := stats.Collect(); err == nil {
 			s.statsRing.Add(sm)
+			n++
+			// 每 5 分钟落盘一次：重启后不用从零开始攒，
+			// 否则"360 分钟"视图永远只有重启后那几分钟
+			if n%10 == 0 {
+				if err := s.statsRing.SaveFile(statsHistoryPath()); err != nil {
+					log.Printf("stats history save failed: %v", err)
+				}
+			}
 		}
 	}
 }
@@ -4301,7 +4423,56 @@ func (s *Server) handleClassifyPayload(w http.ResponseWriter, r *http.Request) {
 		payload = []byte(req.PayloadAscii)
 	}
 	app, cat := dpiflow.DetectApp(payload, req.DstPort)
-	writeJSON(w, 200, map[string]interface{}{"app": app, "category": cat, "payload_len": len(payload)})
+	// QUIC（HTTP/3）走独立路径：SNI 在被 Initial 密钥加密的载荷里，
+	// 明文字符串匹配看不到，必须先解密再重组 CRYPTO 帧。
+	if req.DstPort == 443 && len(payload) > 0 && payload[0]&0x80 != 0 {
+		if sni := dpi.QUICSNI(payload); sni != "" {
+			app, cat = "quic-sni:"+sni, "Encrypted"
+		}
+	}
+	resp := map[string]interface{}{"app": app, "category": cat, "payload_len": len(payload)}
+	// 客户端指纹：SNI 之外的第二条识别线索
+	if ch := dpi.ParseClientHello(payload); ch != nil {
+		resp["ja4"] = ch.JA4()
+		resp["ja3"] = ch.JA3()
+		resp["tls_sni"] = ch.SNI
+		if c := dpi.DescribeClient(ch.JA4()); c != "" {
+			resp["client"] = c
+		}
+	} else if req.DstPort == 443 {
+		if ch := dpi.QUICClientHello(payload); ch != nil {
+			resp["ja4"] = ch.JA4()
+			resp["tls_sni"] = ch.SNI
+			if c := dpi.DescribeClient(ch.JA4()); c != "" {
+				resp["client"] = c
+			}
+		}
+	}
+	// 底层 DPI 只到协议层（tls-sni:www.qq.com）。再查一次特征库，
+	// 把主机名换成"用户真正关心的应用名"——这正是商业路由所谓应用识别的差别所在。
+	if host := hostFromAppTag(app); host != "" {
+		resp["host"] = host
+		if a, ok := lookupAppForHost(host); ok {
+			resp["app_id"] = a.ID
+			resp["app_name"] = a.Name
+			resp["app_category"] = string(a.Category)
+			resp["identified"] = true
+		} else {
+			resp["identified"] = false
+		}
+	}
+	writeJSON(w, 200, resp)
+}
+
+// hostFromAppTag 从 DetectApp 的返回里取出主机名。
+// 形如 "tls-sni:www.qq.com" / "http:example.com" / "dns:a.b.c"。
+func hostFromAppTag(app string) string {
+	for _, p := range []string{"tls-sni:", "quic-sni:", "http:", "dns:"} {
+		if strings.HasPrefix(app, p) {
+			return strings.TrimPrefix(app, p)
+		}
+	}
+	return ""
 }
 
 const dpiMarkRulesStoreKey = "dpi/mark-rules"
@@ -4465,7 +4636,6 @@ func loadDPIMarkRules(s *Server) map[string][]int {
 	}
 	return appPorts
 }
-
 
 func (s *Server) handleWebfilterApply(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -4662,7 +4832,6 @@ func (s *Server) handleSetSMSConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]interface{}{"ok": true, "configured": true})
 }
 
-
 func (s *Server) handleHTBSmartApply(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Confirm bool `json:"confirm"`
@@ -4685,4 +4854,3 @@ func (s *Server) handleHTBSmartApply(w http.ResponseWriter, r *http.Request) {
 	ok, msg := htb.Apply(execx.DefaultRunner{}, cfg)
 	writeJSON(w, 200, map[string]interface{}{"applied": ok, "detail": msg})
 }
-

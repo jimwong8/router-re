@@ -138,8 +138,17 @@ func stripLinkLayer(pkt []byte, linkType uint32) ([]byte, bool) {
 		return pkt[16:], true
 	case 0, 12, 101, 108, 228:
 		// BSD loopback(0) / DLT_RAW(12) / LINKTYPE_RAW(101) / LOOP(108) / LINKTYPE_IPV4(228)
-		// 这些链路类型下，抓到的就是裸 IP 包（tailscale/wireguard/tun 常见）
-		return pkt, true
+		//
+		// 其中 DLT_NULL(0) 与 DLT_LOOP(108) 带 4 字节地址族头，而 RAW 系列是裸 IP。
+		// 不区分会把 IPv6 包（前面 4 字节是 AF 值）当成无效 IP 整个丢掉——
+		// 表现是「这段抓包里没有 IP 包」，但 tcpdump 看明明是好的。
+		if len(pkt) >= 1 && (pkt[0]>>4 == 4 || pkt[0]>>4 == 6) {
+			return pkt, true
+		}
+		if len(pkt) >= 5 && (pkt[4]>>4 == 4 || pkt[4]>>4 == 6) {
+			return pkt[4:], true
+		}
+		return nil, false
 	}
 	return nil, false
 }
@@ -156,6 +165,12 @@ type FlowResult struct {
 	Bytes    int    `json:"bytes"`
 	// Hosts 是从 TLS SNI / HTTP Host / DNS 里提到的域名（用于再查应用特征库）
 	Hosts []string `json:"hosts,omitempty"`
+
+	// TLS 客户端指纹：SNI 缺失时仍能区分客户端软件
+	JA4    string `json:"ja4,omitempty"`
+	JA3    string `json:"ja3,omitempty"`
+	Client string `json:"client,omitempty"`
+	ALPN   string `json:"alpn,omitempty"`
 }
 
 // AnalyzePcap 回放抓包并给出每条流的识别结果。
@@ -189,6 +204,17 @@ func AnalyzePcap(pkts []PCAPPacket, classify func([]byte) (string, string, int, 
 			m[key] = a
 			order = append(order, key)
 		}
+		if a.res.JA4 == "" {
+			if ch := clientHelloOf(p.IP); ch != nil {
+				a.res.JA4 = ch.JA4()
+				a.res.JA3 = ch.JA3()
+				a.res.Client = DescribeClient(a.res.JA4)
+				if len(ch.ALPN) > 0 {
+					a.res.ALPN = ch.ALPN[0]
+				}
+			}
+		}
+
 		proto, cat, _, err := classify(p.IP)
 		if err == nil && proto != "" && proto != "Unknown" {
 			a.res.Protocol = proto
@@ -245,4 +271,52 @@ func formatIPv6(b []byte) string {
 		out = append(out, []byte(fmt.Sprintf("%x", v))...)
 	}
 	return string(out)
+}
+
+// clientHelloOf 从 IP 包里取出 ClientHello（TCP 明文握手或 QUIC Initial）。
+func clientHelloOf(pkt []byte) *ClientHelloInfo {
+	if len(pkt) < 20 {
+		return nil
+	}
+	switch pkt[0] >> 4 {
+	case 4:
+		ihl := int(pkt[0]&0x0f) * 4
+		if len(pkt) <= ihl {
+			return nil
+		}
+		switch pkt[9] {
+		case 6:
+			if len(pkt) < ihl+20 {
+				return nil
+			}
+			doff := int(pkt[ihl+12]>>4) * 4
+			if doff < 20 || len(pkt) <= ihl+doff {
+				return nil
+			}
+			return ParseClientHello(pkt[ihl+doff:])
+		case 17:
+			if len(pkt) < ihl+8 {
+				return nil
+			}
+			return QUICClientHello(pkt[ihl+8:])
+		}
+	case 6:
+		if len(pkt) < 60 {
+			return nil
+		}
+		switch pkt[6] {
+		case 6:
+			doff := int(pkt[52]>>4) * 4
+			if doff < 20 || len(pkt) <= 40+doff {
+				return nil
+			}
+			return ParseClientHello(pkt[40+doff:])
+		case 17:
+			if len(pkt) <= 48 {
+				return nil
+			}
+			return QUICClientHello(pkt[48:])
+		}
+	}
+	return nil
 }

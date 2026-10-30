@@ -116,6 +116,17 @@
         <el-table-column label="域名" min-width="220">
           <template #default="{ row }"><span class="mono small">{{ row.host || '-' }}</span></template>
         </el-table-column>
+        <el-table-column label="TLS 指纹 (JA4)" width="232">
+          <template #default="{ row }">
+            <span class="mono ja4" :title="row.ja4 || ''">{{ row.ja4 || '-' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="客户端" width="150">
+          <template #default="{ row }">
+            <span v-if="row.client">{{ row.client }}</span>
+            <span v-else class="muted small">-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="packets" label="包数" width="80" />
         <el-table-column prop="bytes" label="字节" width="90" />
       </el-table>
@@ -329,6 +340,8 @@ onMounted(() => { load(); probe(); });
 .cat:hover { border-color: #3d4655; }
 .cat.on { border-color: #58a6ff; background: #16202e; }
 .cat-n { color: #8b91a5; font-size: 12px; font-variant-numeric: tabular-nums; }
+/* 指纹是定长字符串，折行会让人以为值被截断，所以强制单行 */
+.ja4 { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
 .pcap-sum { display: flex; gap: 22px; flex-wrap: wrap; font-size: 13px; color: #cfd3da; }
 .pcap-sum b { color: #e6e9ef; font-variant-numeric: tabular-nums; }
 .probe { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }

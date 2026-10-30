@@ -50,18 +50,20 @@ const quicMaxDatagram = 1500
 // 返回空字符串表示：不是 QUIC、不是 Initial、是服务端包、或解密失败。
 // 调用方不应把它当成错误——绝大多数 UDP 都不是可解的 QUIC Initial。
 func QUICSNI(datagram []byte) string {
-	if len(datagram) < 48 || len(datagram) > quicMaxDatagram {
+	ch := QUICClientHello(datagram)
+	if ch == nil {
 		return ""
 	}
-	// 长包头：首字节最高位为 1
-	if datagram[0]&0x80 == 0 {
-		return ""
-	}
+	return ch.SNI
+}
+
+// quicDecrypt 解密一个 Initial 包并把 CRYPTO 片段交给重组器。
+func quicDecrypt(datagram []byte) *ClientHelloInfo {
 
 	version := binary.BigEndian.Uint32(datagram[1:5])
 	salt, ok := quicInitialSalts[version]
 	if !ok {
-		return "" // 版本协商(0x0)或未知版本
+		return nil // 版本协商(0x0)或未知版本
 	}
 
 	pktType := (datagram[0] >> 4) & 0x03
@@ -70,54 +72,54 @@ func QUICSNI(datagram []byte) string {
 		wantType = quicTypeInitialV2
 	}
 	if pktType != wantType {
-		return ""
+		return nil
 	}
 
 	off := 5
 	dcid, off, ok := quicConnID(datagram, off)
 	if !ok {
-		return ""
+		return nil
 	}
 	_, off, ok = quicConnID(datagram, off) // SCID：解析出来只为推进偏移
 	if !ok {
-		return ""
+		return nil
 	}
 
 	// Initial 包带 token（首次连接时长度为 0，Retry 之后会有值）
 	tokenLen, n, ok := quicVarint(datagram[off:])
 	if !ok {
-		return ""
+		return nil
 	}
 	off += n
 	if uint64(len(datagram)-off) < tokenLen {
-		return ""
+		return nil
 	}
 	off += int(tokenLen)
 
 	length, n, ok := quicVarint(datagram[off:])
 	if !ok {
-		return ""
+		return nil
 	}
 	off += n
 	pnOffset := off
 	if length == 0 || pnOffset+int(length) > len(datagram) {
-		return ""
+		return nil
 	}
 
 	// 头保护：采样从包号字段之后 4 字节开始，取 16 字节
 	sampleOff := pnOffset + 4
 	if sampleOff+16 > len(datagram) {
-		return ""
+		return nil
 	}
 	sample := datagram[sampleOff : sampleOff+16]
 
 	hpKey, key, iv, err := quicInitialKeys(salt, dcid)
 	if err != nil {
-		return ""
+		return nil
 	}
 	block, err := aes.NewCipher(hpKey)
 	if err != nil {
-		return ""
+		return nil
 	}
 	mask := make([]byte, 16)
 	block.Encrypt(mask, sample)
@@ -126,7 +128,7 @@ func QUICSNI(datagram []byte) string {
 	first := datagram[0] ^ (mask[0] & 0x0f)
 	pnLen := int(first&0x03) + 1
 	if pnOffset+pnLen > len(datagram) {
-		return ""
+		return nil
 	}
 	pnBytes := make([]byte, pnLen)
 	for i := 0; i < pnLen; i++ {
@@ -145,7 +147,7 @@ func QUICSNI(datagram []byte) string {
 
 	aead, err := cipher.NewGCM(block2(key))
 	if err != nil {
-		return ""
+		return nil
 	}
 	nonce := make([]byte, len(iv))
 	copy(nonce, iv)
@@ -158,10 +160,18 @@ func QUICSNI(datagram []byte) string {
 	ciphertext := datagram[pnOffset+pnLen : pnOffset+int(length)]
 	plaintext, err := aead.Open(nil, nonce, ciphertext, header)
 	if err != nil {
-		return ""
+		return nil
 	}
 
 	return quicFrames(string(dcid), plaintext)
+}
+
+// QUICClientHello 返回解密重建出的 ClientHello（含 SNI 与指纹）。
+func QUICClientHello(datagram []byte) *ClientHelloInfo {
+	if len(datagram) < 48 || len(datagram) > quicMaxDatagram || datagram[0]&0x80 == 0 {
+		return nil
+	}
+	return quicDecrypt(datagram)
 }
 
 // block2 把密钥包成 cipher.Block（GCM 需要）。
@@ -235,22 +245,17 @@ func quicExpandLabel(secret []byte, label string, length int) ([]byte, error) {
 	return hkdf.Expand(sha256.New, secret, string(info), length)
 }
 
-// sniFromQUICFrames 从解密后的帧里取出 CRYPTO 片段（保留旧名供测试与阅读）。
-func sniFromQUICFrames(plain []byte) string {
-	return quicFrames("", plain)
-}
-
 // quicFrames 遍历解密后的帧，把 CRYPTO 片段交给重组器。
 //
 // 为什么必须重组：Initial 包最大 1200 字节，而一个真实的 ClientHello
 // 常见 1500 字节以上，客户端会把它切成两个 Initial 包发。只看单包，
 // CRYPTO 帧里是半截握手，长度字段对不上，永远解析不出 SNI。
-func quicFrames(cryptoKey string, plain []byte) string {
+func quicFrames(cryptoKey string, plain []byte) *ClientHelloInfo {
 	off := 0
 	for off < len(plain) {
 		frameType, n, ok := quicVarint(plain[off:])
 		if !ok {
-			return ""
+			return nil
 		}
 		off += n
 		switch frameType {
@@ -258,38 +263,38 @@ func quicFrames(cryptoKey string, plain []byte) string {
 			continue
 		case 0x02, 0x03: // ACK：跳过 largest/last/delay/count/ranges
 			if _, n, ok := quicVarint(plain[off:]); !ok {
-				return ""
+				return nil
 			} else {
 				off += n
 			}
 			if _, n, ok := quicVarint(plain[off:]); !ok {
-				return ""
+				return nil
 			} else {
 				off += n
 			}
 			if _, n, ok := quicVarint(plain[off:]); !ok {
-				return ""
+				return nil
 			} else {
 				off += n
 			}
 			cnt, n, ok := quicVarint(plain[off:])
 			if !ok {
-				return ""
+				return nil
 			}
 			off += n
 			if _, n, ok := quicVarint(plain[off:]); !ok { // first_range
-				return ""
+				return nil
 			} else {
 				off += n
 			}
 			for i := uint64(0); i < cnt && i < 64; i++ {
 				if _, n, ok := quicVarint(plain[off:]); !ok {
-					return ""
+					return nil
 				} else {
 					off += n
 				}
 				if _, n, ok := quicVarint(plain[off:]); !ok {
-					return ""
+					return nil
 				} else {
 					off += n
 				}
@@ -297,28 +302,28 @@ func quicFrames(cryptoKey string, plain []byte) string {
 		case 0x06: // CRYPTO
 			frameOff, n, ok := quicVarint(plain[off:])
 			if !ok {
-				return ""
+				return nil
 			}
 			off += n
 			length, n, ok := quicVarint(plain[off:])
 			if !ok {
-				return ""
+				return nil
 			}
 			off += n
 			if length == 0 || off+int(length) > len(plain) {
-				return ""
+				return nil
 			}
 			data := plain[off : off+int(length)]
 			off += int(length)
-			if sni := quicReassemble(cryptoKey, frameOff, data); sni != "" {
-				return sni
+			if info := quicReassemble(cryptoKey, frameOff, data); info != nil {
+				return info
 			}
 		default:
 			// 其它帧类型（如 CONNECTION_CLOSE）无法可靠跳过，直接放弃
-			return ""
+			return nil
 		}
 	}
-	return ""
+	return nil
 }
 
 // sniFromHandshake 从 TLS 握手字节流里取 ClientHello 的 SNI。
@@ -433,7 +438,7 @@ type quicStream struct {
 	chunks map[uint64][]byte // 尚未接上的片段
 	last   time.Time
 	done   bool
-	sni    string
+	info   *ClientHelloInfo // 解析成功后缓存（SNI + JA3/JA4 都在里面）
 }
 
 var (
@@ -448,10 +453,10 @@ const (
 	quicMaxHandshake = 16 << 10 // 握手前 16KB 足够覆盖 ClientHello
 )
 
-// quicReassemble 把一段 CRYPTO 数据放进该连接的重组缓冲，能解析时返回 SNI。
-func quicReassemble(key string, frameOff uint64, data []byte) string {
+// quicReassemble 把一段 CRYPTO 数据放进该连接的重组缓冲，凑齐后返回 ClientHello。
+func quicReassemble(key string, frameOff uint64, data []byte) *ClientHelloInfo {
 	if key == "" || len(data) == 0 {
-		return ""
+		return nil
 	}
 
 	quicMu.Lock()
@@ -478,14 +483,14 @@ func quicReassemble(key string, frameOff uint64, data []byte) string {
 	}
 	st.last = now
 	if st.done {
-		return st.sni
+		return st.info
 	}
 
 	// 与已有前缀重叠的部分直接丢弃，只补新字节
 	if frameOff < uint64(len(st.prefix)) {
 		skip := uint64(len(st.prefix)) - frameOff
 		if skip >= uint64(len(data)) {
-			return ""
+			return nil
 		}
 		data = data[skip:]
 		frameOff = uint64(len(st.prefix))
@@ -510,26 +515,27 @@ func quicReassemble(key string, frameOff uint64, data []byte) string {
 	if uint64(len(st.prefix)) > quicMaxHandshake {
 		st.prefix = nil
 		st.chunks = map[uint64][]byte{}
-		return ""
+		return nil
 	}
 
 	// 手上已有完整 ClientHello 才解析
 	if len(st.prefix) < 4 || st.prefix[0] != 0x01 {
-		return ""
+		return nil
 	}
 	hlen := int(st.prefix[1])<<16 | int(st.prefix[2])<<8 | int(st.prefix[3])
 	if hlen == 0 || 4+hlen > len(st.prefix) {
-		return ""
+		return nil
 	}
 
-	sni := sniFromHandshake(st.prefix[:4+hlen])
-	if sni != "" {
+	info := ParseClientHello(st.prefix[:4+hlen])
+	if info != nil {
+		info.IsQUIC = true
 		st.done = true
-		st.sni = sni
+		st.info = info
 		st.prefix = nil
 		st.chunks = map[uint64][]byte{}
 	}
-	return sni
+	return info
 }
 
 // ResetQUICStreams 清空重组状态（测试与 pcap 回放用）。
