@@ -1,0 +1,119 @@
+# REALITY / SNI 实测审计记录（2026-10-31 第二轮：路由层）
+
+承接 `reality-audit-20261031.md`。这一轮把「110 上 TCP 型出站为什么是死的」追到了路由层，
+并修掉了其中确定的一环；还剩一个未解释的差异，写清楚留给下一轮。
+
+---
+
+## 1. 先修掉一个隐蔽问题：110 上跑的不是 procd 管的那份 sing-box
+
+    ps w | grep sing-box
+      10067  sing-box run -c /tmp/or_test.json        (root, 1292 分钟)
+      14238  sing-box run -c /etc/sing-box/probe.json (root)
+      14338  sing-box run -c /etc/sing-box/config.json (root, 1357 分钟)
+
+主实例是**手工 root 启动**的，不是 `/etc/init.d/sing-box`（该脚本用 procd 且
+`procd_set_param group nogroup`）。后果：
+- `/etc/init.d/sing-box restart` 重启的是 procd 那个实例，而我们改的 config 由这条手工进程持有 → **改配置不生效**；
+- 手工实例的 Gid=0（root），与已知的「sing-box 须以 nogroup 运行」的约束不符。
+
+处置：kill 掉三条手工进程，改用 `/etc/init.d/sing-box start` 起 procd 实例，
+确认 `Gid: 65534 (nogroup)`、7890 监听、代理可用。此后改配置再重启才真正生效。
+
+## 2. 根因之一（已修）：到上游服务器的连接被自己的 TUN 抢走
+
+    ip route get 209.33.171.48
+      209.33.171.48 via 172.19.0.2 dev tun0 table 2022 src 172.19.0.1
+
+即：路由器自己去连落地服务器时，走的是 `ip rule 9001 → table 2022 → tun0`，
+等于「代理的流量又进代理」，绕回主实例再换节点出去。对照实验（在 110 上另起一个
+不带 mark 的 sing-box 实例，只配 JP 一个出站）出口 IP 却是 **103.240.198.142 (HK)**，
+直接证实了这条环路。
+
+修复：新增 `/etc/sing-box/bypass-rules.sh`，把配置里全部 19 个上游 IP 加进 main 表：
+
+    ip rule add to <ip>/32 lookup main priority 8900
+
+并在 `/etc/rc.local`（`exit 0` 之前）挂上调用。执行后：
+
+    ip rule list | grep -c 8900   → 19
+    ip route get 209.33.171.48    → via 10.100.1.1 dev br-lan src 10.100.1.110
+
+**验证**：用同一个 REALITY 出站另起实例（同样的 uuid / public_key / short_id / SNI），
+经它的 socks 访问 ipinfo：
+
+    209.33.171.48   ← 真实从日本出口
+
+说明「服务器 + 新密钥 + www.apple.com + 路由 bypass」这一整套是对的。
+
+## 3. 仍未解释的差异（留待下一轮）
+
+在 main 实例里对单节点做 Clash API 延迟测试：
+
+    OR-balmy-dingo   delay 588      ← vless + reality + vision, SNI www.cloudflare.com，正常
+    OR-my-relay      delay 372      ← 同上，正常
+    HK-TUIC          delay 266      ← QUIC，正常
+    JP-VLESS         Timeout        ← 我们自己 jp48
+    HK87-VLESS       "An error occurred in the delay test"  ← 错误类型都不同
+
+已排除：
+- 密钥/SNI/证书（18 上独立客户端与 110 上独立实例都能走通 jp48）；
+- 密钥格式（重新生成并同步过）；
+- 路由（bypass 规则生效后 route get 已指向 br-lan）；
+- 进程身份（procd + nogroup 已恢复，重启后 PID 变化、配置确已加载）；
+- 目标站可用性（把 jp48 的 target 临时换成 www.cloudflare.com 同样 Timeout，已回滚）。
+
+未排除/方向：
+- 这两个节点在本路由器的出口路径上被上游（iKuai/ISP）针对该 IP:port 做了限制——
+  但 conntrack 显示 TCP 有去有回（回包仅 48 字节），像是「TCP 通了、TLS 第一步被掐」；
+- Clash API 延迟测试对这两个 tag 的处理差异（HK87 报的是另一种错误，提示可能连上了但握手失败）；
+- 需要在两端装 tcpdump 抓包才能定论（110 与 jp48 目前都没有 tcpdump/openssl）。
+
+## 4. 当前状态（可交付）
+
+- 110 由 procd 托管，Gid=nogroup，7890/9090 正常，经代理访问 ipinfo 出口 HK 正常（未影响用户上网）。
+- 19 条 bypass 规则已持久化到 rc.local。
+- jp48 服务端：`server_name`/`handshake.server` = `www.apple.com`，密钥对已更新，服务 active。
+- 110 侧 JP-VLESS 的 `public_key`、`server_name` 已同步为新值。
+- 备份：`/etc/s-box/sb.json.bak.{sni,cf}.<ts>`、`/etc/sing-box/config.json.bak.{sni,adi}.<ts>`、
+  `/etc/rc.local.bak.<ts>`。
+
+## 5. 下一轮要做的最小闭环
+
+1. `opkg update && opkg install tcpdump`（110）；jp48 `apt install tcpdump`；
+2. 在 110 上 `tcpdump -ni br-lan host 209.33.171.48 and port 37651` 同时触发延迟测试，
+   看 ClientHello 是否发出、服务端回的是什么（48 字节到底是什么）；
+3. 若确认是上游对该 IP:port 的限制，就把 jp48 的 REALITY 换端口/换 IP，或改走 443。
+
+---
+
+## 6. 抓包结论（tcpdump，本轮新增）
+
+两端都装了 tcpdump（110: opkg，jp48: apt）。
+
+在 110 上抓 `host 209.33.171.48 and port 37651`，触发 JP-VLESS 延迟测试，看到：
+
+    10.100.1.110.42604 > 209.33.171.48.37651: S  (mss 1460)
+    209.33.171.48.37651 > 10.100.1.110.42604: S. (mss 1400, wscale 0)
+    10.100.1.110.42604 > ...: P. length 565   ← ClientHello
+    （同一 seq 反复重传 5 次，始终没有 ACK）
+
+在 jp48 上抓 `port 37651`，同一时间段内**没有出现来自本次连接的 ClientHello**；
+只有别的来源（117.141.104.196）的 SYN/SYN-ACK。
+
+对照：在 10.100.1.18 上用 `openssl s_client -connect 209.33.171.48:37651 -servername www.apple.com`
+**完整握手成功**，拿到真实 Apple 证书（CN=www.apple.com，Apple Public EV Server RSA CA 1 - G1）。
+
+⇒ 服务器与证书链没问题；问题在 **110 这条出口路径**上：SYN 能拿到一个 mss 1400 的 SYN-ACK
+（很可能是中间设备/另一条链路回的，不是 jp48 自己回的，因为 jp48 侧没看到），
+但随后的 TLS 数据到不了 jp48。
+注意 jp48 自己的 MSS 是 1460，110 收到的是 1400 —— 两者不一致，佐证回包不是同一台机器发的。
+
+## 7. 当前最终状态
+
+- 110：procd 托管、nogroup、7890/9090 正常；19 条 bypass 规则已持久化到 rc.local。
+- jp48：REALITY 用 www.apple.com（SAN 合法、支持 h2），密钥对已更新，服务 active。
+- 18 → jp48 REALITY：**完整可用**（TLS 握手 + 真实证书 + 实际出口 209.33.171.48）。
+- 110 → jp48 REALITY：仍不通，已定位到出口路径（非 sing-box 配置）。
+- 待办：在 iKuai（10.100.1.1）上核对 10.100.1.110 的分流/策略路由与 WAN 选择，
+  或在 110 上用 `ip route get` + 抓包确认这条 TCP 到底从哪个 WAN 出去、被谁回了 SYN-ACK。
