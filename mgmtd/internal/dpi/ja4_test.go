@@ -233,3 +233,55 @@ func TestLoadKnownClients(t *testing.T) {
 		t.Fatal("解析失败后不应清空已有名单")
 	}
 }
+
+// TestPcapngMatchesChrome 用 FoxIO 的 Chrome 样本校验 pcapng 解析。
+// 期望值与 python/test/testdata/browsers-x509.pcapng.json 一致。
+func TestPcapngMatchesChrome(t *testing.T) {
+	const want = "t13d1516h2_8daaf6152771_e5627efa2ab1"
+	f, err := os.Open("testdata/ja4_chrome.pcapng")
+	if err != nil {
+		t.Skip("缺 pcapng 样本")
+	}
+	defer f.Close()
+	pkts, err := ReadPcap(f)
+	if err != nil {
+		t.Fatalf("pcapng 解析失败: %v", err)
+	}
+	if len(pkts) == 0 {
+		t.Fatal("pcapng 里没解析出包")
+	}
+	got := map[string]int{}
+	for _, p := range pkts {
+		if ch := clientHelloOf(p.IP); ch != nil {
+			got[ch.JA4()]++
+		}
+	}
+	if got[want] != 3 {
+		t.Fatalf("期望 3 条 %s，实际 %v", want, got)
+	}
+	t.Logf("pcapng 包数=%d 指纹=%v", len(pkts), got)
+}
+
+// TestPcapngTruncated 截断的 pcapng 不能 panic，解析出来的部分要保留。
+func TestPcapngTruncated(t *testing.T) {
+	all, err := os.ReadFile("testdata/ja4_chrome.pcapng")
+	if err != nil {
+		t.Skip("缺 pcapng 样本")
+	}
+	// 截到一个块中间
+	cut := all[:len(all)/2]
+	pkts, err := ReadPcapng(cut)
+	if err != nil {
+		t.Fatalf("截断文件应尽量解析而不是报错: %v", err)
+	}
+	if len(pkts) == 0 {
+		t.Fatal("截断后的前半段应该有包")
+	}
+}
+
+// TestPcapngBadMagic 不是 pcapng 的数据要给出明确错误，不能静默返回空。
+func TestPcapngBadMagic(t *testing.T) {
+	if _, err := ReadPcapng([]byte("this is not a pcapng file at all")); err == nil {
+		t.Fatal("非法输入应报错")
+	}
+}

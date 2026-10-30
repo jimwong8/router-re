@@ -37,6 +37,10 @@ func ReadPcap(r io.Reader) ([]PCAPPacket, error) {
 	if err != nil {
 		return nil, err
 	}
+	// pcapng 的块类型 0x0A0D0D0A 与 pcap 的 magic 完全不同，先分流
+	if len(all) >= 4 && binary.BigEndian.Uint32(all[0:4]) == blockSHB {
+		return ReadPcapng(all)
+	}
 	if len(all) < 24 {
 		return nil, fmt.Errorf("不是有效的 pcap：文件头不足 24 字节")
 	}
@@ -56,7 +60,7 @@ func ReadPcap(r io.Reader) ([]PCAPPacket, error) {
 		if binary.BigEndian.Uint32(all[0:4]) == magicMicroLE {
 			order, nano = binary.LittleEndian, false
 		} else {
-			return nil, fmt.Errorf("不支持的 pcap 格式（magic=%08x）；pcapng 需要先转换", binary.LittleEndian.Uint32(all[0:4]))
+			return nil, fmt.Errorf("不支持的抓包格式（magic=%08x）：既不是 pcap 也不是 pcapng", binary.LittleEndian.Uint32(all[0:4]))
 		}
 	}
 

@@ -78,9 +78,9 @@
         <div class="hdr">
           <span>抓包分析</span>
           <div class="tools">
-            <input ref="pcapInput" type="file" accept=".pcap,application/vnd.tcpdump.pcap" style="display:none"
+            <input ref="pcapInput" type="file" accept=".pcap,.pcapng,application/vnd.tcpdump.pcap" style="display:none"
               @change="onPcap" />
-            <el-button size="small" :loading="analyzing" @click="analyzePcap">选择 pcap 并分析</el-button>
+            <el-button size="small" :loading="analyzing" @click="analyzePcap">选择 pcap / pcapng 并分析</el-button>
           </div>
         </div>
       </template>

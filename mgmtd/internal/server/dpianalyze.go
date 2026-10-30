@@ -38,7 +38,7 @@ func (s *Server) handleAnalyzePcap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(pkts) == 0 {
-		writeJSON(w, 422, errBody(12003, "no packets", "文件里没有可分析的 IP 包（只支持 pcap，pcapng 请先转换）"))
+		writeJSON(w, 422, errBody(12003, "no packets", "文件里没有可分析的 IP 包（支持 pcap / pcapng）"))
 		return
 	}
 
