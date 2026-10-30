@@ -164,3 +164,39 @@ func TestParseBadInput(t *testing.T) {
 }
 
 var _ = strings.TrimSpace
+
+// TestParseStatusFileFormat 用 openvpn --status 写出的真实文件内容。
+//
+// 这条用例的存在意义：此前的用例全是 management 接口格式（每行带 >CLIENT_LIST 前缀），
+// 解析器在真实 status.log 上返回 0 个客户端而单测全绿。样本逐字取自
+// 10.100.1.18 上实际运行的一份 status.log，不要"美化"它。
+func TestParseStatusFileFormat(t *testing.T) {
+	raw := `OpenVPN CLIENT LIST
+Updated,2026-10-30 23:05:23
+Common Name,Real Address,Bytes Received,Bytes Sent,Connected Since
+alice,172.30.99.2:54089,5059,7748,2026-10-30 23:04:39
+ROUTING TABLE
+Virtual Address,Common Name,Real Address,Last Ref
+10.8.0.2,alice,172.30.99.2:54089,2026-10-30 23:05:11
+GLOBAL STATS
+Max bcast/mcast queue length,1
+END
+`
+	st := ParseClientList(raw)
+	if len(st.Clients) != 1 {
+		t.Fatalf("客户端数 = %d, 期望 1", len(st.Clients))
+	}
+	c := st.Clients[0]
+	if c.CommonName != "alice" {
+		t.Errorf("CN = %q", c.CommonName)
+	}
+	if c.VirtualAddress != "10.8.0.2" {
+		t.Errorf("虚拟地址 = %q, 期望 10.8.0.2（来自 ROUTING TABLE 段）", c.VirtualAddress)
+	}
+	if c.BytesReceived != 5059 || c.BytesSent != 7748 {
+		t.Errorf("流量 = %d/%d, 期望 5059/7748", c.BytesReceived, c.BytesSent)
+	}
+	if c.RealAddress != "172.30.99.2:54089" {
+		t.Errorf("真实地址 = %q", c.RealAddress)
+	}
+}

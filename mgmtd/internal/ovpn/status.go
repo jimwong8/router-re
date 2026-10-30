@@ -37,6 +37,13 @@ type Status struct {
 func ParseClientList(text string) Status {
 	st := Status{Clients: []Client{}}
 	var clientHeader, routingHeader []string
+	// section 记录「当前处在 status.log 的哪一段」。
+	//
+	// 为什么需要它：management 接口的输出每行都带前缀（>CLIENT_LIST,...），
+	// 但 openvpn 用 --status 写出来的文件是「一行表头 + 若干纯数据行」，
+	// 数据行没有任何前缀。只认前缀的解析器在真实 status.log 上会返回 0 个客户端——
+	// 单测用 management 样例全绿，一接真实文件就空。
+	section := ""
 	routingByCN := map[string]string{}
 	routingByReal := map[string]string{}
 
@@ -51,6 +58,21 @@ func ParseClientList(text string) Status {
 		}
 		first := strings.ToUpper(strings.TrimSpace(fields[0]))
 
+		// Bare header variant: a line whose first field names a known column
+		// (e.g. "Common Name,Real Address,...") without a HEADER prefix.
+		if first != "HEADER" && first != "CLIENT_LIST" && first != "ROUTING_TABLE" &&
+			first != "TIME" && first != "STATUS" && first != "END" && !strings.HasPrefix(first, "TOTAL") {
+			if clientHeader == nil && looksLikeClientHeader(fields) {
+				clientHeader = trimFields(fields)
+				section = "client"
+				continue
+			}
+			if routingHeader == nil && looksLikeRoutingHeader(fields) {
+				routingHeader = trimFields(fields)
+				section = "routing"
+				continue
+			}
+		}
 		if first == "HEADER" {
 			if len(fields) >= 3 {
 				sec := strings.ToUpper(strings.TrimSpace(fields[1]))
@@ -61,6 +83,11 @@ func ParseClientList(text string) Status {
 					routingHeader = names
 				}
 			}
+			continue
+		}
+
+		if first == "END" || strings.HasPrefix(first, "GLOBAL") {
+			section = ""
 			continue
 		}
 
@@ -101,6 +128,35 @@ func ParseClientList(text string) Status {
 			}
 			continue
 		}
+
+		// 走到这里说明这一行既不是关键字也不是表头：若某个段落已开启，它就是该段的裸数据行。
+		if section == "client" && len(trimFields(fields)) >= 5 {
+			hdr := clientHeader
+			if hdr == nil {
+				hdr = defaultClientHeader(len(trimFields(fields)))
+			}
+			st.Clients = append(st.Clients, parseClientRow(hdr, trimFields(fields)))
+			continue
+		}
+		if section == "routing" && len(trimFields(fields)) >= 3 {
+			hdr := routingHeader
+			if hdr == nil {
+				hdr = defaultRoutingHeader(len(trimFields(fields)))
+			}
+			data := trimFields(fields)
+			va := fieldByName(hdr, data, "virtual")
+			cn := fieldByName(hdr, data, "common")
+			ra := fieldByName(hdr, data, "real")
+			if va != "" {
+				if cn != "" {
+					routingByCN[cn] = va
+				}
+				if ra != "" {
+					routingByReal[ra] = va
+				}
+			}
+			continue
+		}
 	}
 
 	// Merge virtual addresses from the routing table into clients that did
@@ -114,6 +170,17 @@ func ParseClientList(text string) Status {
 		} else if va, ok := routingByReal[st.Clients[i].RealAddress]; ok {
 			st.Clients[i].VirtualAddress = va
 		}
+	}
+	// Merge cumulative traffic / uptime from the STATUS section when present.
+	ps := ParseStatus(text)
+	if st.TotalBytesIn == 0 {
+		st.TotalBytesIn = ps.TotalBytesIn
+	}
+	if st.TotalBytesOut == 0 {
+		st.TotalBytesOut = ps.TotalBytesOut
+	}
+	if st.UpSince == "" {
+		st.UpSince = ps.UpSince
 	}
 	return st
 }
@@ -392,6 +459,32 @@ func numberAfterKeyword(s, kw string) (int64, bool) {
 
 func isAlnum(r rune) bool {
 	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_'
+}
+
+func looksLikeClientHeader(fields []string) bool {
+	if len(fields) < 2 {
+		return false
+	}
+	joined := strings.ToLower(strings.Join(fields, ","))
+	// Must look like a header row: contains column-ish words.
+	if !(strings.Contains(joined, "address") || strings.Contains(joined, "bytes") || strings.Contains(joined, "virtual") || strings.Contains(joined, "common")) {
+		return false
+	}
+	lower := strings.ToLower(strings.TrimSpace(fields[0]))
+	return strings.Contains(lower, "common") || strings.Contains(lower, "name") || strings.Contains(lower, "client")
+}
+
+func looksLikeRoutingHeader(fields []string) bool {
+	if len(fields) < 2 {
+		return false
+	}
+	joined := strings.ToLower(strings.Join(fields, ","))
+	// 不能要求出现 "routing" 这个词：--status 写出的文件里，这张表只有
+	// "Virtual Address,Common Name,Real Address,Last Ref" 这一行表头，
+	// 里面根本没有 routing 字样（management 接口才带 ROUTING_TABLE 前缀）。
+	// 靠 virtual + (real|common|last) 认表，client 表没有 virtual 列，不会误判。
+	return strings.Contains(joined, "virtual") &&
+		(strings.Contains(joined, "real") || strings.Contains(joined, "common") || strings.Contains(joined, "last"))
 }
 
 func fieldByName(hdr, data []string, key string) string {
