@@ -156,3 +156,50 @@
 
 遗留：HK87-VLESS 换成 IPv6 后仍报 "An error occurred in the delay test"（能连上、握手失败），
 说明 hk87 侧 REALITY 的 short_id / 公钥与该 tag 不一致，需要在 hk87 上核对（其 SSH 22 目前从外部超时）。
+
+---
+
+## 9. HK87 修通（第二轮）
+
+通过 IPv6 SSH 进到 hk87（`ssh -6 root@2001:df1:7880:2::25e`，公网 IPv4 22 端口不通、IPv6 22 通），
+读到 `/etc/s-box/sb.json` 里 30746 的 REALITY 入站：
+
+    uuid       5f517335-e3e2-49b6-bb17-3a3dbe065cc2   （与 110 一致）
+    short_id   d5d1dcc7                                （与 110 一致）
+    server_name apple.com                              ← 110 客户端发的是 www.apple.com
+    private_key 6HRGQ4gc67Ykll_RCxGnUNZn4BaW8LggBbG5tdEY90A
+
+用 X25519 由私钥推导公钥，结果等于 110 侧配置的 `Hu0maD0kGc9VhlISsAnsqP_W9DI_aj9bmlHUR6k23WU`
+→ **密钥是对的**，问题只出在 server_name：REALITY 要求客户端 SNI 落在服务端 serverNames 内，
+`apple.com ≠ www.apple.com`，所以握手被拒（表现为 "An error occurred in the delay test"）。
+
+处置：hk87 的 `server_name` / `handshake.server` 改为 `www.apple.com`（与 jp48 一致），
+`sing-box check` 通过、`systemctl restart sing-box` active，备份 `sb.json.bak.sni.<ts>`。
+
+（过程中一次 sed 把两处 private_key 一起改写，`sing-box check` 报
+`decode private key: illegal base64 data`，已立刻用备份 `sb.json.bak.1793385763` 还原并复核，
+没有把坏配置留在线上。）
+
+验证（110 Clash API 延迟测试，真实 HTTP 经由节点）：
+
+    JP-VLESS      228 ms     HK87-VLESS    446 ms（首次 1224 ms，之后稳定）
+    HK87-ANYTLS   140 ms     JP-HY2        164 ms     HK-TUIC  261 ms
+    OR-my-relay   260 ms
+    GLAXY-HK      仍 Timeout —— 其服务器 156.224.78.107:26991 的 IPv4 TLS 直接不通（第三方节点，改不了）
+    OR-balmy-dingo 偶发 "error in delay test"，但 IPv4 TLS 0.47s 正常 → 上游侧问题，非链路
+
+## 10. 全量 server_name 体检
+
+110 现在所有真实 TLS 出口的 SNI 都合法（取自目标证书 SAN，且目标支持 h2）：
+
+    www.cloudflare.com ×14   www.bing.com ×9   www.apple.com ×4
+
+不再有裸 `apple.com`（该名字既不在 SAN 内、也不提供 h2，实测 alert 120）。
+
+## 11. 结论（可复用）
+
+1. 这类「TCP 能连上、TLS 一开始就断」的故障，先做 IPv4/IPv6 对照，一步就能定性：
+   两个落地 IP 的 IPv4 全部 tls=0，IPv6 0.08~0.19s 正常 → 目的地址级 IPv4 封锁。
+2. REALITY 排错顺序：`uuid/short_id` → `public_key`（可用 X25519 从私钥推导核对）→ `server_name`
+   是否在服务端 serverNames 内、且该名字在目标证书 SAN 里、且目标支持 h2。
+3. 有 IPv6 的落地优先用 IPv6 做 REALITY 入口，绕开 IPv4 侧封锁，且不用改路由器分流。
