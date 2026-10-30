@@ -215,7 +215,7 @@
     不改：JP-HY2 / JP-HY2-443 / JP-TUIC（UDP）
     备份：/etc/sing-box/config.json.bak.v6all.<ts>
 
-`s ing-box check` 通过、restart 后全部实测（Clash API，真实 HTTP 经节点）：
+`sing-box check` 通过、restart 后全部实测（Clash API，真实 HTTP 经节点）：
 
     JP-VMWS 226   JP-ANYTLS 240   HK87-ANYTLS 584   JP-ANYTLS-443 239
     JP-VMWS-TLS 223   JP-VMWS-80 220   JP-VLESS 245   HK87-VLESS 180
