@@ -1,11 +1,14 @@
 package server
 
 import (
+	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jimwong/router-re/mgmtd/internal/execx"
 	"github.com/jimwong/router-re/mgmtd/internal/ovpn"
@@ -41,6 +44,80 @@ func writeFileSafe(path, content string) error {
 		return err
 	}
 	return os.WriteFile(path, []byte(content), 0o600)
+}
+
+// ensureOpenVPNPKI 保证 server.conf 引用的四份文件真实存在。
+//
+// 之前没有任何代码负责生成它们：conf 里写着 rr-ca.crt / rr-server.crt /
+// rr-server.key / rr-tls-crypt.key，实际一个都没有，openvpn 起来就
+// "Cannot pre-load keyfile ... Exiting due to fatal error" —— 而接口只回
+// applied=false + 一段 systemctl 文本，看不出真正原因。
+// 这里在渲染配置前用 ovpn.LoadOrCreate 生成 CA 与服务端证书（已存在则复用），
+// tls-crypt 用一份本地随机静态密钥，写完再渲染。
+func ensureOpenVPNPKI() error {
+	const dir = "/etc/openvpn/server"
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	ca, err := ovpn.LoadOrCreate(dir + "/pki")
+	if err != nil {
+		return err
+	}
+	cert, key, err := ca.IssueServer("vpn-server", nil, []string{"10.8.0.1"})
+	if err != nil {
+		return err
+	}
+	files := map[string]struct {
+		data []byte
+		mode os.FileMode
+	}{
+		dir + "/rr-ca.crt":     {ca.CACertPEM(), 0o644},
+		dir + "/rr-server.crt": {cert, 0o644},
+		dir + "/rr-server.key": {key, 0o600},
+	}
+	for name, f := range files {
+		// 已存在就不覆盖：换了服务端证书，已签发的客户端会全部失联
+		if _, statErr := os.Stat(name); statErr == nil {
+			continue
+		}
+		if err := os.WriteFile(name, f.data, f.mode); err != nil {
+			return err
+		}
+	}
+	tc := dir + "/rr-tls-crypt.key"
+	if _, statErr := os.Stat(tc); statErr != nil {
+		buf := make([]byte, 256)
+		if _, err := rand.Read(buf); err != nil {
+			return err
+		}
+		var sb strings.Builder
+		sb.WriteString("-----BEGIN OpenVPN Static key V1-----\n")
+		for i := 0; i < len(buf); i += 16 {
+			fmt.Fprintf(&sb, "%x\n", buf[i:i+16])
+		}
+		sb.WriteString("-----END OpenVPN Static key V1-----\n")
+		if err := os.WriteFile(tc, []byte(sb.String()), 0o600); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// openvpnStartError 把 systemd 的 is-active 结果翻成一句能看懂的话，
+// 并补上日志里最关键的一行（例如 tun 打不开、证书读不到）。
+func openvpnStartError(r execx.Runner, state string) string {
+	msg := "openvpn 服务状态为 " + state + "，未能启动"
+	if out, err := r.Run("journalctl", "-u", "openvpn-server@router-re", "-n", "20", "--no-pager"); err == nil {
+		for _, line := range strings.Split(out, "\n") {
+			l := strings.ToLower(line)
+			if strings.Contains(l, "cannot open tun") || strings.Contains(l, "cannot pre-load keyfile") ||
+				strings.Contains(l, "error:") || strings.Contains(l, "fatal") {
+				msg += "；" + strings.TrimSpace(line)
+				break
+			}
+		}
+	}
+	return msg
 }
 
 func runCommands(r execx.Runner, cmds [][]string) (bool, string) {
@@ -274,12 +351,32 @@ func (s *Server) handleSetOpenVPN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	runner := execx.DefaultRunner{}
+	// 证书与 tls-crypt 必须先生成，否则写出来的 conf 引用了不存在的文件
+	if err := ensureOpenVPNPKI(); err != nil {
+		writeJSON(w, 500, errBody(11015, "openvpn pki init failed", err.Error()))
+		return
+	}
 	conf := vpn.RenderOpenVPNServerConf(cfg)
 	if err := writeFileSafe(openvpnConfPath, conf); err != nil {
 		writeJSON(w, 500, errBody(11014, "write openvpn conf failed", err.Error()))
 		return
 	}
 	ok, detail := runCommands(runner, vpn.RenderOpenVPNCommands(cfg.Enabled))
+	// systemctl restart 返回 0 只代表"提交了重启"，进程秒退时它一样返回 0。
+	// 必须回读服务状态，否则接口会把崩溃循环报成 applied=true —— 这是这类
+	// 功能最常见的假成功。等最多 3 秒让 systemd 把状态落定。
+	if cfg.Enabled && ok {
+		for i := 0; i < 6; i++ {
+			if serviceActive(runner, "openvpn-server@router-re") == "active" {
+				break
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		if st := serviceActive(runner, "openvpn-server@router-re"); st != "active" {
+			ok = false
+			detail = openvpnStartError(runner, st)
+		}
+	}
 	if b, err := json.Marshal(cfg); err == nil {
 		_ = s.store.Set("vpn", "openvpn", string(b))
 	}
