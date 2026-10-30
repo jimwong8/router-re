@@ -8,9 +8,11 @@ import (
 )
 
 // 三个"全量替换"端点曾对空数组一律返回 200 并清空配置：
-//   POST /api/v1/alerts/rules     {rules:[]}   -> 清空所有告警规则
-//   POST /api/v1/l7/rules         {rules:[]}   -> 清空所有 L7 规则
-//   POST /api/v1/routing/tables   {tables:[]}  -> 清空所有策略路由表
+//
+//	POST /api/v1/alerts/rules     {rules:[]}   -> 清空所有告警规则
+//	POST /api/v1/l7/rules         {rules:[]}   -> 清空所有 L7 规则
+//	POST /api/v1/routing/tables   {tables:[]}  -> 清空所有策略路由表
+//
 // 任何客户端误发空 body 就会静默清空，且返回成功。
 // 现在要求显式 confirm:true，与 timeschedule 的做法对齐。
 func TestEmptyArrayRequiresConfirm(t *testing.T) {

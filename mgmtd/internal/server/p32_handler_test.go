@@ -2,9 +2,9 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -20,7 +20,9 @@ func getAdminToken(t *testing.T, s *Server) string {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("login failed for token: %d %s", rr.Code, rr.Body.String())
 	}
-	var resp struct{ Token string `json:"token"` }
+	var resp struct {
+		Token string `json:"token"`
+	}
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}

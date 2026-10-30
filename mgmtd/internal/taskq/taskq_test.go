@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 )
@@ -169,3 +170,65 @@ func TestPersistence(t *testing.T) {
 }
 
 var _ = time.Second
+
+func TestPersistenceAtomicNoTempLeftover(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/tasks.json"
+	q := New(path, 2, 10)
+	q.Register("echo", func(ctx context.Context, params json.RawMessage, progress func(int)) (any, error) {
+		return params, nil
+	})
+	if _, err := q.Submit("echo", json.RawMessage(`{"x":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(150 * time.Millisecond)
+	// 原子写：不该留下 .tmp 残file
+	if _, err := os.Stat(path + ".tmp"); err == nil {
+		t.Fatal("原子写不应留下 .tmp 文件")
+	}
+	// 落盘内容必须是完整 JSON
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("持久化文件缺失: %v", err)
+	}
+	var tasks []map[string]any
+	if err := json.Unmarshal(data, &tasks); err != nil {
+		t.Fatalf("持久化文件不是完整 JSON（可能被截断）: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("应有 1 个任务，实际 %d", len(tasks))
+	}
+}
+
+func TestCorruptStoreNotOverwritten(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/tasks.json"
+	bad := []byte(`[{"id":"task-1","type":"echo"`) // 截断的 JSON
+	if err := os.WriteFile(path, bad, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	q := New(path, 2, 10)
+	q.Register("echo", func(ctx context.Context, params json.RawMessage, progress func(int)) (any, error) {
+		return nil, nil
+	})
+	// 解析失败：列表为空，这是可以接受的降级
+	if _, total := q.List("", "", 0, 10); total != 0 {
+		t.Fatalf("损坏文件应表现为空队列，实际 %d", total)
+	}
+	// 但绝不能用空队列覆盖原文件
+	if _, err := q.Submit("echo", json.RawMessage(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(150 * time.Millisecond)
+	now, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(now) != string(bad) {
+		t.Fatalf("损坏的持久化文件被覆盖了（数据丢失）：%s", string(now))
+	}
+	// 应保留一份 .corrupt 供人工恢复
+	if _, err := os.Stat(path + ".corrupt"); err != nil {
+		t.Fatalf("应备份 .corrupt: %v", err)
+	}
+}

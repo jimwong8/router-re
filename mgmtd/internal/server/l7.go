@@ -54,8 +54,8 @@ func (s *Server) handleGetL7Rules(w http.ResponseWriter, r *http.Request) {
 // handleSetL7Rules validates, persists and renders the rule set.
 func (s *Server) handleSetL7Rules(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Rules []l7filter.Rule `json:"rules"`
-		Confirm bool `json:"confirm"`
+		Rules   []l7filter.Rule `json:"rules"`
+		Confirm bool            `json:"confirm"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, 400, errBody(10150, "invalid body", err.Error()))

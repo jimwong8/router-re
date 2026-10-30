@@ -126,10 +126,10 @@ func TestCaptureValidation(t *testing.T) {
 	token := resp.Token
 
 	testCases := []struct {
-		name       string
-		body       string
-		wantCode   int
-		wantError  float64
+		name      string
+		body      string
+		wantCode  int
+		wantError float64
 	}{
 		{
 			name:      "invalid json",

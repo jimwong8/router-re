@@ -127,10 +127,10 @@ func TestSubnetCalcEndpoint(t *testing.T) {
 	token := resp.Token
 
 	testCases := []struct {
-		name       string
-		cidr       string
-		wantCode   int
-		check      func(t *testing.T, body map[string]interface{})
+		name     string
+		cidr     string
+		wantCode int
+		check    func(t *testing.T, body map[string]interface{})
 	}{
 		{
 			name:     "missing cidr",

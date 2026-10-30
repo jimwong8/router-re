@@ -67,12 +67,17 @@ func tunUsable() bool {
 // applied=false + 一段 systemctl 文本，看不出真正原因。
 // 这里在渲染配置前用 ovpn.LoadOrCreate 生成 CA 与服务端证书（已存在则复用），
 // tls-crypt 用一份本地随机静态密钥，写完再渲染。
+const openvpnPKIDir = "/var/lib/router-re/ovpn/pki"
+
 func ensureOpenVPNPKI() error {
 	const dir = "/etc/openvpn/server"
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	ca, err := ovpn.LoadOrCreate(dir + "/pki")
+	// 必须与 handleOpenVPNClientConf 用同一个 CA 目录，否则客户端证书由 A 签发、
+	// 服务端只信任 B，握手永远失败（表现为 TLS object -> incoming plaintext read error
+	// 或 certificate verify failed），而且两边的 tls-crypt 也可能来自不同文件。
+	ca, err := ovpn.LoadOrCreate(openvpnPKIDir)
 	if err != nil {
 		return err
 	}
@@ -88,11 +93,8 @@ func ensureOpenVPNPKI() error {
 		dir + "/rr-server.crt": {cert, 0o644},
 		dir + "/rr-server.key": {key, 0o600},
 	}
+	// CA 文件永远与 openvpnPKIDir 保持一致；服务端证书每次重签（CA 不变，客户端不受影响）。
 	for name, f := range files {
-		// 已存在就不覆盖：换了服务端证书，已签发的客户端会全部失联
-		if _, statErr := os.Stat(name); statErr == nil {
-			continue
-		}
 		if err := os.WriteFile(name, f.data, f.mode); err != nil {
 			return err
 		}
@@ -432,7 +434,7 @@ func (s *Server) handleOpenVPNClientConf(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, 422, errBody(11017, "invalid client name", err.Error()))
 		return
 	}
-	ca, err := ovpn.LoadOrCreate("/var/lib/router-re/ovpn/pki")
+	ca, err := ovpn.LoadOrCreate(openvpnPKIDir)
 	if err != nil {
 		writeJSON(w, 500, errBody(11018, "pki unavailable", err.Error()))
 		return
@@ -477,9 +479,15 @@ func dirWritable(dir string) bool {
 func (s *Server) handleGetOpenVPNStatus(w http.ResponseWriter, r *http.Request) {
 	text := r.URL.Query().Get("text")
 	if strings.TrimSpace(text) == "" {
-		out, err := execx.DefaultRunner{}.Run("cat", "/var/log/openvpn/status.log")
-		if err == nil {
-			text = out
+		// 渲染出的 server.conf 里 status 指令指向 rr-status.log，
+		// 这里必须读同一个文件；早期版本读 status.log，永远返回 0 个客户端。
+		candidates := []string{"/var/log/openvpn/rr-status.log", "/var/log/openvpn/status.log"}
+		for _, f := range candidates {
+			out, err := execx.DefaultRunner{}.Run("cat", f)
+			if err == nil && strings.TrimSpace(out) != "" {
+				text = out
+				break
+			}
 		}
 	}
 	// ParseClientList 直接返回汇总 Status（客户端列表 + 累计流量 + 在线起始时间）

@@ -129,6 +129,12 @@ import { ref, computed, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import api from '../api';
 
+// 统一错误提示：后端 422 会带具体校验原因（例如"MTU 必须 1000-1492"），
+// 直接弹 message 比只弹 "Request failed" 有用得多
+function showError(e: any) {
+  ElMessage.error(e?.response?.data?.message || e?.message || '请求失败');
+}
+
 // Field names mirror the backend JSON (snake_case) to avoid a mapping layer.
 interface LimitRow {
   interface: string;

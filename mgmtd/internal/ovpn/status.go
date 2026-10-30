@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Client is one connected OpenVPN peer as reported by the management interface.
@@ -30,163 +31,27 @@ type Status struct {
 	TotalBytesOut int64    `json:"total_bytes_out"`
 }
 
-// ParseClientList parses the CLIENT_LIST (+ ROUTING_TABLE) sections of
-// OpenVPN management output into a Status. Field names are taken from the
-// HEADER rows when present; variants without headers fall back to the
-// conventional positional order. Bad/truncated lines are skipped.
-func ParseClientList(text string) Status {
-	st := Status{Clients: []Client{}}
-	var clientHeader, routingHeader []string
-	// section 记录「当前处在 status.log 的哪一段」。
-	//
-	// 为什么需要它：management 接口的输出每行都带前缀（>CLIENT_LIST,...），
-	// 但 openvpn 用 --status 写出来的文件是「一行表头 + 若干纯数据行」，
-	// 数据行没有任何前缀。只认前缀的解析器在真实 status.log 上会返回 0 个客户端——
-	// 单测用 management 样例全绿，一接真实文件就空。
-	section := ""
-	routingByCN := map[string]string{}
-	routingByReal := map[string]string{}
-
-	for _, raw := range strings.Split(text, "\n") {
-		line := normLine(raw)
-		if line == "" {
-			continue
-		}
-		fields := splitCSV(line)
-		if len(fields) == 0 {
-			continue
-		}
-		first := strings.ToUpper(strings.TrimSpace(fields[0]))
-
-		// Bare header variant: a line whose first field names a known column
-		// (e.g. "Common Name,Real Address,...") without a HEADER prefix.
-		if first != "HEADER" && first != "CLIENT_LIST" && first != "ROUTING_TABLE" &&
-			first != "TIME" && first != "STATUS" && first != "END" && !strings.HasPrefix(first, "TOTAL") {
-			if clientHeader == nil && looksLikeClientHeader(fields) {
-				clientHeader = trimFields(fields)
-				section = "client"
-				continue
-			}
-			if routingHeader == nil && looksLikeRoutingHeader(fields) {
-				routingHeader = trimFields(fields)
-				section = "routing"
-				continue
-			}
-		}
-		if first == "HEADER" {
-			if len(fields) >= 3 {
-				sec := strings.ToUpper(strings.TrimSpace(fields[1]))
-				names := trimFields(fields[2:])
-				if sec == "CLIENT_LIST" {
-					clientHeader = names
-				} else if sec == "ROUTING_TABLE" {
-					routingHeader = names
-				}
-			}
-			continue
-		}
-
-		if first == "END" || strings.HasPrefix(first, "GLOBAL") {
-			section = ""
-			continue
-		}
-
-		if first == "TIME" {
-			if len(fields) >= 2 && st.UpSince == "" {
-				st.UpSince = strings.TrimSpace(fields[1])
-			}
-			continue
-		}
-
-		if first == "CLIENT_LIST" {
-			data := trimFields(fields[1:])
-			hdr := clientHeader
-			if hdr == nil {
-				hdr = defaultClientHeader(len(data))
-			}
-			c := parseClientRow(hdr, data)
-			st.Clients = append(st.Clients, c)
-			continue
-		}
-
-		if first == "ROUTING_TABLE" {
-			data := trimFields(fields[1:])
-			hdr := routingHeader
-			if hdr == nil {
-				hdr = defaultRoutingHeader(len(data))
-			}
-			va := fieldByName(hdr, data, "virtual")
-			cn := fieldByName(hdr, data, "common")
-			ra := fieldByName(hdr, data, "real")
-			if va != "" {
-				if cn != "" {
-					routingByCN[cn] = va
-				}
-				if ra != "" {
-					routingByReal[ra] = va
-				}
-			}
-			continue
-		}
-
-		// 走到这里说明这一行既不是关键字也不是表头：若某个段落已开启，它就是该段的裸数据行。
-		if section == "client" && len(trimFields(fields)) >= 5 {
-			hdr := clientHeader
-			if hdr == nil {
-				hdr = defaultClientHeader(len(trimFields(fields)))
-			}
-			st.Clients = append(st.Clients, parseClientRow(hdr, trimFields(fields)))
-			continue
-		}
-		if section == "routing" && len(trimFields(fields)) >= 3 {
-			hdr := routingHeader
-			if hdr == nil {
-				hdr = defaultRoutingHeader(len(trimFields(fields)))
-			}
-			data := trimFields(fields)
-			va := fieldByName(hdr, data, "virtual")
-			cn := fieldByName(hdr, data, "common")
-			ra := fieldByName(hdr, data, "real")
-			if va != "" {
-				if cn != "" {
-					routingByCN[cn] = va
-				}
-				if ra != "" {
-					routingByReal[ra] = va
-				}
-			}
-			continue
-		}
-	}
-
-	// Merge virtual addresses from the routing table into clients that did
-	// not already carry one (header-less or non-standard client rows).
-	for i := range st.Clients {
-		if st.Clients[i].VirtualAddress != "" {
-			continue
-		}
-		if va, ok := routingByCN[st.Clients[i].CommonName]; ok {
-			st.Clients[i].VirtualAddress = va
-		} else if va, ok := routingByReal[st.Clients[i].RealAddress]; ok {
-			st.Clients[i].VirtualAddress = va
-		}
-	}
-	// Merge cumulative traffic / uptime from the STATUS section when present.
-	ps := ParseStatus(text)
-	if st.TotalBytesIn == 0 {
-		st.TotalBytesIn = ps.TotalBytesIn
-	}
-	if st.TotalBytesOut == 0 {
-		st.TotalBytesOut = ps.TotalBytesOut
-	}
-	if st.UpSince == "" {
-		st.UpSince = ps.UpSince
-	}
-	return st
-}
-
 // ParseStatus parses the ">STATUS" section, extracting cumulative traffic
 // from TOTAL lines. Bad input is skipped without panicking.
+// humanTime 把 status 版本 3 的 unix 时间戳转成可读时间。
+// 真实文件里 Connected Since 是秒级时间戳（如 1793374725），直接显示就是一个看不懂的大数字。
+func humanTime(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return ""
+	}
+	for _, r := range v {
+		if r < 0x30 || r > 0x39 {
+			return v
+		}
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n <= 0 {
+		return v
+	}
+	return time.Unix(n, 0).Format("2006-01-02 15:04:05")
+}
+
 func ParseStatus(text string) Status {
 	st := Status{Clients: []Client{}}
 	for _, raw := range strings.Split(text, "\n") {
@@ -410,7 +275,7 @@ func parseClientRow(hdr, data []string) Client {
 			// avoid matching "received" already handled above; "sent" distinct
 			c.BytesSent = atoi(val)
 		case strings.Contains(lower, "connect"):
-			c.ConnectedSince = val
+			c.ConnectedSince = humanTime(val)
 		}
 	}
 	// received is handled before sent by switch order.
@@ -459,32 +324,6 @@ func numberAfterKeyword(s, kw string) (int64, bool) {
 
 func isAlnum(r rune) bool {
 	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_'
-}
-
-func looksLikeClientHeader(fields []string) bool {
-	if len(fields) < 2 {
-		return false
-	}
-	joined := strings.ToLower(strings.Join(fields, ","))
-	// Must look like a header row: contains column-ish words.
-	if !(strings.Contains(joined, "address") || strings.Contains(joined, "bytes") || strings.Contains(joined, "virtual") || strings.Contains(joined, "common")) {
-		return false
-	}
-	lower := strings.ToLower(strings.TrimSpace(fields[0]))
-	return strings.Contains(lower, "common") || strings.Contains(lower, "name") || strings.Contains(lower, "client")
-}
-
-func looksLikeRoutingHeader(fields []string) bool {
-	if len(fields) < 2 {
-		return false
-	}
-	joined := strings.ToLower(strings.Join(fields, ","))
-	// 不能要求出现 "routing" 这个词：--status 写出的文件里，这张表只有
-	// "Virtual Address,Common Name,Real Address,Last Ref" 这一行表头，
-	// 里面根本没有 routing 字样（management 接口才带 ROUTING_TABLE 前缀）。
-	// 靠 virtual + (real|common|last) 认表，client 表没有 virtual 列，不会误判。
-	return strings.Contains(joined, "virtual") &&
-		(strings.Contains(joined, "real") || strings.Contains(joined, "common") || strings.Contains(joined, "last"))
 }
 
 func fieldByName(hdr, data []string, key string) string {

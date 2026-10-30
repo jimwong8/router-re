@@ -59,8 +59,8 @@ func (s *Server) handlePortalLogout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, 200, map[string]interface{}{
-		"revoked": revoked,
-		"online":  len(remaining) > 0,
+		"revoked":      revoked,
+		"online":       len(remaining) > 0,
 		"online_count": len(remaining),
 	})
 }

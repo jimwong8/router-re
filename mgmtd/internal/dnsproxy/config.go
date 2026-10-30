@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"strconv"
 
 	"github.com/jimwong/router-re/mgmtd/internal/execx"
 )
@@ -15,6 +16,11 @@ import (
 type Upstream struct {
 	Address string `json:"address"`
 	Port    int    `json:"port"`
+	// Source is the source IP address to use when querying this upstream.
+	// When set, dnsmasq uses `server=upstream@source` syntax,
+	// useful for multi-WAN setups where different WAN lines
+	// should use different source IPs for DNS queries.
+	Source string `json:"source"`
 }
 
 // HostEntry maps one IP to one or more names for local resolution.
@@ -102,7 +108,16 @@ func RenderDnsmasq(c Config) string {
 	}
 	b.WriteString(pfx + "no-resolv\n")
 	for _, u := range c.Upstreams {
-		fmt.Fprintf(&b, "%sserver=%s#%d\n", pfx, strings.TrimSpace(u.Address), UpstreamPort(u.Port))
+		server := strings.TrimSpace(u.Address)
+		if u.Port != 0 {
+			server += "#" + strconv.Itoa(UpstreamPort(u.Port))
+		} else {
+			server += "#53"
+		}
+		if u.Source != "" {
+			server += "@" + u.Source
+		}
+		fmt.Fprintf(&b, "%sserver=%s\n", pfx, server)
 	}
 	fmt.Fprintf(&b, "%scache-size=%d\n", pfx, c.CacheSize)
 	if c.DomainNeeded {

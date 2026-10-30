@@ -53,6 +53,21 @@ import Voucher from '../views/Voucher.vue';
 import Ddns from '../views/Ddns.vue';
 import Quota from '../views/Quota.vue';
 
+import DnsMultiLine from '../views/DnsMultiLine.vue';
+import DomainRoute from '../views/DomainRoute.vue';
+import Behavior from '../views/Behavior.vue';
+import VpnServers from '../views/VpnServers.vue';
+import Storage from '../views/Storage.vue';
+import Files from '../views/Files.vue';
+import Sysctl from '../views/Sysctl.vue';
+import FileServices from '../views/FileServices.vue';
+import LogCategories from '../views/LogCategories.vue';
+import Plugins from '../views/Plugins.vue';
+import VMs from '../views/VMs.vue';
+import L3Apps from '../views/L3Apps.vue';
+import Groups from '../views/Groups.vue';
+import AppIdent from '../views/AppIdent.vue';
+
 const routes = [
   { path: '/', component: Dashboard, meta: { requiresAuth: true } },
   { path: '/multi-wan', component: MultiWan, meta: { requiresAuth: true } },
@@ -108,6 +123,21 @@ const routes = [
   { path: '/voucher', component: Voucher, meta: { requiresAuth: true } },
   { path: '/ddns', component: Ddns, meta: { requiresAuth: true } },
   { path: '/quota', component: Quota, meta: { requiresAuth: true } },
+  { path: '/objects', redirect: '/groups' },
+  { path: '/dns-multiline', component: DnsMultiLine, meta: { requiresAuth: true } },
+  { path: '/domain-route', component: DomainRoute, meta: { requiresAuth: true } },
+  { path: '/behavior', component: Behavior, meta: { requiresAuth: true } },
+  { path: '/vpn-servers', component: VpnServers, meta: { requiresAuth: true } },
+  { path: '/storage', component: Storage, meta: { requiresAuth: true } },
+  { path: '/files', component: Files, meta: { requiresAuth: true } },
+  { path: '/sysctl', component: Sysctl, meta: { requiresAuth: true } },
+  { path: '/file-services', component: FileServices, meta: { requiresAuth: true } },
+  { path: '/log-categories', component: LogCategories, meta: { requiresAuth: true } },
+  { path: '/plugins', component: Plugins, meta: { requiresAuth: true } },
+  { path: '/vms', component: VMs, meta: { requiresAuth: true } },
+  { path: '/l3-apps', component: L3Apps, meta: { requiresAuth: true } },
+  { path: '/groups', component: Groups, meta: { requiresAuth: true } },
+  { path: '/app-ident', component: AppIdent, meta: { requiresAuth: true } },
   { path: '/login', component: Login },
   { path: '/:pathMatch(.*)*', redirect: '/login' },
 ];

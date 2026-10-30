@@ -35,8 +35,8 @@ type CaptureJob struct {
 }
 
 var (
-	captureJobsMu   sync.Mutex
-	captureJobs = map[string]*CaptureJob{}
+	captureJobsMu sync.Mutex
+	captureJobs   = map[string]*CaptureJob{}
 )
 
 // 硬上限：即使调用方传更大的值也不接受，避免一次抓包把磁盘写满。

@@ -3,6 +3,8 @@ package main
 import (
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/jimwong/router-re/mgmtd/internal/server"
 )
@@ -36,6 +38,15 @@ func main() {
 	if err := s.InitError(); err != nil {
 		log.Fatalf("mgmtd: %v\n提示：修好配置文件，或显式设 MGM_ALLOW_EPHEMERAL_STORE=1 接受「重启丢配置」", err)
 	}
+	// 退出前把监控历史落盘：重启后 360 分钟视图还能看到重启前的曲线，
+	// 否则每次重启图表都从零开始，用户会以为监控坏了
+	go func() {
+		ch := make(chan os.Signal, 1)
+		signal.Notify(ch, syscall.SIGTERM, syscall.SIGINT)
+		<-ch
+		s.SaveStatsHistory()
+		os.Exit(0)
+	}()
 	log.Printf("mgmtd listening on %s（配置存储: %s）", cfg.Addr, os.Getenv("MGM_CONFIG_FILE"))
 	if err := s.Run(); err != nil {
 		log.Fatal(err)

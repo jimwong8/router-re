@@ -12,13 +12,13 @@ import (
 
 // haState holds runtime HA state.
 type haState struct {
-	mu        sync.Mutex
-	PeerURL   string
-	Secret    string
-	SyncKeys  []string
-	LastSync  time.Time
+	mu         sync.Mutex
+	PeerURL    string
+	Secret     string
+	SyncKeys   []string
+	LastSync   time.Time
 	LastResult string
-	LastErr   string
+	LastErr    string
 }
 
 var globalHAState = &haState{}
@@ -139,9 +139,9 @@ func (s *Server) handleHAStatus(w http.ResponseWriter, r *http.Request) {
 	globalHAState.mu.Lock()
 	defer globalHAState.mu.Unlock()
 	writeJSON(w, 200, map[string]interface{}{
-		"peer_url":     globalHAState.PeerURL,
-		"last_sync":    globalHAState.LastSync,
-		"last_result":  globalHAState.LastResult,
-		"last_error":   globalHAState.LastErr,
+		"peer_url":    globalHAState.PeerURL,
+		"last_sync":   globalHAState.LastSync,
+		"last_result": globalHAState.LastResult,
+		"last_error":  globalHAState.LastErr,
 	})
 }

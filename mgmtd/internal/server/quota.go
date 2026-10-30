@@ -40,7 +40,7 @@ func (s *Server) handleGetQuotaPolicies(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleSetQuotaPolicies(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Policies []quota.Policy `json:"policies"`
-		Confirm bool `json:"confirm"`
+		Confirm  bool           `json:"confirm"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, 400, errBody(10170, "json decode fail", err.Error()))

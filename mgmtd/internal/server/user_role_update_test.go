@@ -84,7 +84,9 @@ func TestUpdateRolePersisted(t *testing.T) {
 		t.Fatalf("update role: expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
 	var resp struct {
-		User struct{ Role string `json:"role"` } `json:"user"`
+		User struct {
+			Role string `json:"role"`
+		} `json:"user"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
@@ -100,7 +102,9 @@ func TestUpdateRolePersisted(t *testing.T) {
 	if getRR.Code != http.StatusOK {
 		t.Fatalf("get users: %d", getRR.Code)
 	}
-	var usersResp struct{ Users []struct{ Username, Role string } `json:"users"` }
+	var usersResp struct {
+		Users []struct{ Username, Role string } `json:"users"`
+	}
 	if err := json.NewDecoder(getRR.Body).Decode(&usersResp); err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +130,9 @@ func TestUpdateViewerForbidden(t *testing.T) {
 	loginReq := httptest.NewRequest("POST", "/api/v1/auth/login", strings.NewReader(loginBody))
 	loginRR := httptest.NewRecorder()
 	s.ServeHTTP(loginRR, loginReq)
-	var viewerToken struct{ Token string `json:"token"` }
+	var viewerToken struct {
+		Token string `json:"token"`
+	}
 	if err := json.NewDecoder(loginRR.Body).Decode(&viewerToken); err != nil || viewerToken.Token == "" {
 		t.Fatalf("viewer login failed: %d", loginRR.Code)
 	}

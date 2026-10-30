@@ -55,6 +55,9 @@ type Queue struct {
 	storePath  string
 	cancelFns  map[string]context.CancelFunc
 	seq        int64
+	// loadFailed 表示启动时持久化文件读不出来。为 true 时拒绝回写，
+	// 防止"读失败 + 回写空"把队列真的清空。
+	loadFailed bool
 }
 
 // New creates a queue. storePath may be "" (no persistence).
@@ -277,6 +280,11 @@ func (q *Queue) saveLocked() {
 	if q.storePath == "" {
 		return
 	}
+	// 持久化文件读不出来时绝不回写：那会把"可能是好文件、只是这次没读到"
+	// 变成"确定被空队列覆盖"，真的丢任务。宁可这次不保存，等人来修。
+	if q.loadFailed {
+		return
+	}
 	var tasks []*Task
 	for _, id := range q.order {
 		if t, ok := q.tasks[id]; ok {
@@ -289,7 +297,18 @@ func (q *Queue) saveLocked() {
 		return
 	}
 	_ = os.MkdirAll(filepath.Dir(q.storePath), 0o755)
-	_ = os.WriteFile(q.storePath, data, 0o600)
+	// 原子替换：先写临时文件再 rename。
+	//
+	// 直接 WriteFile 会先 truncate 再写，另一进程（或崩溃后的重启）在这个
+	// 窗口里读到的是半截 JSON —— 解析失败就会被当成"没有任务"，等于把
+	// 队列悄悄清空。rename 在 POSIX 上是原子的，读到的永远是完整版本。
+	tmp := q.storePath + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return
+	}
+	if err := os.Rename(tmp, q.storePath); err != nil {
+		_ = os.Remove(tmp)
+	}
 }
 
 func (q *Queue) load() {
@@ -302,6 +321,13 @@ func (q *Queue) load() {
 	}
 	var tasks []*Task
 	if err := json.Unmarshal(data, &tasks); err != nil {
+		// 文件存在但解析不了：备份一份再标记 loadFailed，后续 saveLocked 不写，
+		// 避免用空队列覆盖掉可能还能人工恢复的内容。
+		q.loadFailed = true
+		if len(data) > 0 {
+			_ = os.WriteFile(q.storePath+".corrupt", data, 0o600)
+		}
+		fmt.Fprintf(os.Stderr, "taskq: 持久化文件解析失败，本次不加载也不回写: %s: %v\n", q.storePath, err)
 		return
 	}
 	q.mu.Lock()

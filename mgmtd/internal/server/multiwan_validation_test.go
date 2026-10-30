@@ -30,10 +30,10 @@ func TestHandleSetMultiWANValidation(t *testing.T) {
 	const validProbe = `"probe":{"type":"icmp","target":"1.1.1.1","interval_sec":5,"timeout_sec":3,"fail_threshold":2,"recover_threshold":2}`
 
 	cases := []struct {
-		name    string
-		body    string
-		want    int    // 期望 HTTP 状态码
-		codeIn  string // 期望错误码 ("" 表示不检查)
+		name   string
+		body   string
+		want   int    // 期望 HTTP 状态码
+		codeIn string // 期望错误码 ("" 表示不检查)
 	}{
 		// ① members 为空数组
 		{

@@ -24,10 +24,10 @@ import (
 //  5. 绝不调用 firmware.Apply，绝不重启设备
 func (s *Server) handleFirmwareConfirm(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Path    string `json:"path"`
-		SHA256  string `json:"sha256"`
-		Board   string `json:"board"`
-		Force   bool   `json:"force"`
+		Path   string `json:"path"`
+		SHA256 string `json:"sha256"`
+		Board  string `json:"board"`
+		Force  bool   `json:"force"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, 422, errBody(10503, "invalid body", err.Error()))
@@ -82,9 +82,9 @@ func (s *Server) handleFirmwareConfirm(w http.ResponseWriter, r *http.Request) {
 		"board_checked": boardChecked,
 		"image": map[string]interface{}{
 			"sha256": img.SHA256,
-			"board":   img.Board,
-			"magic":   img.Magic,
-			"size":    img.Size,
+			"board":  img.Board,
+			"magic":  img.Magic,
+			"size":   img.Size,
 		},
 	}
 	if perr != nil {

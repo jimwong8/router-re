@@ -5,6 +5,7 @@
       <button class="icon-btn" :title="collapsed ? '展开菜单' : '收起菜单'" @click="collapsed = !collapsed">
         {{ collapsed ? '☰' : '«' }}
       </button>
+      <span class="crumb">{{ crumb }}</span>
       <div class="spacer" />
       <span class="user">{{ username }}</span>
       <button class="icon-btn" @click="logout">退出</button>
@@ -42,90 +43,10 @@
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
-type NavItem = { path: string; label: string };
-type NavGroup = { title: string; items: NavItem[] };
+import { navGroups, type NavGroup } from './nav';
 
-// 47 个页面按功能分成 6 组。此前是 47 个链接平铺在顶栏：总宽 1754px 超过
-// 1440 视口，页面出现横向滚动条，品牌 router-re 被折成两行。
-const groups: NavGroup[] = [
-  {
-    title: '总览',
-    items: [
-      { path: '/', label: '仪表盘' },
-      { path: '/stats', label: '系统监控' },
-      { path: '/traffic', label: '流量统计' },
-      { path: '/clients', label: '终端' },
-      { path: '/online-users', label: '在线用户' },
-      { path: '/terminals', label: '终端列表' },
-    ],
-  },
-  {
-    title: '网络',
-    items: [
-      { path: '/interfaces', label: '接口配置' },
-      { path: '/multi-wan', label: '多WAN' },
-      { path: '/static-route', label: '静态路由' },
-      { path: '/routing-policy', label: '策略路由' },
-      { path: '/network', label: '端口映射/策略路由' },
-      { path: '/l2', label: 'VLAN/桥接' },
-      { path: '/ipv6', label: 'IPv6' },
-      { path: '/dhcp', label: 'DHCP 服务' },
-      { path: '/network-advanced', label: '网络高级' },
-      { path: '/upnp', label: 'UPnP/端口映射' },
-    ],
-  },
-  {
-    title: '安全',
-    items: [
-      { path: '/ips', label: '入侵防御' },
-      { path: '/security', label: '安全管控' },
-      { path: '/dpi', label: '应用识别' },
-      { path: '/dpi-flow', label: 'DPI 流表' },
-      { path: '/l7', label: '应用层过滤' },
-      { path: '/threat', label: '威胁情报' },
-      { path: '/audit', label: '审计日志' },
-      { path: '/nac', label: '接入控制' },
-      { path: '/cert', label: '证书管理' },
-    ],
-  },
-  {
-    title: '认证',
-    items: [
-      { path: '/users', label: '用户管理' },
-      { path: '/radius', label: 'RADIUS' },
-      { path: '/pppoe', label: 'PPPoE 服务' },
-      { path: '/portal', label: '上网认证' },
-      { path: '/accounts', label: '认证计费' },
-    ],
-  },
-  {
-    title: '流控与高可用',
-    items: [
-      { path: '/qos', label: '流量控制' },
-      { path: '/quota', label: '限速配额' },
-      { path: '/lb', label: '负载均衡' },
-      { path: '/linkcheck', label: '链路检测' },
-      { path: '/vpn', label: 'VPN' },
-    ],
-  },
-  {
-    title: '系统与运维',
-    items: [
-      { path: '/firmware', label: '固件升级' },
-      { path: '/config-sync', label: '配置备份' },
-      { path: '/diagnostics', label: '系统诊断' },
-      { path: '/diag', label: '网络诊断' },
-      { path: '/logs', label: '日志中心' },
-      { path: '/alerts', label: '告警规则' },
-      { path: '/snmp', label: 'SNMP' },
-      { path: '/services', label: '高级服务' },
-      { path: '/remote', label: '远程与系统' },
-      { path: '/dns', label: 'DNS 服务' },
-      { path: '/wireless', label: '无线设置' },
-      { path: '/cloud', label: '云管理' },
-    ],
-  },
-];
+// 分组骨架照 iKuai 4.0（虚拟专网、对象管理、扩展服务…），只挂真实存在的路由
+const groups: NavGroup[] = navGroups;
 
 const route = useRoute();
 const router = useRouter();
@@ -134,6 +55,19 @@ const collapsed = ref(false);
 const activePath = computed(() => route.path);
 const isLogin = computed(() => route.path === '/login');
 const username = ref(localStorage.getItem('router_user') || 'admin');
+
+// 面包屑：分组 / 页面，和侧栏的分组名一致
+const currentGroup = computed(() =>
+  groups.find((g) => g.items.some((it) => it.path === route.path)),
+);
+const crumb = computed(() => {
+  const g = currentGroup.value;
+  if (!g) return '';
+  const it = g.items.find((i) => i.path === route.path);
+  if (!it) return g.title;
+  // 分组名和页面名相同时不重复（"系统概览 / 系统概览" 读起来像 bug）
+  return it.label === g.title ? g.title : `${g.title} / ${it.label}`;
+});
 
 // 当前页所在分组默认展开，否则进了页面看不到高亮在哪
 const openedGroups = computed(() =>
@@ -148,6 +82,30 @@ function logout() {
 </script>
 
 <style scoped>
+.crumb {
+  color: #9aa0b5;
+  font-size: 13px;
+  margin-left: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nav-menu :deep(.el-menu-item.is-active) {
+  position: relative;
+}
+
+.nav-menu :deep(.el-menu-item.is-active)::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: #4f8cff;
+}
+
 .app {
   min-height: 100vh;
 }

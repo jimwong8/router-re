@@ -321,7 +321,6 @@ func (s *Server) handleSetPolicyRules(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]interface{}{"rules": body.Rules, "count": len(body.Rules)})
 }
 
-
 func (s *Server) handleGetPolicyRouteHits(w http.ResponseWriter, r *http.Request) {
 	raw, _ := s.store.Get("policyroute", prRulesKey)
 	rules := []policyroute.Rule{}

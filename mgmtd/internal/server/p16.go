@@ -67,9 +67,11 @@ func (s *Server) handleGetVPNClient(w http.ResponseWriter, r *http.Request) {
 }
 
 // p95 审计结论：本 handler 对两处落盘都是「完整文档写入」——
-//   ① store：saveVPNClient = json.Marshal(整份 config) + store.Set，单键覆盖；
-//   ② 文件：writeSecretFile 写整个 /etc/wireguard/<iface>.conf，随后按
-//      RenderCommands 逐条执行（wg-quick up 等），命令本身也是全量重建。
+//
+//	① store：saveVPNClient = json.Marshal(整份 config) + store.Set，单键覆盖；
+//	② 文件：writeSecretFile 写整个 /etc/wireguard/<iface>.conf，随后按
+//	   RenderCommands 逐条执行（wg-quick up 等），命令本身也是全量重建。
+//
 // 因此并发的 set 等价于「最后一次保存胜出」，与配置表单语义一致：最终态必为某份
 // 完整文档之一，不存在字段撕裂/丢失（rmw_concurrency_test.go 第 5 例固化该性质）。
 // 这是可接受的单键覆盖语义，故不加锁。

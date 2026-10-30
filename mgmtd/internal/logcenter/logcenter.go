@@ -27,9 +27,13 @@ type LogEntry struct {
 // QueryOpts 是 Query 的查询选项。
 type QueryOpts struct {
 	Limit int    // 最大条数（默认 100，上限 5000）
-	Since string // --since 时间（如 "1 hour ago"）
+	Since string // 时间下限（"30m" / "1d" / "1 hour ago" / RFC3339）
 	Unit  string // systemd unit 过滤
 	Grep  string // message 子串过滤
+
+	// sinceTS 是 Since 解析后的 Unix 秒，由 Query 内部填充；
+	// journalctl 拿不到它，过滤在 Go 侧做。
+	sinceTS int64
 }
 
 // priorityMap 将数字优先级映射为 syslog 名称。
@@ -54,6 +58,18 @@ func Query(o QueryOpts) ([]LogEntry, error) {
 	if o.Limit > 5000 {
 		o.Limit = 5000
 	}
+	// Since 在这里就解析成时间戳，交给 journalctl 之后的 Go 侧过滤。
+	//
+	// 不能把它直接传给 journalctl 的 --since：`--since X -n N` 的实际行为是
+	// 取过滤后**最早**的 N 条（实测 940 条里返回 03:50→20:15 那一段），
+	// 而用户要看的是"最近 N 条"。语义差得很远，且界面上完全看不出来。
+	sinceTS := int64(0)
+	if o.Since != "" {
+		if ts, err := parseSince(o.Since); err == nil {
+			sinceTS = ts
+		}
+	}
+	o.sinceTS = sinceTS
 	entries, err := queryJournalctl(o)
 	if err != nil {
 		// 降级读 /var/log/syslog
@@ -81,9 +97,8 @@ func queryJournalctl(o QueryOpts) ([]LogEntry, error) {
 	if o.Unit != "" {
 		args = append(args, "-u", o.Unit)
 	}
-	if o.Since != "" {
-		args = append(args, "--since", o.Since)
-	}
+	// 注意：这里有意不传 --since（见 Query 里的说明），
+	// 时间下限由调用方在解析结果时过滤。
 	// Grep 走 journalctl 自己的过滤能力（--grep），而不是取完尾部再过滤，
 	// 这样才能搜到 -n 窗口之外的老日志。用 QuoteMeta 保持子串语义，
 	// --case-sensitive 与 strings.Contains 的大小写敏感语义对齐。
@@ -124,6 +139,9 @@ func queryJournalctl(o QueryOpts) ([]LogEntry, error) {
 		// 直接透传会让前端显示成一串裸数字，人看不懂 —— 这里转成可读时间。
 		if ts, ok := raw["__REALTIME_TIMESTAMP"].(string); ok {
 			if us, err := strconv.ParseInt(ts, 10, 64); err == nil && us > 0 {
+				if o.sinceTS > 0 && us/1_000_000 < o.sinceTS {
+					continue // 早于时间下限，跳过
+				}
 				entry.TS = time.Unix(0, us*1000).Local().Format("2006-01-02 15:04:05")
 			} else {
 				entry.TS = ts

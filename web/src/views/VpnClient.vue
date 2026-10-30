@@ -1,5 +1,6 @@
 <template>
   <div>
+    <VpnClientsExtra />
     <el-card shadow="never" style="margin-bottom:16px">
       <template #header>
         <div style="display:flex; justify-content:space-between; align-items:center">
@@ -125,6 +126,7 @@
 import { ref, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import api from '../api';
+import VpnClientsExtra from './components/VpnClientsExtra.vue';
 
 const loading = ref(false);
 const previewing = ref(false);

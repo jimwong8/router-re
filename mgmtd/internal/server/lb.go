@@ -83,9 +83,9 @@ func (s *Server) handleGetLBStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, 200, map[string]interface{}{
-		"config":            cfg,
-		"status":            ch.Snapshot(),
-		"per_member_rx_tx":  perMember,
+		"config":           cfg,
+		"status":           ch.Snapshot(),
+		"per_member_rx_tx": perMember,
 	})
 }
 
