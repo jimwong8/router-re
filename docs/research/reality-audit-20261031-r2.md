@@ -203,3 +203,33 @@
 2. REALITY 排错顺序：`uuid/short_id` → `public_key`（可用 X25519 从私钥推导核对）→ `server_name`
    是否在服务端 serverNames 内、且该名字在目标证书 SAN 里、且目标支持 h2。
 3. 有 IPv6 的落地优先用 IPv6 做 REALITY 入口，绕开 IPv4 侧封锁，且不用改路由器分流。
+
+---
+
+## 12. 把这两台落地上的所有 TCP 出站都切到 IPv6（最终态）
+
+既然 IPv4 到 209.33.171.48 / 149.104.27.87 被掐、IPv6 正常，就把这两台上**所有 TCP 类型**的出站一起换掉
+（UDP 的 hysteria2 / tuic 本来就是通的，保持 IPv4 不动）：
+
+    改：JP-VMWS(2086) JP-VMWS-TLS(8443) JP-VMWS-80(80) JP-ANYTLS(64514) JP-ANYTLS-443(443) HK87-ANYTLS(50075)
+    不改：JP-HY2 / JP-HY2-443 / JP-TUIC（UDP）
+    备份：/etc/sing-box/config.json.bak.v6all.<ts>
+
+`s ing-box check` 通过、restart 后全部实测（Clash API，真实 HTTP 经节点）：
+
+    JP-VMWS 226   JP-ANYTLS 240   HK87-ANYTLS 584   JP-ANYTLS-443 239
+    JP-VMWS-TLS 223   JP-VMWS-80 220   JP-VLESS 245   HK87-VLESS 180
+    经 7890 代理访问 ipinfo 正常（出口 103.240.198.142）
+
+在此之前这些节点里有 5 个是超时/连不上的（IPv4 被封），现在整组可用。
+
+## 13. 最终状态一览
+
+| 项目 | 状态 |
+|---|---|
+| jp48 REALITY (37651) | IPv6 2401:a660:1001:445::248，SNI www.apple.com，密钥已换，可用 ~220ms |
+| hk87 REALITY (30746) | IPv6 2001:df1:7880:2::25e，SNI 已改 www.apple.com，可用 ~180-450ms |
+| jp48/hk87 其余 TCP 出站 | 全部改 IPv6，6 个节点由不可用变为 180-590ms |
+| 110 自身 | procd 托管、gid nogroup、19 条 bypass 规则持久化于 rc.local |
+| iKuai | 自建的 PT_RR110_JP 已停用（与既有 PT_110 冲突、且无效），可删除；PT_110 保留 |
+| 遗留 | GLAXY-HK（第三方 156.224.78.107:26991）IPv4 TLS 不通，非我方节点；OR-balmy-dingo 偶发上游错误 |
