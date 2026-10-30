@@ -8,3 +8,17 @@ package dpi
 func ClassifyPacket(pkt []byte) (protocol string, category string, err error) {
 	return "", "", ErrUnsupported
 }
+
+// ClassifyFlow 非 cgo 环境的桩：没有 nDPI 就没有跨包识别能力。
+// 返回 Unknown 而不是报错——调用方会把"没识别出来"当正常情况对待。
+func ClassifyFlow(pkt []byte) (protocol string, category string, packets int, err error) {
+	return "Unknown", "Unspecified", 0, ErrUnsupported
+}
+
+// Stats 非 cgo 环境下没有流表。
+func Stats() FlowStats {
+	return FlowStats{Max: 0}
+}
+
+// ResetFlows 非 cgo 环境下是空操作。
+func ResetFlows() {}

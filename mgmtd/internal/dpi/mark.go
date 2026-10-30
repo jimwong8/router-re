@@ -12,13 +12,13 @@ import (
 // MarkRule describes an application-marking rule: match by protocol+dports,
 // then either set an fwmark (for tc shaping) or drop the packet.
 type MarkRule struct {
-	App      string `json:"app"`      // 应用名，如 "netflix"
-	Protocol string `json:"protocol"` // "tcp" / "udp"
-	DPorts   []int  `json:"dports"`   // 目标端口列表，可为空
-	Mark     int    `json:"mark"`     // fwmark 值（mark/drop 动作使用）
+	App      string `json:"app"`       // 应用名，如 "netflix"
+	Protocol string `json:"protocol"`  // "tcp" / "udp"
+	DPorts   []int  `json:"dports"`    // 目标端口列表，可为空
+	Mark     int    `json:"mark"`      // fwmark 值（mark/drop 动作使用）
 	RateMbit int    `json:"rate_mbit"` // limit 时速率 Mbit
 	RateMbps int    `json:"rate_mbps"` // alias
-	Action   string `json:"action"`   // "mark" / "drop" / "limit"
+	Action   string `json:"action"`    // "mark" / "drop" / "limit"
 }
 
 func (r MarkRule) validate() error {
