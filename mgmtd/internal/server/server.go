@@ -363,6 +363,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/vpn/openvpn/services", s.auth(s.handleGetOpenVPN))
 	s.mux.HandleFunc("POST /api/v1/vpn/openvpn/services", s.auth(s.auditWrap("vpn.openvpn.save", s.handleSetOpenVPN)))
 	s.mux.HandleFunc("POST /api/v1/vpn/openvpn/client-conf", s.auth(s.auditWrap("vpn.openvpn.clientconf", s.handleOpenVPNClientConf)))
+	s.mux.HandleFunc("GET /api/v1/vpn/openvpn/status", s.auth(s.handleGetOpenVPNStatus))
 	// 对象管理（IP/MAC/终端分组）、多线路 DNS、域名分流、行为记录
 	s.mux.HandleFunc("GET /api/v1/objects/groups", s.auth(s.handleGetGroups))
 	s.mux.HandleFunc("POST /api/v1/objects/groups", s.auth(s.auditWrap("objects.groups.save", s.handleSetGroups)))
