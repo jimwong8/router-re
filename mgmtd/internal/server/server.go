@@ -719,6 +719,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/users", s.auth(s.auditWrap("user.create", s.handleCreateUser)))
 	s.mux.HandleFunc("DELETE /api/v1/users/{username}", s.auth(s.auditWrap("user.delete", s.handleDeleteUser)))
 	s.mux.HandleFunc("POST /api/v1/users/{username}/password", s.auth(s.auditWrap("user.password", s.handleSetUserPassword)))
+	// 自助改密：任何已登录用户改自己的密码（身份取自 token，需验证旧密码）。
+	// 审计在 handler 内按结果精确记录，这里不再套 auditWrap 以免重复。
+	s.mux.HandleFunc("POST /api/v1/auth/password", s.auth(s.handleChangeOwnPassword))
 	s.mux.HandleFunc("PUT /api/v1/users/{username}", s.auth(s.auditWrap("user.update", s.handleUpdateUser)))
 	// P7-1 IPS 入侵防御（仅本区块）
 	s.mux.HandleFunc("GET /api/v1/ips/rules", s.auth(s.handleGetIPSRules))
@@ -1632,6 +1635,11 @@ func (s *Server) sessionValid(actor string, iat int64) bool {
 // 放行，保持旧部署行为。
 func (s *Server) roleAllows(actor, method, path string) bool {
 	if actor == s.cfg.AdminUser {
+		return true
+	}
+	// 自助改密端点对所有已登录用户开放：身份取自 token，处理函数会校验
+	// 旧密码且只能改自己，不需要 admin 或特定角色（viewer 也应能改自己密码）。
+	if method == http.MethodPost && path == "/api/v1/auth/password" {
 		return true
 	}
 	if s.rbacMgr == nil {
@@ -3942,6 +3950,54 @@ func (s *Server) handleSetUserPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]interface{}{"changed": name})
+}
+
+// handleChangeOwnPassword 让任何已登录用户修改「自己」的密码。
+//
+// 与 handleSetUserPassword 的区别：后者要求 admin 且能改任意用户；这里身份
+// 只取自 token（Upsert 不了别人的账号），因此 viewer/operator 都能用，且必须
+// 验证旧密码——「改密」若不需要旧密码，拿别人一个未过期的 token 就能把密码
+// 改走、永久接管账号。
+func (s *Server) handleChangeOwnPassword(w http.ResponseWriter, r *http.Request) {
+	actor := s.currentActor(r)
+	if actor == "" {
+		writeJSON(w, 401, errBody(10003, "unauthorized", "无法识别当前用户"))
+		return
+	}
+	var req struct {
+		OldPassword string `json:"old_password"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10228, "invalid body", err.Error()))
+		return
+	}
+	// 旧密码校验口径与登录一致：优先 RBAC 记录（内部带锁，不会与登录竞争），
+	// 内置 env 管理员再用环境变量口令兜底比对。
+	oldOK := false
+	if u, ok := s.rbacMgr.Get(actor); ok && u.Enabled {
+		oldOK = rbac.VerifyPassword(req.OldPassword, u.PasswordHash)
+	}
+	if !oldOK && actor == s.cfg.AdminUser {
+		oldOK = subtle.ConstantTimeCompare([]byte(req.OldPassword), []byte(s.cfg.AdminPassword)) == 1
+	}
+	if !oldOK {
+		s.logAudit(r, "auth.password.change", actor, "fail", "旧密码错误")
+		writeJSON(w, 401, errBody(10229, "invalid old password", "当前密码错误"))
+		return
+	}
+	if err := rbac.ValidatePassword(req.NewPassword); err != nil {
+		writeJSON(w, 422, errBody(10230, "weak password", err.Error()))
+		return
+	}
+	if err := s.rbacMgr.ChangePassword(actor, req.NewPassword); err != nil {
+		writeJSON(w, 409, errBody(10231, "password change failed", err.Error()))
+		return
+	}
+	s.logAudit(r, "auth.password.change", actor, "ok", "")
+	// 改密会让此前签发的 token 失效（sessionValid 比对 PasswordChangedAt），
+	// 前端据此应引导重新登录。
+	writeJSON(w, 200, map[string]interface{}{"changed": true, "reauth": true})
 }
 
 // handleUpdateUser updates a user's role and/or enabled flag.
