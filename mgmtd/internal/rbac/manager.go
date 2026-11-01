@@ -70,7 +70,13 @@ func (m *Manager) Create(u User) error {
 		u.LastLogin = 0
 	}
 	m.users[u.Username] = u
-	return m.persistLocked()
+	if err := m.persistLocked(); err != nil {
+		// 落盘失败必须回滚内存，否则 API 报错但账号已在内存生效：
+		// 用户能登录、能授权，直到重启才神秘消失——比直接失败更难排查。
+		delete(m.users, u.Username)
+		return err
+	}
+	return nil
 }
 
 // Update overwrites a user's role/enabled flags. PasswordHash is preserved if empty.
@@ -94,8 +100,13 @@ func (m *Manager) Update(u User) error {
 			return fmt.Errorf("cannot demote or disable the last admin")
 		}
 	}
+	prev := m.users[u.Username]
 	m.users[u.Username] = u
-	return m.persistLocked()
+	if err := m.persistLocked(); err != nil {
+		m.users[u.Username] = prev
+		return err
+	}
+	return nil
 }
 
 // Delete removes a user; rejecting removal of the last admin prevents lockout.
@@ -110,7 +121,11 @@ func (m *Manager) Delete(username string) error {
 		return fmt.Errorf("cannot delete the last admin")
 	}
 	delete(m.users, username)
-	return m.persistLocked()
+	if err := m.persistLocked(); err != nil {
+		m.users[username] = target
+		return err
+	}
+	return nil
 }
 
 // hasAnotherAdminLocked requires the caller to already hold m.mu.
@@ -179,9 +194,14 @@ func (m *Manager) ChangePassword(username, newPassword string) error {
 	if !ok {
 		return fmt.Errorf("user %q not found", username)
 	}
+	prev := u
 	u.PasswordHash = hash
 	i := int64(time.Now().Unix())
 	u.PasswordChangedAt = i
 	m.users[username] = u
-	return m.persistLocked()
+	if err := m.persistLocked(); err != nil {
+		m.users[username] = prev
+		return err
+	}
+	return nil
 }
