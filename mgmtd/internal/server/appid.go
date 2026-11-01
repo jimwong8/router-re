@@ -4,10 +4,13 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -21,6 +24,44 @@ import (
 
 // maxAppidUpload 限制导入体积：一份完整域名库解压后几十 MB 已经很多了。
 const maxAppidUpload = 64 << 20
+
+// zip 安全上限，防 zip bomb
+const (
+	maxZipEntries   = 2000     // 单 zip 最大条目数
+	maxZipEntrySize = 16 << 20 // 单条目最大 16 MB（解压后）
+	maxZipDepth     = 3        // 目录深度上限（防 ../ 链）
+)
+
+// 校验 zip entry 名：禁止路径穿越、Windows 分隔符、绝对路径、过深目录
+func safeZipEntryName(name string) error {
+	if name == "" {
+		return errors.New("empty entry name")
+	}
+	// 统一分隔符，防 \ 绕过
+	name = filepath.ToSlash(name)
+	if filepath.IsAbs(name) {
+		return fmt.Errorf("absolute path not allowed: %s", name)
+	}
+	// 禁止 .. 穿越（path.Clean 会归一化，但我们要显式拦截并报错）
+	if strings.Contains(name, "..") {
+		return fmt.Errorf("path traversal not allowed: %s", name)
+	}
+	// 禁止隐藏文件/目录（以 . 开头的段）
+	for _, seg := range strings.Split(name, "/") {
+		if seg == "" || seg == "." {
+			continue
+		}
+		if strings.HasPrefix(seg, ".") && seg != "." && seg != ".." {
+			return fmt.Errorf("hidden segment not allowed: %s", name)
+		}
+	}
+	// 目录深度上限
+	depth := strings.Count(strings.Trim(name, "/"), "/") + 1
+	if depth > maxZipDepth {
+		return fmt.Errorf("zip entry depth %d exceeds limit %d: %s", depth, maxZipDepth, name)
+	}
+	return nil
+}
 
 func (s *Server) handleAppidStats(w http.ResponseWriter, r *http.Request) {
 	l := appid.Get()
@@ -81,7 +122,77 @@ func (s *Server) handleAppidImport(w http.ResponseWriter, r *http.Request) {
 	version := ""
 	source := "upload"
 
-	if strings.HasPrefix(ct, "application/zip") || strings.HasPrefix(ct, "multipart/form-data") {
+	// multipart 必须优先于 zip 判断（multipart/form-data 也会被 HasPrefix("application/zip") 命中）
+	if strings.HasPrefix(ct, "multipart/form-data") {
+		// 解析 multipart，取每个文件 part 的内容，文件名作 key
+		mr, err := r.MultipartReader()
+		if err != nil {
+			writeJSON(w, 400, errBody(11910, "multipart parse failed", err.Error()))
+			return
+		}
+		entryCount := 0
+		for {
+			part, err := mr.NextPart()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				writeJSON(w, 400, errBody(11910, "multipart read failed", err.Error()))
+				return
+			}
+			if part.FileName() == "" {
+				// 非文件字段忽略（或可选读 version 字段）
+				continue
+			}
+			// part.FileName() 只返回 basename，需从 Content-Disposition 取原始 filename 以防路径穿越
+			rawFilename := part.FileName()
+			if cd := part.Header.Get("Content-Disposition"); cd != "" {
+				// 解析 filename="..."，支持 RFC 5987 编码（filename*=utf-8''...）
+				// 简化：取最后一个 filename= 后的值，去引号
+				if idx := strings.LastIndex(cd, "filename="); idx >= 0 {
+					val := cd[idx+len("filename="):]
+					val = strings.TrimSpace(val)
+					if strings.HasPrefix(val, "\"") {
+						end := strings.IndexByte(val[1:], '"')
+						if end >= 0 {
+							val = val[1 : end+1]
+						}
+					}
+					val = strings.Trim(val, "\"")
+					if val != "" {
+						rawFilename = val
+					}
+				}
+			}
+			entryCount++
+			if entryCount > maxZipEntries {
+				writeJSON(w, 422, errBody(11907, "too many entries", fmt.Sprintf("文件数 %d 超过上限 %d", entryCount, maxZipEntries)))
+				return
+			}
+			if err := safeZipEntryName(rawFilename); err != nil {
+				writeJSON(w, 422, errBody(11908, "unsafe entry name", err.Error()))
+				return
+			}
+			name := path.Base(rawFilename)
+			if strings.HasPrefix(name, ".") {
+				continue
+			}
+			b, err := io.ReadAll(io.LimitReader(part, maxZipEntrySize+1))
+			if err != nil {
+				continue
+			}
+			if int64(len(b)) > maxZipEntrySize {
+				writeJSON(w, 422, errBody(11909, "entry too large", fmt.Sprintf("文件 %s 超过 %d MB", name, maxZipEntrySize>>20)))
+				return
+			}
+			groups[name] = b
+		}
+		if len(groups) == 0 {
+			writeJSON(w, 422, errBody(11905, "no files", "multipart 中未找到有效文件 part"))
+			return
+		}
+		source = "multipart"
+	} else if strings.HasPrefix(ct, "application/zip") {
 		body, err := io.ReadAll(io.LimitReader(r.Body, maxAppidUpload))
 		if err != nil {
 			writeJSON(w, 400, errBody(11902, "read body failed", err.Error()))
@@ -92,9 +203,18 @@ func (s *Server) handleAppidImport(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 422, errBody(11903, "invalid zip", err.Error()))
 			return
 		}
+		if len(zr.File) > maxZipEntries {
+			writeJSON(w, 422, errBody(11907, "too many entries", fmt.Sprintf("zip 条目数 %d 超过上限 %d", len(zr.File), maxZipEntries)))
+			return
+		}
 		for _, f := range zr.File {
 			if f.FileInfo().IsDir() {
 				continue
+			}
+			// 安全校验 entry 名
+			if err := safeZipEntryName(f.Name); err != nil {
+				writeJSON(w, 422, errBody(11908, "unsafe entry name", err.Error()))
+				return
 			}
 			name := path.Base(f.Name)
 			if strings.HasPrefix(name, ".") || strings.Contains(f.Name, "__MACOSX") {
@@ -104,10 +224,15 @@ func (s *Server) handleAppidImport(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				continue
 			}
-			b, err := io.ReadAll(io.LimitReader(rc, 8<<20))
+			// 单条目大小上限（解压流读取时限制）
+			b, err := io.ReadAll(io.LimitReader(rc, maxZipEntrySize+1))
 			rc.Close()
 			if err != nil {
 				continue
+			}
+			if int64(len(b)) > maxZipEntrySize {
+				writeJSON(w, 422, errBody(11909, "entry too large", fmt.Sprintf("zip 条目 %s 解压后超过 %d MB", name, maxZipEntrySize>>20)))
+				return
 			}
 			groups[name] = b
 		}
@@ -122,6 +247,10 @@ func (s *Server) handleAppidImport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for k, v := range req.Files {
+			if err := safeZipEntryName(k); err != nil {
+				writeJSON(w, 422, errBody(11908, "unsafe key name", err.Error()))
+				return
+			}
 			groups[k] = []byte(v)
 		}
 		version = req.Version
