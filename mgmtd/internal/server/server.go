@@ -1118,6 +1118,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "same-origin")
+	// CSP：控制台由本二进制同源托管（/assets/*），页面里没有内联 <script>，
+	// 所以可以禁掉一切非自身来源的脚本——这是 XSS 最后一道闸：即便某处
+	// 把用户可控字符串（日志内容、主机名、User-Agent）渲染进了 DOM，
+	// 注入的 <script> 与外链脚本也无法执行。
+	// style-src 仍留 'unsafe-inline'：Element Plus 运行时会注入 <style> 标签，
+	// 收紧会直接让界面失去样式；脚本面已由 script-src 'self' 掐死。
+	// 认证页(p18b.go)会用 Header().Set 覆盖成本端点更严的 default-src 'none'。
+	w.Header().Set("Content-Security-Policy",
+		"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "+
+			"img-src 'self' data:; font-src 'self' data:; connect-src 'self'; "+
+			"object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
 
 	// 兜底排空请求体：路由不匹配(404/405)或 handler 提前返回时，Go 的
 	// http.Server 只会自动丢弃 256KB，超出部分会让服务端直接关闭连接，
