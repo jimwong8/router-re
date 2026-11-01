@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -301,13 +302,26 @@ func TestSubnetCalcEndpoint(t *testing.T) {
 }
 
 // rebootFakeRunner records argv slices without executing anything.
+// 加锁：handler 会在延迟 goroutine 里调用 Run，而测试在另一 goroutine 读结果——
+// 无锁就是数据竞争（-race 会报），而且固定 sleep 等它完成本身也不可靠。
 type rebootFakeRunner struct {
+	mu       sync.Mutex
 	Commands [][]string
 }
 
 func (f *rebootFakeRunner) Run(name string, args ...string) (string, error) {
+	f.mu.Lock()
 	f.Commands = append(f.Commands, append([]string{name}, args...))
+	f.mu.Unlock()
 	return "ok", nil
+}
+
+func (f *rebootFakeRunner) snapshot() [][]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([][]string, len(f.Commands))
+	copy(out, f.Commands)
+	return out
 }
 
 func (f *rebootFakeRunner) RunWithInput(input, name string, args ...string) (string, error) {
@@ -344,19 +358,28 @@ func TestSystemRebootCallsRunner(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr2.Code, rr2.Body.String())
 	}
 
-	// 等待延迟重启 goroutine 执行
-	time.Sleep(2500 * time.Millisecond)
+	// 轮询等待延迟重启 goroutine 执行，而不是固定 sleep（既避免数据竞争，
+	// 也不依赖机器速度）。
+	var cmds [][]string
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		cmds = fr.snapshot()
+		if len(cmds) >= 1 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 
-	if len(fr.Commands) != 1 {
-		t.Fatalf("expected runner called once, got %d", len(fr.Commands))
+	if len(cmds) != 1 {
+		t.Fatalf("expected runner called once, got %d", len(cmds))
 	}
 	want := []string{"systemctl", "reboot"}
-	if len(fr.Commands[0]) != len(want) {
-		t.Fatalf("runner cmd %v, want %v", fr.Commands[0], want)
+	if len(cmds[0]) != len(want) {
+		t.Fatalf("runner cmd %v, want %v", cmds[0], want)
 	}
 	for i := range want {
-		if fr.Commands[0][i] != want[i] {
-			t.Fatalf("runner cmd %v, want %v", fr.Commands[0], want)
+		if cmds[0][i] != want[i] {
+			t.Fatalf("runner cmd %v, want %v", cmds[0], want)
 		}
 	}
 }
