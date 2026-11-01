@@ -8,6 +8,7 @@
       <span class="crumb">{{ crumb }}</span>
       <div class="spacer" />
       <span class="user">{{ username }}</span>
+      <button class="icon-btn" @click="showChangePw = true">修改密码</button>
       <button class="icon-btn" @click="logout">退出</button>
     </el-header>
 
@@ -36,12 +37,33 @@
         <router-view />
       </el-main>
     </el-container>
+
+    <!-- 修改密码：任何已登录用户改自己的密码（后端校验旧密码、身份取自 token） -->
+    <el-dialog v-model="showChangePw" title="修改密码" width="400px">
+      <el-form label-width="90px">
+        <el-form-item label="当前密码">
+          <el-input v-model="cpOld" type="password" show-password autocomplete="current-password" />
+        </el-form-item>
+        <el-form-item label="新密码">
+          <el-input v-model="cpNew" type="password" show-password placeholder="8-64 位，含字母和数字" autocomplete="new-password" />
+        </el-form-item>
+        <el-form-item label="确认新密码">
+          <el-input v-model="cpConfirm" type="password" show-password autocomplete="new-password" @keyup.enter="doChangePw" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showChangePw = false">取消</el-button>
+        <el-button type="primary" :loading="cpBusy" @click="doChangePw">确定</el-button>
+      </template>
+    </el-dialog>
   </el-container>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { ElMessage } from 'element-plus';
+import api from './api';
 
 import { navGroups, type NavGroup } from './nav';
 
@@ -78,6 +100,31 @@ function logout() {
   localStorage.removeItem('router_token');
   localStorage.removeItem('router_user');
   router.push('/login');
+}
+
+// 修改自己密码
+const showChangePw = ref(false);
+const cpOld = ref('');
+const cpNew = ref('');
+const cpConfirm = ref('');
+const cpBusy = ref(false);
+async function doChangePw() {
+  if (!cpOld.value) { ElMessage.error('请输入当前密码'); return; }
+  if (cpNew.value.length < 8) { ElMessage.error('新密码至少 8 位'); return; }
+  if (cpNew.value !== cpConfirm.value) { ElMessage.error('两次新密码不一致'); return; }
+  cpBusy.value = true;
+  try {
+    await api.post('/api/v1/auth/password', { old_password: cpOld.value, new_password: cpNew.value });
+    showChangePw.value = false;
+    ElMessage.success('密码已修改，请重新登录');
+    // 改密后旧 token 失效，主动登出回到登录页
+    logout();
+  } catch (e: any) {
+    // 后端 400 时 detail 已被拦截器提到 message，这里直接展示
+    ElMessage.error(e?.response?.data?.message || '修改失败');
+  } finally {
+    cpBusy.value = false;
+  }
 }
 </script>
 

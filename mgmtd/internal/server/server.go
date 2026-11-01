@@ -3983,7 +3983,9 @@ func (s *Server) handleChangeOwnPassword(w http.ResponseWriter, r *http.Request)
 	}
 	if !oldOK {
 		s.logAudit(r, "auth.password.change", actor, "fail", "旧密码错误")
-		writeJSON(w, 401, errBody(10229, "invalid old password", "当前密码错误"))
+		// 用 400 而非 401：请求本身已通过 token 鉴权，只是旧密码填错。前端拦截器
+		// 把 401 当作「登录失效」会直接踢回登录页，掩盖真正原因。
+		writeJSON(w, 400, errBody(10229, "invalid old password", "当前密码错误"))
 		return
 	}
 	if err := rbac.ValidatePassword(req.NewPassword); err != nil {

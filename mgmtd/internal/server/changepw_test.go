@@ -48,8 +48,8 @@ func TestChangeOwnPasswordViewer(t *testing.T) {
 	tok := loginTokenAs(t, s, "viewer1", "ViewerOld123")
 
 	// 旧密码错误 -> 401，不允许改
-	if code := postChangePassword(s, tok, "wrong-old", "ViewerNew456"); code != http.StatusUnauthorized {
-		t.Fatalf("旧密码错误应 401，得 %d", code)
+	if code := postChangePassword(s, tok, "wrong-old", "ViewerNew456"); code != http.StatusBadRequest {
+		t.Fatalf("旧密码错误应 400，得 %d", code)
 	}
 	// 正确旧密码 -> 200
 	if code := postChangePassword(s, tok, "ViewerOld123", "ViewerNew456"); code != http.StatusOK {
