@@ -90,6 +90,10 @@ type Store struct {
 	path string
 	mu   sync.RWMutex
 	st   state
+	// dirty 表示内存里有尚未落盘的审计等变更。拒绝路径（登录失败、过期
+	// 令牌注册）只置位这个标志，由后台定时批量落盘——否则每次被拒请求都
+	// 触发一次带 fsync 的整文件重写，公网端点等于给攻击者一个免费刷盘器。
+	dirty bool
 }
 
 // GetAdminPassword 返回存储的管理员密码（空表示未修改，使用配置默认值）。
@@ -177,9 +181,12 @@ func OpenStore(path string) (*Store, error) {
 
 // Save 原子落盘：先写临时文件 fsync，再 rename。避免半截文件把状态写成空白。
 func (s *Store) Save() error {
-	s.mu.RLock()
+	// 先在锁内清 dirty 再 marshal：如果 marshal 期间又有 AddAudit 写入，
+	// 它会重新把 dirty 置位，下一轮再落盘——不会丢更新。
+	s.mu.Lock()
+	s.dirty = false
 	b, err := json.MarshalIndent(s.st, "", "  ")
-	s.mu.RUnlock()
+	s.mu.Unlock()
 	if err != nil {
 		return err
 	}
@@ -200,6 +207,17 @@ func (s *Store) Save() error {
 		return err
 	}
 	return os.Rename(tmp, s.path)
+}
+
+// SaveIfDirty 仅当有未落盘变更时才写盘。供后台定时器调用。
+func (s *Store) SaveIfDirty() error {
+	s.mu.RLock()
+	d := s.dirty
+	s.mu.RUnlock()
+	if !d {
+		return nil
+	}
+	return s.Save()
 }
 
 // ---------------------------------------------------------------- 工具函数
@@ -414,6 +432,7 @@ func (s *Store) AddAudit(e AuditEntry) {
 	if len(s.st.Audit) > maxAudit {
 		s.st.Audit = s.st.Audit[len(s.st.Audit)-maxAudit:]
 	}
+	s.dirty = true
 	s.mu.Unlock()
 }
 

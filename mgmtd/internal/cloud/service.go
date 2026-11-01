@@ -43,6 +43,9 @@ type Service struct {
 	started time.Time
 	limiter loginLimiter
 	rc      releaseCache
+	// enrollLimiter 按 IP 限制注册失败次数：/agent/enroll 是公开端点，
+	// 不限制的话可以被无限次用假令牌试探（每次都要查令牌表）。
+	enrollLimiter loginLimiter
 }
 
 // NewService 打开状态文件并装配服务。
@@ -70,6 +73,24 @@ func NewService(cfg Config) (*Service, error) {
 		tm:      auth.NewTokenManager(cfg.JWTSecret, cfg.SessionTTL),
 		started: time.Now(),
 	}, nil
+}
+
+// StartAuditAutoSave 启动后台批量落盘：每 interval 检查一次，仅在
+// 有未落盘变更（dirty）时才写盘。目的是把拒绝路径（登录失败、过期令牌
+// 注册）从"每次请求一次 fsync"变成"变更后几秒内合并写一次"。
+func (s *Service) StartAuditAutoSave(interval time.Duration) {
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for range t.C {
+			if err := s.store.SaveIfDirty(); err != nil {
+				log.Printf("cloud: 后台落盘失败: %v", err)
+			}
+		}
+	}()
 }
 
 // Store 暴露给测试用。
@@ -397,7 +418,8 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 	ip := clientIP(r)
 	if wait := s.limiter.blocked(ip); wait > 0 {
 		s.store.AddAudit(AuditEntry{Actor: "console:" + ip, Action: "console.login", Result: "deny", Detail: "锁定中 " + wait.Round(time.Second).String()})
-		_ = s.store.Save()
+		// 不在这里同步 Save：锁定期间每个请求都会走到这里，同步写盘等于
+		// 让攻击者用被拒请求刷盘。AddAudit 已置 dirty，由后台批量落盘。
 		writeErr(w, 429, 20103, "too many attempts",
 			fmt.Sprintf("失败次数过多，请 %d 分钟后再试", int(wait.Minutes())+1))
 		return
@@ -412,7 +434,7 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if !uOK || !pOK {
 		s.limiter.fail(ip)
 		s.store.AddAudit(AuditEntry{Actor: "console:" + ip, Action: "console.login", Result: "fail", Detail: req.Username})
-		_ = s.store.Save()
+		// 同上：失败审计靠后台批量落盘，不在这里同步写
 		writeErr(w, 401, 20101, "invalid credentials", "账号或密码错误")
 		return
 	}

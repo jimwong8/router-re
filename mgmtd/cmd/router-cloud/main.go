@@ -64,6 +64,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("router-cloud: %v", err)
 	}
+	// 审计/拒绝记录靠后台每 5 秒批量落盘，避免公开端点被拒绝请求刷盘
+	svc.StartAuditAutoSave(5 * time.Second)
 
 	srv := &http.Server{
 		Addr:              *addr,

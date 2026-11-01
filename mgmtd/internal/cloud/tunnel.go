@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -61,13 +62,23 @@ func (s *Service) handleEnroll(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 422, 20002, "name required", "设备名不能为空")
 		return
 	}
+	// 注册是公开端点：按 IP 限制失败次数，避免被拿假令牌无限试探。
+	ip := clientIP(r)
+	if wait := s.enrollLimiter.blocked(ip); wait > 0 {
+		writeErr(w, 429, 20005, "too many attempts",
+			fmt.Sprintf("注册失败次数过多，请 %d 分钟后再试", int(wait.Minutes())+1))
+		return
+	}
 	probeID := randHex(8)
 	if !s.store.ConsumeToken(req.Token, probeID) {
-		s.store.AddAudit(AuditEntry{Actor: "enroll:" + clientIP(r), Action: "device.enroll", Result: "fail", Detail: "令牌无效/过期/已用"})
-		_ = s.store.Save()
+		s.enrollLimiter.fail(ip)
+		s.store.AddAudit(AuditEntry{Actor: "enroll:" + ip, Action: "device.enroll", Result: "fail", Detail: "令牌无效/过期/已用"})
+		// 不在这里同步 Save：这是公开端点，同步写盘会被用来刷盘。
+		// AddAudit 已置 dirty，由后台批量落盘。
 		writeErr(w, 401, 20003, "invalid token", "注册令牌无效、已过期或已被使用")
 		return
 	}
+	s.enrollLimiter.reset(ip)
 	dev, secret := s.store.RegisterDevice(Device{
 		Name: req.Name, Model: req.Model, Version: req.Version, Labels: req.Labels,
 		RemoteIP: clientIP(r),
