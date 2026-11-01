@@ -2,6 +2,12 @@
 mgmtd/bin/
 web/node_modules/
 web/dist/
+# 误编到仓库根的二进制（应在 cmd 下 go build 到 bin/ 或 /tmp）
+/mgmtd/mgmtd
+/mgmtd/router-cloud
+/mgmtd/router-agent
+# 本地实验工作区
+/workspace/
 # 环境
 .env
 
