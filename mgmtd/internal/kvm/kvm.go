@@ -275,6 +275,56 @@ func (m *Manager) runFor(name, verb, verbCN string, extra ...string) error {
 
 var vmNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
 
+// netNameRe 是 libvirt 网络名的保守子集（与 vmNameRe 同形）。
+var netNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
+
+// validNetworkName 校验 Network 字段。
+//
+// 这个字段以前完全没被校验过：ValidateCreate 只查 Name/VCPU/Memory/DiskPath/ISO，
+// 而 RenderXML 把它原样插进 <source network='...'/>。传
+//   default'/><console type='file' path='/etc/passwd
+// 就能在 <devices> 里凭空多出一个任意 XML 元素——libvirt 接受 <hostdev>
+// 就会把宿主机 PCI 设备直通给 guest，直接越出虚拟化边界。
+func validNetworkName(name string) error {
+	if name == "" {
+		return nil // 空表示用默认网络
+	}
+	if !netNameRe.MatchString(name) {
+		return fmt.Errorf("网络名只能用字母、数字、点、下划线、短横线，且以字母或数字开头（最长 63）: %q", name)
+	}
+	return nil
+}
+
+// xmlEscape 转义 XML 文本/属性里的五个特殊字符，并剔除 XML 1.0 不允许的
+// 控制字符。
+//
+// 渲染层必须自己转义，不能依赖调用方跑过校验：即使将来新增字段忘了校验，
+// 转义也能保证注入的值只会是"一段字符串"，改不了文档结构。
+//
+// 控制字符（除 	 \n \r 外）在 XML 1.0 里连转义都不允许出现，原样写进去
+// 会让 libvirt 报解析错误——等于一次请求就能让这台虚机永远定义不出来。
+func xmlEscape(s string) string {
+	var clean strings.Builder
+	for _, r := range s {
+		switch {
+		case r == '	' || r == '\n' || r == '\r':
+			clean.WriteByte(' ')
+		case r < 0x20 || r == 0x7f:
+			// 丢弃
+		default:
+			clean.WriteRune(r)
+		}
+	}
+	r := strings.NewReplacer(
+		"&", "&amp;",
+		"<", "&lt;",
+		">", "&gt;",
+		`"`, "&quot;",
+		"'", "&apos;",
+	)
+	return r.Replace(clean.String())
+}
+
 // validName 校验虚机名：libvirt 允许的保守子集，且禁止以 - 开头（会被当成参数）。
 func validName(name string) error {
 	if name == "" {
@@ -305,6 +355,12 @@ type CreateSpec struct {
 func ValidateCreate(s CreateSpec) error {
 	if err := validName(s.Name); err != nil {
 		return err
+	}
+	// Network 以前完全没校验。它直接进 <source network='...'/>，带引号就能
+	// 闭合属性并在 <devices> 里插入任意 XML 元素（如 <hostdev> 直通宿主机
+	// PCI 设备）。这里与虚机名同一套白名单。
+	if err := validNetworkName(s.Network); err != nil {
+		return fmt.Errorf("网络: %w", err)
 	}
 	if s.VCPU < 1 || s.VCPU > 64 {
 		return fmt.Errorf("vCPU 必须在 1-64 之间")
@@ -353,9 +409,19 @@ func RenderXML(s CreateSpec) string {
 	if net == "" {
 		net = "default"
 	}
+	// 渲染层兜底：所有插值一律转义。即使调用方漏了 ValidateCreate，
+	// 注入的值也只能是"一段字符串"，无法闭合属性或插入新元素。
+	// Network 额外做白名单过滤——它不是路径，非法值直接回落到 default。
+	if !netNameRe.MatchString(net) {
+		net = "default"
+	}
+	name := xmlEscape(s.Name)
+	diskPath := xmlEscape(s.DiskPath)
+	iso := xmlEscape(s.ISO)
+	net = xmlEscape(net)
 	var b strings.Builder
 	b.WriteString("<domain type='kvm'>\n")
-	fmt.Fprintf(&b, "  <name>%s</name>\n", s.Name)
+	fmt.Fprintf(&b, "  <name>%s</name>\n", name)
 	b.WriteString("  <memory unit='MiB'>" + strconv.Itoa(s.MemoryMiB) + "</memory>\n")
 	b.WriteString("  <vcpu>" + strconv.Itoa(s.VCPU) + "</vcpu>\n")
 	b.WriteString("  <os>\n    <type arch='x86_64'>hvm</type>\n    <boot dev='hd'/>\n")
@@ -366,11 +432,11 @@ func RenderXML(s CreateSpec) string {
 	b.WriteString("  <features><acpi/><apic/></features>\n")
 	b.WriteString("  <devices>\n")
 	b.WriteString("    <disk type='file' device='disk'>\n      <driver name='qemu' type='qcow2'/>\n")
-	fmt.Fprintf(&b, "      <source file='%s'/>\n", s.DiskPath)
+	fmt.Fprintf(&b, "      <source file='%s'/>\n", diskPath)
 	b.WriteString("      <target dev='vda' bus='virtio'/>\n    </disk>\n")
 	if s.ISO != "" {
 		b.WriteString("    <disk type='file' device='cdrom'>\n")
-		fmt.Fprintf(&b, "      <source file='%s'/>\n", s.ISO)
+		fmt.Fprintf(&b, "      <source file='%s'/>\n", iso)
 		b.WriteString("      <target dev='hda' bus='ide'/>\n      <readonly/>\n    </disk>\n")
 	}
 	fmt.Fprintf(&b, "    <interface type='network'><source network='%s'/><model type='virtio'/></interface>\n", net)

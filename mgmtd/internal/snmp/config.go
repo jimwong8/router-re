@@ -85,8 +85,8 @@ func Validate(c Config) error {
 		if len(com.Name) < 1 || len(com.Name) > 64 {
 			return fmt.Errorf("communities[%d] name length must be 1-64", i)
 		}
-		if strings.ContainsAny(com.Name, " \t") {
-			return fmt.Errorf("communities[%d] name must not contain spaces", i)
+		if strings.ContainsAny(com.Name, " 	\r\n\v\f") {
+			return fmt.Errorf("communities[%d] name must not contain whitespace or control characters", i)
 		}
 		if com.Access != "ro" && com.Access != "rw" {
 			return fmt.Errorf("communities[%d] access must be ro or rw", i)
@@ -145,10 +145,53 @@ func Validate(c Config) error {
 		}
 	}
 
+	// Location / Contact 以前完全没校验，而它们是自由文本，会被原样拼进
+	// snmpd.conf。snmpd 的配置以行为单位，一个换行就能注入任意指令
+	// ——例如 "机房\nrwcommunity evil" 直接给自己开一个读写 community。
+	// 注意 prefix() 只在整段字符串前加一次 "# "，"禁用" 状态挡不住这种注入。
+	if err := validSnmpText("location", c.Location); err != nil {
+		return err
+	}
+	if err := validSnmpText("contact", c.Contact); err != nil {
+		return err
+	}
+
 	if c.Enabled && len(c.Communities) == 0 && len(c.V3Users) == 0 {
 		return errors.New("enabled config must define at least one community or v3 user")
 	}
 	return nil
+}
+
+// validSnmpText 校验会进入 snmpd.conf 的自由文本字段。
+func validSnmpText(field, v string) error {
+	if v == "" {
+		return nil
+	}
+	if len(v) > 255 {
+		return fmt.Errorf("%s longer than 255 chars (%d)", field, len(v))
+	}
+	for _, r := range v {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("%s must not contain control characters or newlines (got %#U)", field, r)
+		}
+	}
+	return nil
+}
+
+// singleLine 把任意字符串压成单行，渲染层兜底用。
+func singleLine(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r == '	' || r == '\n' || r == '\r' || r == '\v' || r == '\f':
+			b.WriteByte(' ')
+		case r < 0x20 || r == 0x7f:
+			// 丢弃
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // RenderSnmpd 将 Config 渲染为 snmpd.conf 风格文本。
@@ -165,16 +208,18 @@ func RenderSnmpd(c Config) string {
 	}
 	b.WriteString(prefix(fmt.Sprintf("agentAddress udp:%d\n", c.Port)))
 	if c.Location != "" {
-		b.WriteString(prefix("sysLocation " + c.Location + "\n"))
+		// 渲染层兜底：全部压成单行。prefix("# ") 只作用于整段字符串的**第一行**，
+		// 值里带换行就能让后面的行脱离注释、直接生效。
+		b.WriteString(prefix("sysLocation " + singleLine(c.Location) + "\n"))
 	}
 	if c.Contact != "" {
-		b.WriteString(prefix("sysContact " + c.Contact + "\n"))
+		b.WriteString(prefix("sysContact " + singleLine(c.Contact) + "\n"))
 	}
 	for _, com := range c.Communities {
 		if com.Access == "rw" {
-			b.WriteString(prefix("rwcommunity " + com.Name + "\n"))
+			b.WriteString(prefix("rwcommunity " + singleLine(com.Name) + "\n"))
 		} else {
-			b.WriteString(prefix("rocommunity " + com.Name + "\n"))
+			b.WriteString(prefix("rocommunity " + singleLine(com.Name) + "\n"))
 		}
 	}
 	needV3Comment := false
@@ -193,7 +238,7 @@ func RenderSnmpd(c Config) string {
 		b.WriteString(prefix("# 注意：createUser 行含明文密码，首次启动后应改为 rouser 并删除此行中的密码（snmpd 安全惯例）。\n"))
 	}
 	for _, t := range c.TrapTargets {
-		b.WriteString(prefix("trapsink " + t + "\n"))
+		b.WriteString(prefix("trapsink " + singleLine(t) + "\n"))
 	}
 	return b.String()
 }

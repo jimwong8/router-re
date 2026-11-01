@@ -94,7 +94,42 @@ func ValidateL2TP(c L2TPConfig) error {
 	if len(c.LeftID) > 100 || len(c.RightID) > 100 {
 		return fmt.Errorf("IPSec 身份不能超过 100 个字符")
 	}
+	// LeftID/RightID 以前只查长度，不查内容。它们是自由文本，会原样写进
+	// ipsec.conf（leftid=/rightid=）。ipsec.conf 以行为单位，换行就能插入
+	// 任意配置指令——例如改掉 leftsubnet 或追加一条 conn。
+	if err := validIPSecID("leftid", c.LeftID); err != nil {
+		return err
+	}
+	if err := validIPSecID("rightid", c.RightID); err != nil {
+		return err
+	}
 	return validateVPNUsers(c.Users, pool)
+}
+
+// validIPSecID 校验 ipsec.conf 里的身份字段（自由文本，但不能跨行）。
+func validIPSecID(field, v string) error {
+	for _, r := range v {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("%s 不能包含控制字符或换行（发现 %#U）", field, r)
+		}
+	}
+	return nil
+}
+
+// singleLine 把任意字符串压成单行，渲染层兜底用。
+func singleLine(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r == '	' || r == '\n' || r == '\r' || r == '\v' || r == '\f':
+			b.WriteByte(' ')
+		case r < 0x20 || r == 0x7f:
+			// 丢弃
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // RenderXl2tpdConf 生成 /etc/xl2tpd/xl2tpd.conf。
@@ -160,6 +195,11 @@ func RenderXl2tpdOptions(c L2TPConfig) string {
 		dns = []string{"223.5.5.5", "119.29.29.29"}
 	}
 	for _, d := range dns {
+		// 渲染层兜底：ms-dns 只接受 IP 字面量。校验层已用 net.ParseIP 挡过，
+		// 但渲染器不该依赖调用方——一个换行就能插入任意 pppd 选项。
+		if net.ParseIP(d) == nil {
+			continue
+		}
 		fmt.Fprintf(&b, "ms-dns %s\n", d)
 	}
 	fmt.Fprintf(&b, "mtu %d\n", mtu)
@@ -169,7 +209,8 @@ func RenderXl2tpdOptions(c L2TPConfig) string {
 
 // RenderIPSecConf 生成 strongSwan 的 /etc/ipsec.d/router-re-l2tp.conf。
 func RenderIPSecConf(c L2TPConfig) string {
-	leftID := c.LeftID
+	// 渲染层兜底：leftid/rightid 是自由文本，换行会插入任意 ipsec.conf 指令。
+	leftID := singleLine(c.LeftID)
 	if leftID == "" {
 		leftID = c.ServerIP
 	}

@@ -209,7 +209,7 @@ func hasExplicitMPPE(c PPTPConfig) bool {
 func RenderChapSecrets(users []VPNUser) string {
 	var b strings.Builder
 	b.WriteString("# router-re PPTP/L2TP accounts\n")
-	b.WriteString("# username\tserver\tpassword\tIP addresses\n")
+	b.WriteString("# username	server	password	IP addresses\n")
 	sorted := append([]VPNUser(nil), users...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Username < sorted[j].Username })
 	for _, u := range sorted {
@@ -217,7 +217,13 @@ func RenderChapSecrets(users []VPNUser) string {
 		if u.IP != "" {
 			addr = u.IP
 		}
-		fmt.Fprintf(&b, "%s\t*\t%s\t%s\n", u.Username, u.Password, addr)
+		// 渲染层兜底：chap-secrets 每行是 "用户名 服务器 密码 IP"。
+		// 用户名或密码带换行就能凭空多出一个账号（等于开一条 VPN 后门），
+		// 带制表符则会把字段错位。这里统一压成单行并去掉分隔符。
+		user := strings.NewReplacer("	", " ", "\n", " ", "\r", " ").Replace(u.Username)
+		pass := strings.NewReplacer("	", " ", "\n", " ", "\r", " ").Replace(u.Password)
+		ip := strings.NewReplacer("	", " ", "\n", " ", "\r", " ").Replace(addr)
+		fmt.Fprintf(&b, "%s	*	%s	%s\n", user, pass, ip)
 	}
 	return b.String()
 }
