@@ -4678,28 +4678,28 @@ func (s *Server) handleSystemUpgrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !req.Confirm {
-		writeJSON(w, 422, errBody(10492, "confirm required", `body must be {"confirm":true}`))
+		writeJSON(w, 422, errBody(10520, "confirm required", `body must be {"confirm":true}`))
 		return
 	}
 	req.Checksum = strings.ToLower(strings.TrimSpace(req.Checksum))
 	if len(req.Checksum) != 64 || !isHexString(req.Checksum) {
-		writeJSON(w, 400, errBody(10493, "checksum required",
+		writeJSON(w, 400, errBody(10521, "checksum required",
 			"必须提供 64 位十六进制 SHA256；没有完整性校验的升级一律拒绝"))
 		return
 	}
 	u, err := url.Parse(strings.TrimSpace(req.URL))
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-		writeJSON(w, 400, errBody(10494, "bad url", "只接受 http/https 绝对地址"))
+		writeJSON(w, 400, errBody(10522, "bad url", "只接受 http/https 绝对地址"))
 		return
 	}
 
 	exe, err := os.Executable()
 	if err != nil {
-		writeJSON(w, 500, errBody(10495, "executable path", err.Error()))
+		writeJSON(w, 500, errBody(10523, "executable path", err.Error()))
 		return
 	}
 	if exe, err = filepath.EvalSymlinks(exe); err != nil {
-		writeJSON(w, 500, errBody(10496, "resolve symlink", err.Error()))
+		writeJSON(w, 500, errBody(10524, "resolve symlink", err.Error()))
 		return
 	}
 
@@ -4709,17 +4709,17 @@ func (s *Server) handleSystemUpgrade(w http.ResponseWriter, r *http.Request) {
 	client := &http.Client{Timeout: downloadTimeout}
 	resp, err := client.Get(u.String())
 	if err != nil {
-		writeJSON(w, 502, errBody(10497, "download failed", err.Error()))
+		writeJSON(w, 502, errBody(10525, "download failed", err.Error()))
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		writeJSON(w, 502, errBody(10498, "download status", fmt.Sprintf("HTTP %d", resp.StatusCode)))
+		writeJSON(w, 502, errBody(10526, "download status", fmt.Sprintf("HTTP %d", resp.StatusCode)))
 		return
 	}
 	f, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
 	if err != nil {
-		writeJSON(w, 500, errBody(10499, "create temp", err.Error()))
+		writeJSON(w, 500, errBody(10527, "create temp", err.Error()))
 		return
 	}
 	h := sha256.New()

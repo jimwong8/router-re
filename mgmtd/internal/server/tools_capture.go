@@ -93,14 +93,14 @@ func (s *Server) handleCaptureStart(w http.ResponseWriter, r *http.Request) {
 	}
 	// 网卡名作为 tcpdump -i 的值传入，先校验字符集，避免奇怪输入。
 	if err := acl.ValidateIface(req.Interface); err != nil {
-		writeJSON(w, 422, errBody(10493, "invalid interface", err.Error()))
+		writeJSON(w, 422, errBody(10518, "invalid interface", err.Error()))
 		return
 	}
 	// filter 作为 tcpdump 的末位位置参数传入。若无校验，攻击者传 "-z /tmp/x.sh"
 	// 之类会被 getopt 当作 tcpdump 选项解析（-z 可执行命令、-F 可读过滤文件），
 	// 属于参数注入。这里挡掉前导 '-'、控制字符与超长。
 	if err := validateBPFFilter(req.Filter); err != nil {
-		writeJSON(w, 422, errBody(10494, "invalid filter", err.Error()))
+		writeJSON(w, 422, errBody(10519, "invalid filter", err.Error()))
 		return
 	}
 
