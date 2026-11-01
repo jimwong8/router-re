@@ -1,7 +1,7 @@
 # 错误码审计报告 (104xx)
 
 > 扫描: /home/jimwong/projects/router-re/mgmtd  (mgmtd Go 源码)
-> 生成: 2026-11-02 04:12:08
+> 生成: 2026-11-02 04:58:42
 
 ## 1. 概览
 
