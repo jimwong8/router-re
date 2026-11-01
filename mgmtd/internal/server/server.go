@@ -918,9 +918,8 @@ func (s *Server) handleSetFirewallRules(w http.ResponseWriter, r *http.Request) 
 	var req struct {
 		Rules []firewall.Rule `json:"rules"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.logAudit(r, "firewall.rules.set", "", "fail", "json decode: "+err.Error())
-		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+	if err := decodeReplaceList(r, "rules", &req.Rules); err != nil {
+		s.writeReplaceListError(w, r, "firewall.rules.set", "rules", err)
 		return
 	}
 	// Validate syntax before storing
@@ -987,8 +986,8 @@ func (s *Server) handleSetNATRules(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Rules []nat.NATRule `json:"rules"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+	if err := decodeReplaceList(r, "rules", &req.Rules); err != nil {
+		s.writeReplaceListError(w, r, "nat.rules.set", "rules", err)
 		return
 	}
 	oldMax := s.maxIndexedIndex("nat", "type", 2048)
@@ -1098,6 +1097,18 @@ func (s *Server) handleSetWANLinks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// 兜底排空请求体：路由不匹配(404/405)或 handler 提前返回时，Go 的
+	// http.Server 只会自动丢弃 256KB，超出部分会让服务端直接关闭连接，
+	// 客户端看到的是 "connection reset by peer" 而不是 405/413 —— 例如
+	// POST 1MB 到 GET-only 端点就会被误判为服务端崩溃。
+	// 仅对 Content-Length ≤ 2MB 的请求排空（典型的手滑/误用），更大的 body
+	// 说明是异常流量，交给服务端直接关闭，避免排空被用来放大资源消耗。
+	if r.Body != nil && r.Body != http.NoBody && r.ContentLength > 0 && r.ContentLength <= 2<<20 {
+		defer func() {
+			_, _ = io.Copy(io.Discard, io.LimitReader(r.Body, r.ContentLength))
+			_ = r.Body.Close()
+		}()
+	}
 	s.mux.ServeHTTP(w, r)
 }
 
@@ -1179,9 +1190,8 @@ func (s *Server) handleSetQoSLimits(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Limits []qos.RateLimit `json:"limits"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.logAudit(r, "qos.limits.set", "", "fail", "json decode: "+err.Error())
-		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+	if err := decodeReplaceList(r, "limits", &req.Limits); err != nil {
+		s.writeReplaceListError(w, r, "qos.limits.set", "limits", err)
 		return
 	}
 	for _, lim := range req.Limits {
@@ -1560,7 +1570,7 @@ func (s *Server) Run() error {
 	// IdleTimeout 只限制 keep-alive 空闲连接，不误伤进行中的传输。
 	srv := &http.Server{
 		Addr:              s.cfg.Addr,
-		Handler:           s.mux,
+		Handler:           s, // 必须是 s 而不是 s.mux：ServeHTTP 里做了请求体排空等兜底
 		ReadHeaderTimeout: 15 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		ReadTimeout:       0,
@@ -4994,7 +5004,14 @@ func (s *Server) handleWebfilterApply(w http.ResponseWriter, r *http.Request) {
 	}
 	// 原来这里吞掉 decode 错误：body 写错会被当成"规则为空"，
 	// 于是一次手滑的请求就把过滤规则清空了，而且返回 200。
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	// 现在连"合法 JSON 但字段名写错"也拦掉：必须显式带 "rules"（[] 表示清空）。
+	if err := decodeReplaceList(r, "rules", &req.Rules); err != nil {
+		if errors.Is(err, errMissingListField) {
+			s.writeReplaceListError(w, r, "webfilter.apply", "rules", err)
+			return
+		}
+		// 保持该端点既有错误码契约：坏 body 一律 10504
+		s.logAudit(r, "webfilter.apply", "", "fail", "invalid body: "+err.Error())
 		writeJSON(w, 400, errBody(10504, "invalid body", err.Error()))
 		return
 	}
