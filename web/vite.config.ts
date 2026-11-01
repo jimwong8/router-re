@@ -11,6 +11,14 @@ const apiProxy = {
 
 export default defineConfig({
   plugins: [vue()],
+  build: {
+    rollupOptions: {
+      input: {
+        main: 'index.html',
+        cloud: 'cloud.html',
+      },
+    },
+  },
   server: { proxy: apiProxy },
   // `vite preview` serves the production build; enable the same proxy so the
   // built app can be exercised end-to-end without the dev server's transform.
