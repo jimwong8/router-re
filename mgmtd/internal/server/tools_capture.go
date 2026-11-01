@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jimwong/router-re/mgmtd/internal/acl"
 )
 
 // CaptureJob 是一次抓包任务的运行时状态。
@@ -49,6 +51,30 @@ func newCaptureID() string {
 	return fmt.Sprintf("%s-%06d", time.Now().Format("20060102-150405"), rand.Intn(1000000))
 }
 
+// validateBPFFilter 校验 tcpdump 抓包过滤表达式，防止参数注入。
+//
+// tcpdump 把 filter 当作末位位置参数，但 getopt 仍会把以 '-' 开头的参数解析成
+// tcpdump 自身选项（例如 -z 指定文件轮转后执行的命令、-F 从文件读过滤规则）。
+// 因此不允许前导 '-'（去空格后），也不允许控制字符，并限制长度。正常 BPF 语法
+// （tcp/udp/host/port/and/or/括号/数字/冒号等）不受影响。
+func validateBPFFilter(f string) error {
+	if f == "" {
+		return nil
+	}
+	if len(f) > 512 {
+		return fmt.Errorf("过滤表达式过长（上限 512 字节）")
+	}
+	if strings.HasPrefix(strings.TrimSpace(f), "-") {
+		return fmt.Errorf("过滤表达式不能以 '-' 开头")
+	}
+	for _, r := range f {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("过滤表达式含控制字符")
+		}
+	}
+	return nil
+}
+
 // handleCaptureStart 启动抓包。POST /api/v1/tools/capture/start
 func (s *Server) handleCaptureStart(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -63,6 +89,18 @@ func (s *Server) handleCaptureStart(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(req.Interface) == "" {
 		writeJSON(w, 422, errBody(10492, "missing interface", "interface is required"))
+		return
+	}
+	// 网卡名作为 tcpdump -i 的值传入，先校验字符集，避免奇怪输入。
+	if err := acl.ValidateIface(req.Interface); err != nil {
+		writeJSON(w, 422, errBody(10493, "invalid interface", err.Error()))
+		return
+	}
+	// filter 作为 tcpdump 的末位位置参数传入。若无校验，攻击者传 "-z /tmp/x.sh"
+	// 之类会被 getopt 当作 tcpdump 选项解析（-z 可执行命令、-F 可读过滤文件），
+	// 属于参数注入。这里挡掉前导 '-'、控制字符与超长。
+	if err := validateBPFFilter(req.Filter); err != nil {
+		writeJSON(w, 422, errBody(10494, "invalid filter", err.Error()))
 		return
 	}
 
