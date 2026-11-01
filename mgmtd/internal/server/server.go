@@ -1097,6 +1097,11 @@ func (s *Server) handleSetWANLinks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// 安全响应头：防止点击劫持、MIME 混淆、泄露 Referer
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Referrer-Policy", "same-origin")
+
 	// 兜底排空请求体：路由不匹配(404/405)或 handler 提前返回时，Go 的
 	// http.Server 只会自动丢弃 256KB，超出部分会让服务端直接关闭连接，
 	// 客户端看到的是 "connection reset by peer" 而不是 405/413 —— 例如
