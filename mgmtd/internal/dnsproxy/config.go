@@ -108,14 +108,25 @@ func RenderDnsmasq(c Config) string {
 	}
 	b.WriteString(pfx + "no-resolv\n")
 	for _, u := range c.Upstreams {
-		server := strings.TrimSpace(u.Address)
+		// 渲染层兜底：Address/Source 必须是 IP 字面量。注意 pfx="# " 只是
+		// 注释前缀，一旦 Address 里带换行，"# server=x\nserver=/evil.com/1.2.3.4"
+		// 的**第二行会脱离注释**变成生效指令——等于完整的 DNS 劫持。
+		addr := strings.TrimSpace(u.Address)
+		if net.ParseIP(addr) == nil {
+			continue
+		}
+		server := addr
 		if u.Port != 0 {
 			server += "#" + strconv.Itoa(UpstreamPort(u.Port))
 		} else {
 			server += "#53"
 		}
 		if u.Source != "" {
-			server += "@" + u.Source
+			src := strings.TrimSpace(u.Source)
+			if net.ParseIP(src) == nil {
+				continue
+			}
+			server += "@" + src
 		}
 		fmt.Fprintf(&b, "%sserver=%s\n", pfx, server)
 	}
@@ -127,11 +138,36 @@ func RenderDnsmasq(c Config) string {
 		b.WriteString(pfx + "bogus-priv\n")
 	}
 	for _, h := range c.Hosts {
+		ip := strings.TrimSpace(h.IP)
+		if net.ParseIP(ip) == nil {
+			continue
+		}
 		for _, n := range h.Names {
-			fmt.Fprintf(&b, "%saddress=/%s/%s\n", pfx, strings.TrimSpace(n), strings.TrimSpace(h.IP))
+			name := strings.TrimSpace(n)
+			// 名字只能含域名字符：带空白/换行会让 address= 变成两条指令。
+			if !isSimpleHostname(name) {
+				continue
+			}
+			fmt.Fprintf(&b, "%saddress=/%s/%s\n", pfx, name, ip)
 		}
 	}
 	return b.String()
+}
+
+// isSimpleHostname 判断是否为可安全写进 dnsmasq/hosts 的主机名。
+func isSimpleHostname(n string) bool {
+	if n == "" || len(n) > 253 {
+		return false
+	}
+	for _, r := range n {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '.' || r == '-' || r == '_':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // RenderHosts renders an /etc/hosts style mapping.

@@ -2,6 +2,7 @@ package l7filter
 
 import (
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/jimwong/router-re/mgmtd/internal/execx"
@@ -23,10 +24,47 @@ func RenderDnsmasqBlock(domains []string) string {
 		if d == "" {
 			continue
 		}
+		// 渲染层也要挡一次：调用方若漏了 ValidateDomainPattern，这里是最后
+		// 一道闸。域名里出现换行/空白/斜杠/分号等字符，拼进 dnsmasq 配置后
+		// 会变成一整行新指令——例如 "x\nserver=/evil.com/1.2.3.4" 能把任意
+		// 域名劫持到指定 IP。宁可跳过这条，也不要把注入原样写下去。
+		if !isPlainDomain(d) {
+			continue
+		}
 		fmt.Fprintf(&b, "address=/%s/0.0.0.0\n", d)
 		fmt.Fprintf(&b, "address=/%s/::\n", d)
 	}
 	return b.String()
+}
+
+// isPlainDomain 判断字符串是否只含域名字符集。允许前导 "*." 通配。
+func isPlainDomain(d string) bool {
+	s := strings.TrimPrefix(d, "*.")
+	if s == "" || len(s) > 253 {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '.' || r == '-' || r == '_':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// isIPOrCIDR 判断是否为 IP 字面量或 CIDR。只做字符集 + ParseIP/ParseCIDR
+// 校验，不接受任何空白、换行、逗号或花括号。
+func isIPOrCIDR(s string) bool {
+	if s == "" || len(s) > 64 {
+		return false
+	}
+	if strings.Contains(s, "/") {
+		_, _, err := net.ParseCIDR(s)
+		return err == nil
+	}
+	return net.ParseIP(s) != nil
 }
 
 // RenderNftIpBlock 把一组 IP 渲染成 nftables 丢弃规则。
@@ -48,6 +86,11 @@ func RenderNftIpBlock(ips []string) string {
 	for _, ip := range ips {
 		ip = strings.TrimSpace(ip)
 		if ip == "" {
+			continue
+		}
+		// 只接受 IP/CIDR 字面量。nft 的 set elements 是纯文本拼接，
+		// "1.2.3.4\nflush ruleset" 会把整个表结构写坏——渲染层必须先挡。
+		if !isIPOrCIDR(ip) {
 			continue
 		}
 		parts = append(parts, ip)

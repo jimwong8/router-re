@@ -36,6 +36,11 @@ func RenderNftables(rules []Rule) string {
 	}
 
 	for _, ch := range order {
+		// 链名同样只允许标识符：换行会把 chain 声明拆成两行，后面那段
+		// 就成了自由指令（例如 "forward\nflush ruleset"）。
+		if !chainRe.MatchString(ch) {
+			continue
+		}
 		hook := ""
 		switch ch {
 		case "input":
@@ -53,6 +58,11 @@ func RenderNftables(rules []Rule) string {
 		}
 		for _, r := range chainRules[ch] {
 			parts := renderMatch(r)
+			// 动作必须是白名单里的终结符。否则 "accept\nflush ruleset" 这类值
+			// 会直接写成两行——渲染层不能假设调用方一定先跑过 Validate。
+			if !actionAllow[r.Action] {
+				continue
+			}
 			cond := ""
 			if len(parts) > 0 {
 				cond = strings.Join(parts, " ") + " "
@@ -67,19 +77,22 @@ func RenderNftables(rules []Rule) string {
 }
 
 // renderMatch builds the match expression for a single rule.
+//
+// 每个字段都先过白名单：这里是渲染层，不能假设调用方一定跑了 Validate。
+// 任何一个值带换行/分号/空格都会让一行规则变成多条指令。
 func renderMatch(r Rule) []string {
 	var parts []string
-	if r.Src != "" {
+	if r.Src != "" && addrRe.MatchString(r.Src) {
 		parts = append(parts, fmt.Sprintf("ip saddr %s", r.Src))
 	}
-	if r.Dst != "" {
+	if r.Dst != "" && addrRe.MatchString(r.Dst) {
 		parts = append(parts, fmt.Sprintf("ip daddr %s", r.Dst))
 	}
-	if r.Proto != "" {
-		if r.DPort != "" {
-			parts = append(parts, fmt.Sprintf("%s dport %s", r.Proto, r.DPort))
+	if r.Proto != "" && protoAllow[strings.ToLower(r.Proto)] {
+		if r.DPort != "" && portRe.MatchString(r.DPort) {
+			parts = append(parts, fmt.Sprintf("%s dport %s", strings.ToLower(r.Proto), r.DPort))
 		} else {
-			parts = append(parts, r.Proto)
+			parts = append(parts, strings.ToLower(r.Proto))
 		}
 	}
 	return parts
