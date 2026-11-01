@@ -1,7 +1,7 @@
 # 错误码审计报告 (104xx)
 
 > 扫描: /home/jimwong/projects/router-re/mgmtd  (mgmtd Go 源码)
-> 生成: 2026-10-29 21:16:54
+> 生成: 2026-11-02 04:12:08
 
 ## 1. 概览
 
@@ -27,6 +27,7 @@
 ## 4. 多文件重复定义 (信息性)
 
 - `10435`: internal/server/p17.go, internal/server/wechat.go
+- `10491`: internal/server/server.go, internal/server/tools_capture.go
 
 ## 5. 源码中有但文档未记录
 
@@ -85,7 +86,7 @@
 | 10488 | "missing cidr" | internal/server/server.go |
 | 10489 | "invalid cidr" | internal/server/server.go |
 | 10490 | "ipv6 not supported" | internal/server/server.go |
-| 10491 | "invalid body" | internal/server/tools_capture.go |
+| 10491 | "invalid body" | internal/server/server.go, internal/server/tools_capture.go |
 | 10492 | "missing interface" | internal/server/tools_capture.go |
 | 10493 | "capture not found" | internal/server/tools_capture.go |
 | 10494 | "bad path" | internal/server/tools_capture.go |
