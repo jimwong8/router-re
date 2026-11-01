@@ -6,8 +6,8 @@ import (
 )
 
 func TestRegisterAndHeartbeat(t *testing.T) {
-	m := NewManager()
-	dev := Device{ID: "dev-test-01", Name: "Router-A", Model: "RM200", Version: "v1.2.3"}
+	m := NewLegacyManager()
+	dev := LegacyDevice{ID: "dev-test-01", Name: "Router-A", Model: "RM200", Version: "v1.2.3"}
 	if err := m.Register(dev); err != nil {
 		t.Fatalf("Register failed: %v", err)
 	}
@@ -31,8 +31,8 @@ func TestRegisterAndHeartbeat(t *testing.T) {
 }
 
 func TestPushConfigAndPoll(t *testing.T) {
-	m := NewManager()
-	m.Register(Device{ID: "dev-cfg", Name: "C", Model: "M", Version: "1"})
+	m := NewLegacyManager()
+	m.Register(LegacyDevice{ID: "dev-cfg", Name: "C", Model: "M", Version: "1"})
 	ver, err := m.PushConfig("dev-cfg", map[string]string{"dns": "8.8.8.8"})
 	if err != nil {
 		t.Fatalf("PushConfig failed: %v", err)

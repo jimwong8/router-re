@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
@@ -14,11 +15,13 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/jimwong/router-re/mgmtd/internal/account"
@@ -77,6 +80,9 @@ type Config struct {
 	// UserFile 是 RBAC 账号表落盘路径。空串=纯内存（测试用）。
 	// 不设的话重启会清空所有非 admin 账号（实测过：建的用户重启后登录不上）。
 	UserFile string
+	// Version 是编译期注入的版本号（-ldflags "-X main.Version=..."）。
+	// 通过 /api/v1/health 暴露，好让在线升级后能确认设备实际跑的是哪个版本。
+	Version string
 }
 
 type Server struct {
@@ -85,7 +91,7 @@ type Server struct {
 	mux         *http.ServeMux
 	store       config.Store
 	tm          *auth.TokenManager
-	cloudMgr    *cloud.Manager
+	cloudMgr    *cloud.LegacyManager
 	pppoeUsers  []pppoe.User
 	audit       *audit.Logger
 	// loginLimiter throttles failed login attempts per remote IP to blunt
@@ -209,7 +215,7 @@ func New(cfg Config) *Server {
 		storeErr:     storeErr,
 		pppoeUsers:   []pppoe.User{},
 		tm:           auth.NewTokenManager(cfg.SecretKey, 12*time.Hour),
-		cloudMgr:     cloud.NewManager(),
+		cloudMgr:     cloud.NewLegacyManager(),
 		dhcpApplier:  dhcp.NewApplier(),
 		loginLimiter: newLoginLimiter(5, time.Minute),
 		taskQ:        taskq.New(taskStorePath, 2, 50),
@@ -271,7 +277,11 @@ func New(cfg Config) *Server {
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, map[string]string{"status": "ok"})
+		v := s.cfg.Version
+		if v == "" {
+			v = "dev"
+		}
+		writeJSON(w, 200, map[string]string{"status": "ok", "version": v})
 	})
 	s.mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
 	s.mux.HandleFunc("GET /api/v1/system/info", s.auth(s.handleSystemInfo))
@@ -364,6 +374,18 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/vpn/openvpn/services", s.auth(s.auditWrap("vpn.openvpn.save", s.handleSetOpenVPN)))
 	s.mux.HandleFunc("POST /api/v1/vpn/openvpn/client-conf", s.auth(s.auditWrap("vpn.openvpn.clientconf", s.handleOpenVPNClientConf)))
 	s.mux.HandleFunc("GET /api/v1/vpn/openvpn/status", s.auth(s.handleGetOpenVPNStatus))
+	// EasyTier 去中心化组网（配置 / 启停 / 运行态 / 对等节点 / 配置预览）
+	s.mux.HandleFunc("GET /api/v1/vpn/easytier/config", s.auth(s.handleGetEasyTierConfig))
+	s.mux.HandleFunc("POST /api/v1/vpn/easytier/config", s.auth(s.auditWrap("vpn.easytier.save", s.handleSetEasyTierConfig)))
+	s.mux.HandleFunc("POST /api/v1/vpn/easytier/preview", s.auth(s.handleEasyTierPreview))
+	s.mux.HandleFunc("GET /api/v1/vpn/easytier/status", s.auth(s.handleEasyTierStatus))
+	s.mux.HandleFunc("POST /api/v1/vpn/easytier/stop", s.auth(s.auditWrap("vpn.easytier.stop", s.handleEasyTierStop)))
+	// Tailscale（接系统 tailscaled，只通过 unix socket 下发命令）
+	s.mux.HandleFunc("GET /api/v1/vpn/tailscale/config", s.auth(s.handleGetTailscale))
+	s.mux.HandleFunc("POST /api/v1/vpn/tailscale/config", s.auth(s.auditWrap("vpn.tailscale.save", s.handleSetTailscale)))
+	s.mux.HandleFunc("POST /api/v1/vpn/tailscale/preview", s.auth(s.handleTailscalePreview))
+	s.mux.HandleFunc("GET /api/v1/vpn/tailscale/status", s.auth(s.handleTailscaleStatus))
+	s.mux.HandleFunc("POST /api/v1/vpn/tailscale/down", s.auth(s.auditWrap("vpn.tailscale.down", s.handleTailscaleDown)))
 	// 对象管理（IP/MAC/终端分组）、多线路 DNS、域名分流、行为记录
 	s.mux.HandleFunc("GET /api/v1/objects/groups", s.auth(s.handleGetGroups))
 	s.mux.HandleFunc("POST /api/v1/objects/groups", s.auth(s.auditWrap("objects.groups.save", s.handleSetGroups)))
@@ -470,6 +492,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/wol/wake", s.auth(s.auditWrap("wol.wake", s.handleWOLWake)))
 	// P6-5 系统重启 + 子网换算工具（仅本区块）
 	s.mux.HandleFunc("POST /api/v1/system/reboot", s.auth(s.auditWrap("system.reboot", s.handleSystemReboot)))
+	s.mux.HandleFunc("POST /api/v1/system/upgrade", s.auth(s.auditWrap("system.upgrade", s.handleSystemUpgrade)))
 	s.mux.HandleFunc("GET /api/v1/tools/subnet", s.auth(s.handleSubnetCalc))
 	s.mux.HandleFunc("GET /api/v1/ha/config", s.auth(s.handleGetHAConfig))
 	s.mux.HandleFunc("POST /api/v1/ha/sync", s.auth(s.auditWrap("ha.sync", s.handleHASync)))
@@ -1406,10 +1429,10 @@ func (s *Server) handlePostCloudDevices(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// Accept either the bare Device object or a {"device": {...}} wrapper.
-	var dev cloud.Device
+	var dev cloud.LegacyDevice
 	if e := json.Unmarshal(body, &dev); e != nil || dev.Name == "" {
 		var wrapper struct {
-			Device cloud.Device `json:"device"`
+			Device cloud.LegacyDevice `json:"device"`
 		}
 		if e2 := json.Unmarshal(body, &wrapper); e2 == nil {
 			dev = wrapper.Device
@@ -3140,6 +3163,12 @@ func (s *Server) handleSetArp(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, errBody(10095, "iface required", ""))
 		return
 	}
+	// 网卡名会进入 sysctl 键名，必须在最外层就挡掉非法字符，
+	// 而不是等到底层执行时才发现（那时命令已经拼出来了）。
+	if err := acl.ValidateIface(req.Iface); err != nil {
+		writeJSON(w, 400, errBody(10097, "invalid iface", err.Error()))
+		return
+	}
 	if s.aclApplier == nil {
 		writeJSON(w, 200, map[string]interface{}{"applied": false, "iface": req.Iface, "sysctls": nil})
 		return
@@ -4540,6 +4569,234 @@ func (s *Server) handleSetDPIMarkRules(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSystemReboot triggers a system reboot.
+// handleSystemUpgrade 在线升级路由终端：下载 → 校验 → 原子替换 → 重启 → 看门狗回滚。
+//
+// 这里的每条约束都对应一个能把设备刷成砖的失败模式：
+//   - checksum 必填：不校验完整性，等于允许远端往二进制路径写任意字节
+//   - 大小上限 + 下载超时：http.Get 默认没有超时，对端不回包会永久挂住 goroutine；
+//     不设上限时，一个会无限返回 404 页的地址就能把根分区写满
+//   - ELF 魔数：URL 返回 404 HTML 时，旧实现会拿 HTML 覆盖二进制，设备下次重启直接起不来
+//   - 回滚看门狗：新二进制一启动就崩时本进程已经没了，只能靠独立脚本把 .bak 换回去
+func (s *Server) handleSystemUpgrade(w http.ResponseWriter, r *http.Request) {
+	const (
+		maxBinaryBytes  = 128 << 20
+		downloadTimeout = 180 * time.Second
+	)
+	var req struct {
+		URL      string `json:"url"`
+		Checksum string `json:"checksum"`
+		Confirm  bool   `json:"confirm"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<14)).Decode(&req); err != nil {
+		writeJSON(w, 400, errBody(10491, "invalid body", err.Error()))
+		return
+	}
+	if !req.Confirm {
+		writeJSON(w, 422, errBody(10492, "confirm required", `body must be {"confirm":true}`))
+		return
+	}
+	req.Checksum = strings.ToLower(strings.TrimSpace(req.Checksum))
+	if len(req.Checksum) != 64 || !isHexString(req.Checksum) {
+		writeJSON(w, 400, errBody(10493, "checksum required",
+			"必须提供 64 位十六进制 SHA256；没有完整性校验的升级一律拒绝"))
+		return
+	}
+	u, err := url.Parse(strings.TrimSpace(req.URL))
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		writeJSON(w, 400, errBody(10494, "bad url", "只接受 http/https 绝对地址"))
+		return
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		writeJSON(w, 500, errBody(10495, "executable path", err.Error()))
+		return
+	}
+	if exe, err = filepath.EvalSymlinks(exe); err != nil {
+		writeJSON(w, 500, errBody(10496, "resolve symlink", err.Error()))
+		return
+	}
+
+	// 下载到同目录的 .new：跨文件系统的 os.Rename 不是原子操作，升级必须同盘。
+	tmpPath := exe + ".new"
+	_ = os.Remove(tmpPath)
+	client := &http.Client{Timeout: downloadTimeout}
+	resp, err := client.Get(u.String())
+	if err != nil {
+		writeJSON(w, 502, errBody(10497, "download failed", err.Error()))
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		writeJSON(w, 502, errBody(10498, "download status", fmt.Sprintf("HTTP %d", resp.StatusCode)))
+		return
+	}
+	f, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
+	if err != nil {
+		writeJSON(w, 500, errBody(10499, "create temp", err.Error()))
+		return
+	}
+	h := sha256.New()
+	// LimitReader 多给 1 字节：正好等于上限时能读完，超限时立刻截断并报错。
+	n, err := io.Copy(io.MultiWriter(f, h), io.LimitReader(resp.Body, maxBinaryBytes+1))
+	cerr := f.Close()
+	if err != nil || cerr != nil {
+		os.Remove(tmpPath)
+		writeJSON(w, 502, errBody(10500, "download write", fmt.Sprint(err, cerr)))
+		return
+	}
+	if n > maxBinaryBytes {
+		os.Remove(tmpPath)
+		writeJSON(w, 400, errBody(10501, "too large", fmt.Sprintf("超过 %d 字节上限", int64(maxBinaryBytes))))
+		return
+	}
+	if n < 4096 {
+		os.Remove(tmpPath)
+		writeJSON(w, 400, errBody(10502, "too small", fmt.Sprintf("只有 %d 字节，不像一个可执行文件", n)))
+		return
+	}
+
+	gotChecksum := hex.EncodeToString(h.Sum(nil))
+	if gotChecksum != req.Checksum {
+		os.Remove(tmpPath)
+		writeJSON(w, 400, errBody(10503, "checksum mismatch",
+			fmt.Sprintf("期望 %s，实际 %s", req.Checksum, gotChecksum)))
+		return
+	}
+
+	// ELF 魔数：Linux 上 mgmtd 只可能是 ELF。这条挡住"下载到 HTML/JSON 错误页"。
+	magic := make([]byte, 4)
+	if fh, err := os.Open(tmpPath); err == nil {
+		_, _ = io.ReadFull(fh, magic)
+		_ = fh.Close()
+	}
+	if string(magic) != "\x7fELF" {
+		os.Remove(tmpPath)
+		writeJSON(w, 400, errBody(10504, "not an elf binary",
+			"下载内容不是 ELF 可执行文件（很可能是错误页），已丢弃"))
+		return
+	}
+
+	// 备份旧二进制，再用 rename 原子替换。
+	backupPath := exe + ".bak"
+	_ = os.Remove(backupPath)
+	if err := os.Rename(exe, backupPath); err != nil {
+		os.Remove(tmpPath)
+		writeJSON(w, 500, errBody(10505, "backup old", err.Error()))
+		return
+	}
+	if err := os.Rename(tmpPath, exe); err != nil {
+		_ = os.Rename(backupPath, exe) // 换不上就立刻还原，别留半个状态
+		os.Remove(tmpPath)
+		writeJSON(w, 500, errBody(10506, "replace binary", err.Error()))
+		return
+	}
+
+	svc := strings.TrimSpace(os.Getenv("MGM_SERVICE_NAME"))
+	if svc == "" {
+		svc = "mgmtd"
+	}
+	watchdog := s.startUpgradeWatchdog(exe, backupPath, svc)
+
+	// 重启放在响应之后：先把 200 发出去，客户端才不会看到"连接被重置"。
+	go func() {
+		time.Sleep(1500 * time.Millisecond)
+		if p, err := exec.LookPath("systemctl"); err == nil {
+			if out, err := exec.Command(p, "restart", svc).CombinedOutput(); err != nil {
+				log.Printf("system.upgrade: systemctl restart %s 失败: %v %s", svc, err, strings.TrimSpace(string(out)))
+				// 起不来就当场还原，不必等看门狗
+				_ = os.Rename(backupPath, exe)
+				_ = exec.Command(p, "start", svc).Run()
+			}
+			return
+		}
+		if p, err := exec.LookPath("/etc/init.d/" + svc); err == nil {
+			_ = exec.Command(p, "restart").Run()
+			return
+		}
+		log.Printf("system.upgrade: 找不到 systemctl 或 /etc/init.d/%s，新二进制已就位但未重启", svc)
+	}()
+
+	writeJSON(w, 200, map[string]interface{}{
+		"upgrade":  true,
+		"size":     n,
+		"checksum": gotChecksum,
+		"backup":   backupPath,
+		"service":  svc,
+		"watchdog": watchdog,
+	})
+}
+
+// startUpgradeWatchdog 起一个脱离本进程的回滚看门狗。
+//
+// 为什么必须是独立进程：升级失败最典型的形态就是新二进制秒崩——这时 mgmtd 自己
+// 已经不在了，任何写在 mgmtd 里的回滚逻辑都不会被执行。脚本用 setsid 脱离进程组，
+// 服务重启不会连带杀掉它。
+func (s *Server) startUpgradeWatchdog(exe, backupPath, svc string) string {
+	healthURL := "http://127.0.0.1:8080/api/v1/health"
+	if a := strings.TrimSpace(s.cfg.Addr); a != "" {
+		host, port := "", a
+		if i := strings.LastIndex(a, ":"); i >= 0 {
+			host, port = a[:i], a[i+1:]
+		}
+		if host == "" || host == "0.0.0.0" || host == "::" || host == "[::]" {
+			host = "127.0.0.1"
+		}
+		healthURL = "http://" + host + ":" + port + "/api/v1/health"
+	}
+
+	// 只拼接常量与已校验的路径，参数全部走位置参数传递，不做字符串插值到命令里。
+	const script = `#!/bin/sh
+# mgmtd 升级回滚看门狗：新版本 25 秒内不健康就把备份换回去。
+# 由 mgmtd 在替换二进制后写入并 setsid 启动，独立于 mgmtd 生命周期。
+BIN="$1"; BAK="$2"; SVC="$3"; URL="$4"
+sleep 25
+ok=0
+if command -v curl >/dev/null 2>&1; then
+  curl -fsS -m 5 "$URL" >/dev/null 2>&1 && ok=1
+elif command -v wget >/dev/null 2>&1; then
+  wget -q -T 5 -O /dev/null "$URL" >/dev/null 2>&1 && ok=1
+else
+  # 两个都没有时退化成只看进程状态，弱一点但好过完全不检查
+  systemctl is-active --quiet "$SVC" >/dev/null 2>&1 && ok=1
+fi
+[ "$ok" = "1" ] && exit 0
+echo "$(date '+%F %T') rollback: $SVC 健康检查失败，还原 $BAK -> $BIN" >> /var/log/mgmtd-upgrade.log 2>/dev/null
+if command -v systemctl >/dev/null 2>&1; then systemctl stop "$SVC" >/dev/null 2>&1; fi
+cp -f "$BAK" "$BIN" 2>/dev/null
+chmod 0755 "$BIN" 2>/dev/null
+if command -v systemctl >/dev/null 2>&1; then systemctl start "$SVC" >/dev/null 2>&1; fi
+`
+	path := filepath.Join(os.TempDir(), "mgmtd-upgrade-watchdog.sh")
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		log.Printf("system.upgrade: 写看门狗失败: %v", err)
+		return ""
+	}
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		return ""
+	}
+	cmd := exec.Command(sh, path, exe, backupPath, svc, healthURL)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // 脱离进程组，mgmtd 重启不带走它
+	if err := cmd.Start(); err != nil {
+		log.Printf("system.upgrade: 启动看门狗失败: %v", err)
+		return ""
+	}
+	_ = cmd.Process.Release()
+	return path
+}
+
+// isHexString 判断 s 是否全为十六进制字符（调用方已保证长度）。
+func isHexString(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *Server) handleSystemReboot(w http.ResponseWriter, r *http.Request) {
 	// confirm 门禁：没有显式确认绝不下发重启。曾经这里的实现在 confirm=false
 	// 时也返回 200 rebooting:true（测试 p103 抓到），等于前端传错参数就把机器重启了。

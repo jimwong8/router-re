@@ -53,6 +53,7 @@ func (r *recordingRunner) run(name string, args ...string) (string, error) {
 
 func TestApplyArpGuardWritesAllScopes(t *testing.T) {
 	r := &recordingRunner{netns: []string{"lo", "ens18", "eth0"}}
+	stubNetDevices(t, "lo", "ens18", "eth0")
 	if err := ApplyArpGuard(r, "ens18"); err != nil {
 		t.Fatalf("ApplyArpGuard for ens18 failed: %v", err)
 	}
@@ -72,6 +73,7 @@ func TestApplyArpGuardWritesAllScopes(t *testing.T) {
 
 func TestApplyArpGuardAllEnumerates(t *testing.T) {
 	r := &recordingRunner{netns: []string{"lo", "ens18", "eth0"}}
+	stubNetDevices(t, "lo", "ens18", "eth0")
 	if err := ApplyArpGuard(r, "all"); err != nil {
 		t.Fatalf("ApplyArpGuard all failed: %v", err)
 	}
@@ -97,4 +99,12 @@ func TestApplyArpGuardVerifyFailure(t *testing.T) {
 	if !strings.Contains(err.Error(), "net.ipv4.conf.") || !strings.Contains(err.Error(), "arp_") {
 		t.Errorf("error should list exact scope+param, got: %v", err)
 	}
+}
+
+// stubNetDevices 替换网卡枚举，避免测试依赖宿主机真实的 /sys/class/net。
+func stubNetDevices(t *testing.T, names ...string) {
+	t.Helper()
+	old := netDevices
+	netDevices = func() []string { return names }
+	t.Cleanup(func() { netDevices = old })
 }

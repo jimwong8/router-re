@@ -3,6 +3,8 @@ package acl
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"regexp"
 	"strings"
 
 	"github.com/jimwong/router-re/mgmtd/internal/execx"
@@ -17,6 +19,38 @@ func RenderSysctl(iface string) string {
 			"sysctl -w net.ipv4.conf.%s.arp_announce=2\n", iface, iface)
 }
 
+// netDevices 列出本机网卡名。抽成变量是为了测试能替换，
+// 同时避免为了拿一个目录列表就去 shell 里跑 ls。
+var netDevices = func() []string {
+	entries, err := os.ReadDir("/sys/class/net")
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, e.Name())
+	}
+	return out
+}
+
+// validIfaceName 校验网卡名。Linux 的 IFNAMSIZ 是 16，名字里只可能出现
+// 字母数字和 -_.: 这几种字符。
+//
+// 这个校验是安全边界，不是格式美化：iface 会拼进 sysctl 的键名再交给 shell，
+// 一个带 `;` 的名字就是一条任意命令（实测 `all; touch /tmp/x; echo` 能落地）。
+var validIfaceName = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,32}$`)
+
+// ValidateIface 校验传入的 iface 参数（"all" 是合法特殊值）。
+func ValidateIface(iface string) error {
+	if iface == "all" {
+		return nil
+	}
+	if !validIfaceName.MatchString(iface) {
+		return fmt.Errorf("网卡名 %q 非法：只允许字母数字和 - _ . : 且不超过 32 字符", iface)
+	}
+	return nil
+}
+
 // ApplyArpGuard applies ARP anti-spoof sysctls and verifies by re-reading.
 //
 // For a concrete interface it writes net.ipv4.conf.all.*, net.ipv4.conf.default.*
@@ -29,18 +63,17 @@ func ApplyArpGuard(r execx.Runner, iface string) error {
 	if strings.TrimSpace(iface) == "" {
 		return fmt.Errorf("iface required")
 	}
+	if err := ValidateIface(iface); err != nil {
+		return err
+	}
 	scopes := []string{"all", "default"}
 	if iface != "all" {
 		scopes = append(scopes, iface)
 	} else {
-		// enumerate real interfaces from /sys/class/net
-		if out, err := r.Run("sh", "-c", "ls /sys/class/net"); err != nil {
-			// fall back to all+default only if listing fails
-		} else {
-			for _, l := range strings.Fields(strings.TrimSpace(out)) {
-				if l != "" && l != "lo" {
-					scopes = append(scopes, l)
-				}
+		// 直接读目录，不必再借 shell 跑 ls
+		for _, n := range netDevices() {
+			if n != "" && n != "lo" && ValidateIface(n) == nil {
+				scopes = append(scopes, n)
 			}
 		}
 	}
@@ -52,8 +85,9 @@ func ApplyArpGuard(r execx.Runner, iface string) error {
 	for _, scope := range scopes {
 		for _, p := range pairs {
 			key := "net.ipv4.conf." + scope + "." + p.k
-			setCmd := fmt.Sprintf("sysctl -w %s=%s", key, p.val)
-			if _, err := r.Run("sh", "-c", setCmd); err != nil {
+			// 参数分开传给 sysctl，不经过 shell：即便 scope 里混进元字符，
+			// 也只会被当成一个普通参数，不会变成第二条命令。
+			if _, err := r.Run("sysctl", "-w", key+"="+p.val); err != nil {
 				failed = append(failed, fmt.Sprintf("set %s: %v", key, err))
 				continue
 			}

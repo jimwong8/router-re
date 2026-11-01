@@ -9,6 +9,10 @@ import (
 	"github.com/jimwong/router-re/mgmtd/internal/server"
 )
 
+// Version 由构建时通过 -ldflags "-X main.Version=x.y.z" 注入。
+// 默认 dev，便于在没注入时一眼看出这是本地构建。
+var Version = "dev"
+
 func main() {
 	addr := os.Getenv("MGM_ADDR")
 	if addr == "" {
@@ -27,6 +31,7 @@ func main() {
 		AdminUser:     os.Getenv("MGM_ADMIN_USER"),
 		AdminPassword: os.Getenv("MGM_ADMIN_PASSWORD"),
 		UserFile:      userFile,
+		Version:       Version,
 	}
 	if len(cfg.SecretKey) == 0 {
 		log.Fatal("MGM_SESSION_SECRET must be set (32+ bytes)")

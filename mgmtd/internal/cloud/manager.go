@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// Device represents a cloud-managed router device.
-type Device struct {
+// LegacyDevice represents a cloud-managed router device.
+type LegacyDevice struct {
 	ID            string `json:"id"`
 	Name          string `json:"name"`
 	Model         string `json:"model"`
@@ -20,17 +20,17 @@ type Device struct {
 	ConfigVersion int    `json:"config_version"`
 }
 
-// Manager is an in-memory cloud device manager (no DB).
-type Manager struct {
+// LegacyManager is an in-memory cloud device manager (no DB).
+type LegacyManager struct {
 	mu      sync.RWMutex
-	devices map[string]Device
+	devices map[string]LegacyDevice
 	configs map[string]map[string]string
 }
 
-// NewManager returns a Manager ready for use.
-func NewManager() *Manager {
-	return &Manager{
-		devices: make(map[string]Device),
+// NewManager returns a LegacyManager ready for use.
+func NewLegacyManager() *LegacyManager {
+	return &LegacyManager{
+		devices: make(map[string]LegacyDevice),
 		configs: make(map[string]map[string]string),
 	}
 }
@@ -46,7 +46,7 @@ func newID() string {
 
 // Register adds a device, generating an ID if not provided. Existing IDs are
 // updated with the latest metadata (but not overwritten with empty fields).
-func (m *Manager) Register(dev Device) error {
+func (m *LegacyManager) Register(dev LegacyDevice) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if dev.ID == "" {
@@ -72,7 +72,7 @@ func (m *Manager) Register(dev Device) error {
 }
 
 // Heartbeat updates the device's LastSeen/Online status.
-func (m *Manager) Heartbeat(id string, ts int64) error {
+func (m *LegacyManager) Heartbeat(id string, ts int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	dev, ok := m.devices[id]
@@ -86,10 +86,10 @@ func (m *Manager) Heartbeat(id string, ts int64) error {
 }
 
 // List returns a copy of all devices, sorted by ID.
-func (m *Manager) List() []Device {
+func (m *LegacyManager) List() []LegacyDevice {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	out := make([]Device, 0, len(m.devices))
+	out := make([]LegacyDevice, 0, len(m.devices))
 	for _, d := range m.devices {
 		out = append(out, d)
 	}
@@ -99,7 +99,7 @@ func (m *Manager) List() []Device {
 
 // PushConfig stores a new config snapshot for the device and bumps
 // ConfigVersion. Returns the new version number.
-func (m *Manager) PushConfig(id string, cfg map[string]string) (int, error) {
+func (m *LegacyManager) PushConfig(id string, cfg map[string]string) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	dev, ok := m.devices[id]
@@ -121,7 +121,7 @@ func (m *Manager) PushConfig(id string, cfg map[string]string) (int, error) {
 
 // PollConfig returns the device's full config if its version is newer than
 // sinceVersion, otherwise an empty map (no change). Returns (cfg, currentVersion).
-func (m *Manager) PollConfig(id string, sinceVersion int) (map[string]string, int) {
+func (m *LegacyManager) PollConfig(id string, sinceVersion int) (map[string]string, int) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	dev, ok := m.devices[id]

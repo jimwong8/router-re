@@ -122,18 +122,37 @@ func TestValidateIdentityOK(t *testing.T) {
 
 func TestApplyIdentityDeletesOldHostsLineFirst(t *testing.T) {
 	rr := newRec()
+	// 拦截 /etc/hosts 追加：单元测试不该真的写宿主机文件。
+	var appended []string
+	oldAppend := appendHostsLine
+	appendHostsLine = func(line string) error {
+		appended = append(appended, line)
+		return nil
+	}
+	t.Cleanup(func() { appendHostsLine = oldAppend })
+
 	i := Identity{Hostname: "router-1", Domain: "lan"}
 	ok, detail := ApplyIdentity(rr, i)
 	if !ok {
 		t.Fatalf("ApplyIdentity failed: %s", detail)
 	}
-	delIdx := rr.indexOf("sed -i")
-	hostIdx := rr.indexOf("sh -c")
-	if delIdx < 0 || hostIdx < 0 {
-		t.Fatalf("missing sed or sh command: %v", rr.calls)
+	if len(appended) != 1 {
+		t.Fatalf("应追加一行 hosts，实际 %d 行: %v", len(appended), appended)
 	}
-	if !(delIdx < hostIdx) {
-		t.Fatalf("sed (delete old 127.0.1.1 line) must come before sh (append new line): delIdx=%d hostIdx=%d", delIdx, hostIdx)
+	// 追加的内容必须是我们拼出来的那行，且不能经由 shell
+	want := "127.0.1.1 router-1.lan router-1\n"
+	if appended[0] != want {
+		t.Fatalf("hosts 行 = %q，期望 %q", appended[0], want)
+	}
+	// sed 删除必须发生在追加之前：命令序列里 sed 必须是最后一条 Runner 调用
+	delIdx := rr.indexOf("sed -i")
+	if delIdx < 0 {
+		t.Fatalf("missing sed command: %v", rr.calls)
+	}
+	for _, c := range rr.calls {
+		if strings.Contains(c, "sh -c") || strings.Contains(c, ">>") {
+			t.Fatalf("仍然经由 shell 写 hosts: %q", c)
+		}
 	}
 	// sed pattern should target 127.0.1.1
 	for _, c := range rr.calls {

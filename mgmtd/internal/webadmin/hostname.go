@@ -2,6 +2,7 @@ package webadmin
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/jimwong/router-re/mgmtd/internal/execx"
@@ -69,6 +70,20 @@ func isAllDigits(s string) bool {
 	return true
 }
 
+// appendHostsLine 往 /etc/hosts 追加一行。抽成变量是为了测试能替换，
+// 避免单元测试真的去写宿主机的 /etc/hosts。
+var appendHostsLine = func(line string) error {
+	f, err := os.OpenFile("/etc/hosts", os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.WriteString(line); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
 // ApplyIdentity 设置主机名并写 /etc/hosts。
 //
 // 1. hostnamectl set-hostname <hostname>
@@ -89,8 +104,11 @@ func ApplyIdentity(r execx.Runner, i Identity) (bool, string) {
 	if _, err := r.Run("sed", "-i", "/^127\\.0\\.1\\.1[[:space:]]/d", "/etc/hosts"); err != nil {
 		return false, fmt.Sprintf("remove old 127.0.1.1 line: %v", err)
 	}
-	line := "127.0.1.1 " + fqdn + " " + hn
-	if _, err := r.Run("sh", "-c", "echo '"+line+"' >> /etc/hosts"); err != nil {
+	// 直接追加，不过 shell。当前 ValidateIdentity 已经把主机名限制在
+	// 字母数字和 '-'，但把用户输入拼进 sh -c 本身就是个不该留的口子：
+	// 哪天校验放宽一行，这里就变成命令注入。
+	line := "127.0.1.1 " + fqdn + " " + hn + "\n"
+	if err := appendHostsLine(line); err != nil {
 		return false, fmt.Sprintf("append hosts line: %v", err)
 	}
 	return true, "hostname applied: " + fqdn
