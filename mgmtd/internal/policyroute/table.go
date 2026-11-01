@@ -20,16 +20,18 @@ import (
 	"net"
 	"regexp"
 	"strings"
-	"sync"
 )
 
 // Table 是独立于 main 的一张策略路由表（ID 1-252）。
+//
+// 注意：这里刻意不放 sync.Mutex / 可变计数器。Table 在 handler 里是值语义
+// 传递的（for _, t := range tables 会复制），一旦带锁就会被复制，
+// go vet 会报 "copies lock value"，而且复制出来的锁状态是错的。
+// 命中计数请用独立的并发安全结构，不要挂在 Table 上。
 type Table struct {
-	ID       int                 `json:"id"`   // 路由表 ID，1-252（253/254/255 内核保留）
-	Name     string              `json:"name"` // 表名，如 wan1table
-	Routes   []Route             `json:"routes"`
-	Hits     map[string]uint64   `json:"-"` // 规则命中计数
-	hitsMu   sync.Mutex          `json:"-"`
+	ID     int     `json:"id"`   // 路由表 ID，1-252（253/254/255 内核保留）
+	Name   string  `json:"name"` // 表名，如 wan1table
+	Routes []Route `json:"routes"`
 }
 
 // Route 是表内的一条路由。
@@ -89,15 +91,4 @@ func ValidateRoute(r Route) error {
 		return fmt.Errorf("route metric 必须 >= 0, got %d", r.Metric)
 	}
 	return nil
-}
-
-
-// Hit 原子递增指定 ruleID 的命中计数。
-func (t *Table) Hit(ruleID string) {
-	t.hitsMu.Lock()
-	defer t.hitsMu.Unlock()
-	if t.Hits == nil {
-		t.Hits = map[string]uint64{}
-	}
-	t.Hits[ruleID]++
 }

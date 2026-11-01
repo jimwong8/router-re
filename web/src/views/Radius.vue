@@ -11,7 +11,12 @@
           <el-input-number v-model="cfg.port" :min="1" :max="65535" />
         </el-form-item>
         <el-form-item label="密钥">
-          <el-input v-model="cfg.secret" type="password" show-password />
+          <el-input
+            v-model="cfg.secret"
+            type="password"
+            show-password
+            :placeholder="secretSet ? '已设置，留空则不修改' : '未设置'"
+          />
         </el-form-item>
         <el-form-item label="超时(秒)">
           <el-input-number v-model="cfg.timeout_sec" :min="1" :max="30" />
@@ -65,6 +70,7 @@ import api from '../api';
 const cfg = ref<any>({ server: '', port: 1812, secret: '', timeout_sec: 5 });
 const confText = ref('');
 const serversText = ref('');
+const secretSet = ref(false);
 const saving = ref(false);
 const testing = ref(false);
 const testUser = ref('');
@@ -75,6 +81,9 @@ async function load() {
   try {
     const res = await api.get('/api/v1/radius/config');
     cfg.value = res.data?.config || cfg.value;
+    secretSet.value = !!res.data?.config?.secret_set;
+    // 密钥只写不读：后端不回明文，输入框留空，避免把掩码值再提交回去
+    cfg.value.secret = '';
     confText.value = res.data?.conf || '';
     serversText.value = res.data?.servers || '';
   } catch (e: any) {
@@ -87,6 +96,8 @@ async function save() {
   try {
     const res = await api.post('/api/v1/radius/config', cfg.value);
     cfg.value = res.data?.config || cfg.value;
+    secretSet.value = !!res.data?.config?.secret_set;
+    cfg.value.secret = '';
     confText.value = res.data?.conf || '';
     serversText.value = res.data?.servers || '';
     ElMessage.success('保存成功');

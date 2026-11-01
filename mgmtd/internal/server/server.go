@@ -2184,16 +2184,45 @@ func (s *Server) clearClientLimitsStore() {
 }
 
 // handleGetRadiusConfig returns the stored RADIUS config and rendered files.
+// radiusConfigView 是 radius.Config 的对外视图：secret 只写不读。
+// 原实现直接把 cfg 连同 RenderServersFile 的明文一起返回，
+// 于是 viewer（只读角色）也能拿到 RADIUS 共享密钥。
+type radiusConfigView struct {
+	Server     string `json:"server"`
+	Port       int    `json:"port"`
+	TimeoutSec int    `json:"timeout_sec"`
+	SecretSet  bool   `json:"secret_set"`
+}
+
+func newRadiusConfigView(cfg radius.Config) radiusConfigView {
+	return radiusConfigView{
+		Server:     cfg.Server,
+		Port:       cfg.Port,
+		TimeoutSec: cfg.TimeoutSec,
+		SecretSet:  cfg.Secret != "",
+	}
+}
+
 func (s *Server) handleGetRadiusConfig(w http.ResponseWriter, r *http.Request) {
 	cfg := radius.Config{}
 	if raw, err := s.store.Get("radius", "config"); err == nil && raw != "" {
 		_ = json.Unmarshal([]byte(raw), &cfg)
 	}
 	writeJSON(w, 200, map[string]interface{}{
-		"config":  cfg,
-		"conf":    radius.RenderRadiusClientConf(cfg),
-		"servers": radius.RenderServersFile(cfg),
+		"config": newRadiusConfigView(cfg),
+		"conf":   radius.RenderRadiusClientConf(cfg),
+		// servers 文件内容是 "<server>	<secret>"，这里返回掩码预览，
+		// 前端仍能展示文件形状但看不到密钥。
+		"servers": renderRadiusServersMasked(cfg),
 	})
+}
+
+// renderRadiusServersMasked 渲染 servers 文件的掩码预览。
+func renderRadiusServersMasked(cfg radius.Config) string {
+	if cfg.Server == "" {
+		return ""
+	}
+	return cfg.Server + "	" + maskToken(cfg.Secret) + "\n"
 }
 
 // handleSetRadiusConfig persists the RADIUS config and returns rendered files.
@@ -2203,13 +2232,22 @@ func (s *Server) handleSetRadiusConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
 		return
 	}
+	// 只传 secret_set 之类的视图字段时，保留已存的 secret（前端拿不到明文，
+	// 保存其它字段不该把密钥清掉）。
+	if cfg.Secret == "" {
+		if raw, err := s.store.Get("radius", "config"); err == nil && raw != "" {
+			var old radius.Config
+			if json.Unmarshal([]byte(raw), &old) == nil {
+				cfg.Secret = old.Secret
+			}
+		}
+	}
 	if raw, err := json.Marshal(cfg); err == nil {
 		_ = s.store.Set("radius", "config", string(raw))
 	}
 	writeJSON(w, 200, map[string]interface{}{
-		"config":  cfg,
-		"conf":    radius.RenderRadiusClientConf(cfg),
-		"servers": radius.RenderServersFile(cfg),
+		"config": newRadiusConfigView(cfg),
+		"conf":   radius.RenderRadiusClientConf(cfg),
 	})
 }
 
