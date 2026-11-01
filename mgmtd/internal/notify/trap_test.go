@@ -54,3 +54,17 @@ func TestTrapMasked(t *testing.T) {
 		t.Fatal("original must not be mutated")
 	}
 }
+
+// Community 拼进 snmptrapd.conf，换行等控制字符会注入额外指令。
+func TestValidateTrapRejectsControlChars(t *testing.T) {
+	for _, c := range []string{"x\nfoo bar", "x\rbar", "a\tb"} {
+		tr := TrapTarget{Host: "1.2.3.4", Port: 162, Version: "v2c", Community: c}
+		if err := ValidateTrap(tr); err == nil {
+			t.Fatalf("非法 community %q 通过了校验", c)
+		}
+	}
+	ok := TrapTarget{Host: "1.2.3.4", Port: 162, Version: "v2c", Community: "public"}
+	if err := ValidateTrap(ok); err != nil {
+		t.Fatalf("合法 community 被拒: %v", err)
+	}
+}

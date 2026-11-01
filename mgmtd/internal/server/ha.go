@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"sync"
@@ -9,6 +10,9 @@ import (
 
 	"github.com/jimwong/router-re/mgmtd/internal/ha"
 )
+
+// haHTTPClient 用于向 HA 对端推配置，必须有超时。
+var haHTTPClient = &http.Client{Timeout: 15 * time.Second}
 
 // haState holds runtime HA state.
 type haState struct {
@@ -79,10 +83,14 @@ func (s *Server) handleHASync(w http.ResponseWriter, r *http.Request) {
 	}
 	// Push to peer
 	body, _ := json.Marshal(data)
-	req, _ := http.NewRequest("POST", cfg.PeerURL+"/api/v1/ha/import", bytes.NewReader(body))
+	// 带超时：http.DefaultClient 没有超时，对端一旦"连上了但不回包"，
+	// 这个 handler 的 goroutine 就永久卡住，反复触发同步会把它们堆满。
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, "POST", cfg.PeerURL+"/api/v1/ha/import", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-HA-Secret", cfg.Secret)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := haHTTPClient.Do(req)
 	if err != nil {
 		globalHAState.mu.Lock()
 		globalHAState.LastSync = time.Now()

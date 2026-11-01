@@ -209,3 +209,23 @@ func TestNeighborsFromTextBusyBox(t *testing.T) {
 		t.Fatalf("FAILED 行解析错误（MAC 应为空但设备要保留）: %+v", devs[1])
 	}
 }
+
+// Name 拼进 nft 注释行，带换行就等于注入任意 nft 规则（如 flush ruleset）。
+func TestValidateLimitRejectsNewlineInName(t *testing.T) {
+	bad := []string{
+		"x\nflush ruleset",
+		"x\r\nip saddr 0.0.0.0/0 accept",
+		"tab\there",
+		strings.Repeat("a", 65),
+	}
+	for _, name := range bad {
+		l := Limit{Name: name, SrcIP: "10.0.0.1", MaxConns: 10}
+		if err := ValidateLimit(l); err == nil {
+			t.Fatalf("非法 Name %q 通过了校验", name)
+		}
+	}
+	ok := Limit{Name: "guest-limit", SrcIP: "10.0.0.1", MaxConns: 10}
+	if err := ValidateLimit(ok); err != nil {
+		t.Fatalf("合法 Name 被拒: %v", err)
+	}
+}

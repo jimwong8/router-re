@@ -275,6 +275,10 @@ func New(cfg Config) *Server {
 	return s
 }
 
+// maxJSONBody 是配置类 JSON 请求体的上限。路由器内存有限，
+// 一个超大 POST 就能把进程撑爆——已鉴权不代表可信。
+const maxJSONBody = 8 << 20
+
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		v := s.cfg.Version
@@ -1423,6 +1427,7 @@ func (s *Server) handleGetCloudDevices(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePostCloudDevices(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBody)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		writeJSON(w, 400, errBody(10007, "read body fail", err.Error()))
@@ -1485,6 +1490,7 @@ func (s *Server) handleGetWirelessSSIDs(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handlePostWirelessSSIDs(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBody)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		writeJSON(w, 400, errBody(10007, "read body fail", err.Error()))
@@ -1542,7 +1548,22 @@ func (s *Server) handlePostWirelessSSIDs(w http.ResponseWriter, r *http.Request)
 func (s *Server) Run() error {
 	// 特征库是包级全局状态，服务开始接请求前装载一次
 	loadAppidLibrary()
-	return http.ListenAndServe(s.cfg.Addr, s.mux)
+	// 用显式 http.Server 而不是裸 ListenAndServe，主要为了 ReadHeaderTimeout：
+	// 裸 ListenAndServe 没有任何超时，攻击者只要慢悠悠地发请求头（Slowloris），
+	// 就能用极少的连接把路由器的连接/goroutine 占满——管理界面直接失联。
+	//
+	// 刻意不设 ReadTimeout/WriteTimeout：固件/特征库升级要传 100MB+ 的文件，
+	// 监控代理可能长时间流式回传，一刀切的读写超时会把正常功能切断。
+	// IdleTimeout 只限制 keep-alive 空闲连接，不误伤进行中的传输。
+	srv := &http.Server{
+		Addr:              s.cfg.Addr,
+		Handler:           s.mux,
+		ReadHeaderTimeout: 15 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		ReadTimeout:       0,
+		WriteTimeout:      0,
+	}
+	return srv.ListenAndServe()
 }
 
 // auth is a Bearer-token middleware guarding all endpoints except health/login.
@@ -2496,6 +2517,7 @@ func (s *Server) handleGetVLAN(w http.ResponseWriter, r *http.Request) {
 
 // handleSetVLAN applies one or more VLANs and returns the actual system state.
 func (s *Server) handleSetVLAN(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBody)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		writeJSON(w, 400, errBody(10007, "read body fail", err.Error()))
@@ -3501,7 +3523,12 @@ func (s *Server) handleGetAccounts(w http.ResponseWriter, r *http.Request) {
 // accountBody accepts either a single account object or {"accounts":[...]}.
 // It returns the parsed list and whether the body was a batch request.
 func accountBody(r *http.Request) ([]account.Account, error) {
-	body, err := io.ReadAll(r.Body)
+	// 账号批量导入可能带很多条，但仍要有上限：LimitReader 多给 1 字节，
+	// 正好等于上限时能读完，超限时立刻判定为超大 body。
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxJSONBody+1))
+	if err == nil && len(body) > maxJSONBody {
+		return nil, fmt.Errorf("请求体超过 %d 字节上限", maxJSONBody)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -3711,6 +3738,7 @@ func (s *Server) handleGetBillingPlans(w http.ResponseWriter, r *http.Request) {
 
 // handleSetBillingPlans replaces the package list (single object or {"plans":[...]}).
 func (s *Server) handleSetBillingPlans(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBody)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		writeJSON(w, 400, errBody(10160, "read body fail", err.Error()))

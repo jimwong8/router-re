@@ -22,6 +22,17 @@ func ValidateLimit(l Limit) error {
 	if strings.TrimSpace(l.Name) == "" {
 		return fmt.Errorf("name required")
 	}
+	// Name 会被拼进 nft 脚本的注释行（"# <name> ..."）。若放任换行/控制字符，
+	// 一个形如 "x\nflush ruleset" 的名字就能在 nft -f 时注入任意规则——
+	// 直接把防火墙清空，路由器对 WAN 全面敞开。注释不是安全边界，校验才是。
+	if len(l.Name) > 64 {
+		return fmt.Errorf("name too long (max 64), got %d", len(l.Name))
+	}
+	for _, r := range l.Name {
+		if r == '\n' || r == '\r' || r == '\t' || r < 0x20 || r == 0x7f {
+			return fmt.Errorf("name contains illegal control character")
+		}
+	}
 	if _, _, err := net.ParseCIDR(strings.TrimSpace(l.SrcIP)); err != nil {
 		if net.ParseIP(strings.TrimSpace(l.SrcIP)) == nil {
 			return fmt.Errorf("src_ip must be an IP or CIDR, got %q", l.SrcIP)

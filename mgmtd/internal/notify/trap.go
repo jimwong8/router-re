@@ -33,6 +33,13 @@ func ValidateTrap(t TrapTarget) error {
 	if strings.Contains(t.Community, " ") {
 		return fmt.Errorf("community must not contain spaces, got %q", t.Community)
 	}
+	// Community 会被拼进 snmptrapd.conf 的 "authCommunity ... %s default" 一行。
+	// 只挡空格不够：换行会另起一条指令，等于往配置文件里注入任意内容。
+	for _, r := range t.Community {
+		if r == '\n' || r == '\r' || r == '\t' || r < 0x20 || r == 0x7f {
+			return fmt.Errorf("community contains illegal control character")
+		}
+	}
 	return nil
 }
 
