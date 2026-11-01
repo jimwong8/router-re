@@ -198,6 +198,8 @@ func (m *Manager) ChangePassword(username, newPassword string) error {
 	u.PasswordHash = hash
 	i := int64(time.Now().Unix())
 	u.PasswordChangedAt = i
+	// 会话代数 +1：旧 token 的 ver 与当前值不再相等，精确失效（不受秒级精度影响）。
+	u.TokenVersion++
 	m.users[username] = u
 	if err := m.persistLocked(); err != nil {
 		m.users[username] = prev

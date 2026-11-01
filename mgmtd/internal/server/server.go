@@ -759,8 +759,18 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// Compare in constant time to avoid leaking length/prefix information.
-	userOK := subtle.ConstantTimeCompare([]byte(req.Username), []byte(s.cfg.AdminUser)) == 1
-	passOK := subtle.ConstantTimeCompare([]byte(req.Password), []byte(s.cfg.AdminPassword)) == 1
+	//
+	// 环境变量兜底只在"该账号还没在 RBAC 表里显式改过密码"时生效：
+	// 一旦用户自己改过密（PasswordChangedAt>0），旧的环境变量密码必须失效——
+	// 否则"改密"只是多了一个能用的新密码，泄露的旧密码照样能登进来（实测如此）。
+	envFallback := s.rbacMgr == nil
+	if !envFallback {
+		if u, ok := s.rbacMgr.Get(req.Username); !ok || u.PasswordChangedAt <= 0 {
+			envFallback = true
+		}
+	}
+	userOK := envFallback && subtle.ConstantTimeCompare([]byte(req.Username), []byte(s.cfg.AdminUser)) == 1
+	passOK := envFallback && subtle.ConstantTimeCompare([]byte(req.Password), []byte(s.cfg.AdminPassword)) == 1
 	if !rbacOK && (!userOK || !passOK) {
 		// 只有失败才计入限流配额（成功登录不该扣自己的额度，否则批量脚本
 		// 第 6 次起就全 429——实测回归套件就是这么挂的）。
@@ -770,7 +780,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.loginLimiter.reset(clientIP(r.RemoteAddr))
-	tok, err := s.tm.Issue(req.Username)
+	// 签发时带上该用户当前的会话代数：改密后代数 +1，旧 token 立即失效。
+	var tokVer int64
+	if s.rbacMgr != nil {
+		if u, ok := s.rbacMgr.Get(req.Username); ok {
+			tokVer = u.TokenVersion
+		}
+	}
+	tok, err := s.tm.IssueWithVersion(req.Username, tokVer)
 	if err != nil {
 		s.logAudit(r, "auth.login", req.Username, "fail", "token issue: "+err.Error())
 		writeJSON(w, 500, errBody(10000, "token issue fail", err.Error()))
@@ -1593,15 +1610,15 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 			writeJSON(w, 401, errBody(10003, "unauthorized", "missing token"))
 			return
 		}
-		sub, iat, err := s.tm.VerifyWithIssuedAt(tok)
+		sub, iat, ver, err := s.tm.VerifyWithVersion(tok)
 		if err != nil {
 			writeJSON(w, 401, errBody(10003, "unauthorized", "invalid token"))
 			return
 		}
 		// 改密后旧会话必须失效。token 是无状态的，改密不会让已签发的 token 作废，
-		// 只能比对签发时间。密码泄漏的第一反应就是改密——如果旧 token 还能用
-		// （哪怕只剩 TTL 那 15 分钟），改密就等于没改。
-		if !s.sessionValid(sub, iat) {
+		// 只能比对会话代数（TokenVersion）。密码泄漏的第一反应就是改密——如果旧
+		// token 还能用（哪怕只剩 TTL 那 15 分钟），改密就等于没改。
+		if !s.sessionValid(sub, iat, ver) {
 			s.logAudit(r, "authz.stale_session", sub, "fail", r.Method+" "+r.URL.Path)
 			writeJSON(w, 401, errBody(10003, "unauthorized", "密码已修改，请重新登录"))
 			return
@@ -1623,19 +1640,26 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// sessionValid 判定 token 是否签发于用户最后一次改密之前。
+// sessionValid 判定 token 是否仍然属于该用户当前的会话代数。
 //
-// 内置管理员（环境变量那个）没有用户记录，恒真；有记录时 PasswordChangedAt==0
-// 表示从未改过密，也恒真。秒级精度带来的唯一缝：改密与登录落在同一秒时，
-// 该秒签发的 token 保留（iat == PasswordChangedAt），这是刻意的——否则刚改完密
-// 立刻重新登录的人会被自己的新 token 踢掉。
-func (s *Server) sessionValid(actor string, iat int64) bool {
-	if s.rbacMgr == nil || actor == s.cfg.AdminUser {
+// 内置管理员在启动时就会被种进 RBAC 表（NewManagerWithFile），所以旧逻辑
+// "actor == AdminUser 恒真"等于让最重要的账号永远踢不掉——实测改密后旧 token
+// 仍返回 200。正确做法是：只有"表里根本没有这个用户"时才放行 env 管理员。
+//
+// 判定优先用 TokenVersion（精确，不受秒级精度影响）；用户还没改过密
+// （TokenVersion==0）时退回 iat >= PasswordChangedAt 的旧逻辑。
+func (s *Server) sessionValid(actor string, iat int64, ver int64) bool {
+	if s.rbacMgr == nil {
 		return true
 	}
 	u, ok := s.rbacMgr.Get(actor)
 	if !ok {
-		return false
+		// 无记录：仅 env 内置管理员放行（单管理员/未建用户表的旧部署）；其它拒绝
+		return actor == s.cfg.AdminUser
+	}
+	if u.TokenVersion > 0 {
+		// 改过密：代数必须完全一致。旧 token（含无 ver 的老 token，ver=0）一律失效。
+		return ver == u.TokenVersion
 	}
 	if u.PasswordChangedAt <= 0 {
 		return true
