@@ -3,6 +3,7 @@ package qos
 import (
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 )
 
@@ -50,6 +51,20 @@ func runCmd(argv []string) error {
 	return fmt.Errorf("permission denied (need root): %s", strings.TrimSpace(string(out)))
 }
 
+// ifaceNameRe 与 bond 包同一套白名单。这里的命令是以 `strings.Fields` 重新
+// 分词后执行的，所以接口名里只要有一个空格，就能把 `tc qdisc del dev eth0`
+// 变成 `tc qdisc del dev eth0 <额外参数>`——不是 RCE，但足以悄悄改掉别的
+// 队列规则（例如把 ingress 挂到错的父级）。字符集校验把这条路堵死。
+var ifaceNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.@:-]{0,31}$`)
+
+// validateIface 校验接口名，空值由调用方自行决定默认接口。
+func validateIface(iface string) error {
+	if !ifaceNameRe.MatchString(iface) {
+		return fmt.Errorf("invalid interface name: %q", iface)
+	}
+	return nil
+}
+
 // Apply executes the rendered tc commands for the given rate limits.
 // Each command string is split into argv (the renderer only produces simple
 // `tc qdisc ...` / `tc filter ...` forms with no shell metacharacters).
@@ -59,6 +74,9 @@ func Apply(limits []RateLimit) error {
 	for _, l := range limits {
 		if l.Interface == "" {
 			return fmt.Errorf("interface required")
+		}
+		if err := validateIface(l.Interface); err != nil {
+			return err
 		}
 		if l.RateMbps <= 0 {
 			return fmt.Errorf("invalid rate: %d", l.RateMbps)

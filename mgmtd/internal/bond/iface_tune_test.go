@@ -57,6 +57,29 @@ func (r *recordingTuneRunner) hasCall(sub string) bool {
 	return false
 }
 
+// withSysfs 把 sysfs 读写接缝换成内存实现，并返回还原函数。
+// applyTune 已经不再经过 shell，所以写入必须在这里拦截而不是在 Runner 里。
+func (r *recordingTuneRunner) withSysfs(t *testing.T) {
+	t.Helper()
+	oldW, oldR := sysfsWrite, sysfsRead
+	sysfsWrite = func(path, value string) error {
+		r.calls = append(r.calls, "write "+path+" = "+strings.TrimSpace(value))
+		if r.failPath == path {
+			return fmt.Errorf("write failed on %s", path)
+		}
+		r.sysFiles[path] = strings.TrimSpace(value)
+		return nil
+	}
+	sysfsRead = func(path string) (string, error) {
+		r.calls = append(r.calls, "read "+path)
+		if v, ok := r.sysFiles[path]; ok {
+			return v, nil
+		}
+		return "", fmt.Errorf("no sim for %s", path)
+	}
+	t.Cleanup(func() { sysfsWrite, sysfsRead = oldW, oldR })
+}
+
 func TestValidateTuneRejectsLoopback(t *testing.T) {
 	c := TuneConfig{Iface: "lo", MTU: 1500}
 	if err := ValidateTune(c); err == nil {
@@ -80,6 +103,7 @@ func TestValidateTuneValid(t *testing.T) {
 
 func TestApplyTuneRPSReadback(t *testing.T) {
 	rr := newTuneRunner()
+	rr.withSysfs(t)
 	c := TuneConfig{Iface: "eth0", RPS: []int{3, 7}}
 	ok, detail := ApplyTune(rr, c)
 	if !ok {
@@ -93,9 +117,40 @@ func TestApplyTuneRPSReadback(t *testing.T) {
 	if rr.sysFiles[path1] != "7" {
 		t.Fatalf("rx-1 rps not written: got %q", rr.sysFiles[path1])
 	}
-	// 回读动作：calls 应含 cat
-	if !rr.hasCall("cat " + path0) {
-		t.Fatalf("missing readback cat for rx-0: %v", rr.calls)
+	// 回读动作
+	if !rr.hasCall("read " + path0) {
+		t.Fatalf("missing readback for rx-0: %v", rr.calls)
+	}
+}
+
+// 接口名字符白名单：这些 payload 以前能拼进 sh -c 以 root 执行任意命令。
+// 实测 iface="eth0; touch /tmp/pwn_rce_test #" 会真的创建文件。
+func TestValidateTuneRejectsShellInjection(t *testing.T) {
+	payloads := []string{
+		"eth0; touch /tmp/pwn_rce_test #",
+		"eth0 && id",
+		"eth0 | id",
+		"$(id)",
+		"`id`",
+		"eth0\nid",
+		"../../etc/passwd",
+		"-f",
+		"eth0 x",
+		"eth0'",
+	}
+	for _, p := range payloads {
+		if err := ValidateTune(TuneConfig{Iface: p, GroMaxSize: 4096}); err == nil {
+			t.Errorf("接口名 %q 应被拒绝，实际通过校验", p)
+		}
+	}
+}
+
+// 合法接口名不能误伤：bond/vlan/别名都要能过。
+func TestValidateTuneAcceptsRealIfaceNames(t *testing.T) {
+	for _, name := range []string{"eth0", "br-lan", "bond0", "eth0.100", "wlan0", "pppoe-wan", "ens18", "eth0:1"} {
+		if err := ValidateTune(TuneConfig{Iface: name, MTU: 1500}); err != nil {
+			t.Errorf("合法接口名 %q 被拒绝: %v", name, err)
+		}
 	}
 }
 
