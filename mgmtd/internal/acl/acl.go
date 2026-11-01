@@ -104,35 +104,44 @@ func RenderNft(rs []Rule) string {
 }
 
 // renderRule renders a single rule's match+action, omitting empty fields.
+//
+// 每个字段都重新校验一次：渲染层不能假设调用方一定跑过 Validate。
+// MAC 用 net.ParseMAC 规整（裸字符串带空格/换行会追加任意 nft 参数），
+// IP 解析失败则直接丢弃——以前会渲染成字面 "<nil>"，让整份 nft 脚本
+// 因为语法错误而加载失败（面板显示下发成功，实际一条都没生效）。
 func renderRule(r Rule) string {
 	var parts []string
 	if r.SrcIP != "" {
 		if _, cidr, err := net.ParseCIDR(r.SrcIP); err == nil && cidr != nil {
 			parts = append(parts, "ip saddr "+cidr.String())
-		} else {
-			parts = append(parts, "ip saddr "+net.ParseIP(r.SrcIP).String())
+		} else if ip := net.ParseIP(r.SrcIP); ip != nil {
+			parts = append(parts, "ip saddr "+ip.String())
 		}
 	}
 	if r.DstIP != "" {
 		if _, cidr, err := net.ParseCIDR(r.DstIP); err == nil && cidr != nil {
 			parts = append(parts, "ip daddr "+cidr.String())
-		} else {
-			parts = append(parts, "ip daddr "+net.ParseIP(r.DstIP).String())
+		} else if ip := net.ParseIP(r.DstIP); ip != nil {
+			parts = append(parts, "ip daddr "+ip.String())
 		}
 	}
 	proto := strings.ToLower(strings.TrimSpace(r.Proto))
 	action := strings.ToLower(strings.TrimSpace(r.Action))
-	if proto != "" && proto != "any" {
+	if proto != "" && proto != "any" && validProtos[proto] {
 		parts = append(parts, proto)
 	}
 	if r.DstPort > 0 {
 		parts = append(parts, "dport "+strconv.Itoa(r.DstPort))
 	}
 	if r.SrcMAC != "" {
-		parts = append(parts, "ether saddr "+r.SrcMAC)
+		if mac, err := net.ParseMAC(r.SrcMAC); err == nil {
+			parts = append(parts, "ether saddr "+mac.String())
+		}
 	}
 	if r.DstMAC != "" {
-		parts = append(parts, "ether daddr "+r.DstMAC)
+		if mac, err := net.ParseMAC(r.DstMAC); err == nil {
+			parts = append(parts, "ether daddr "+mac.String())
+		}
 	}
 	parts = append(parts, action)
 	return strings.Join(parts, " ")

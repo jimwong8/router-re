@@ -2,6 +2,7 @@ package portal
 
 import (
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/jimwong/router-re/mgmtd/internal/execx"
@@ -24,12 +25,20 @@ func RenderNft(clients []Client, portalPort int) string {
 			continue
 		}
 		mac := NormalizeMAC(c.MAC)
+		// 渲染层兜底：NormalizeMAC 只做小写+去空白，不做格式校验。
+		// 原样拼进 elements = { ... } 后，一个带 "\n}" 的 MAC 就能提前闭合
+		// 集合并追加任意 nft 规则。这里用 ParseMAC 规整成标准形态，
+		// 解析失败的直接跳过。
+		parsed, err := net.ParseMAC(mac)
+		if err != nil {
+			continue
+		}
 		if first {
 			first = false
 		} else {
 			b.WriteString(", ")
 		}
-		b.WriteString(fmt.Sprintf("%s", mac))
+		b.WriteString(parsed.String())
 	}
 	b.WriteString(" }\n")
 	b.WriteString("\t}\n")

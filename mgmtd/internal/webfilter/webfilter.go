@@ -24,20 +24,46 @@ func Validate(rs []Rule) error {
 		if d == "" {
 			return fmt.Errorf("rule %d: domain required", i)
 		}
-		if strings.ContainsAny(d, " ,") {
-			return fmt.Errorf("rule %d: domain must not contain space or comma: %q", i, d)
+		// 换行/回车/制表符以前没挡。它们不是"空格或逗号"，但危害更大：
+		// 域名会被原样拼进 dnsmasq 的 address=/<domain>/0.0.0.0，
+		// 一个 "\nserver=/evil.com/1.2.3.4" 就能把任意域名劫持到指定 IP。
+		// 这里统一按"控制字符与空白一律拒绝"处理，不再逐个字符补。
+		if strings.ContainsAny(d, " 	\r\n\v\f,") {
+			return fmt.Errorf("rule %d: domain must not contain whitespace, control characters or comma: %q", i, d)
 		}
 		if strings.HasPrefix(d, ".") {
 			return fmt.Errorf("rule %d: domain must not start with '.': %q", i, d)
 		}
 		if len(d) > 253 {
-			return fmt.Errorf("rule %d: domain longer than 253 chars", i)
+			return fmt.Errorf("rule %d: domain longer than 253 chars (got %d)", i, len(d))
+		}
+		// 字面 IP 走 nft 集合（由 net.ParseIP 单独校验）；其余必须是域名形态，
+		// 只允许字母数字、点、短横线、下划线和可选的 "*." 通配前缀。
+		if net.ParseIP(d) == nil && !isPlainDomain(d) {
+			return fmt.Errorf("rule %d: invalid domain %q (only letters, digits, '.', '-', '_' and a leading '*.' are allowed)", i, d)
 		}
 		if r.Action != "block" && r.Action != "allow" {
 			return fmt.Errorf("rule %d: action must be block or allow, got %q", i, r.Action)
 		}
 	}
 	return nil
+}
+
+// isPlainDomain 判断字符串是否只含域名字符集（允许前导 "*."）。
+func isPlainDomain(d string) bool {
+	s := strings.TrimPrefix(d, "*.")
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '.' || r == '-' || r == '_':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // RenderDnsmasq renders dnsmasq config lines for the rules. Blocked domains
@@ -49,12 +75,18 @@ func RenderDnsmasq(rs []Rule) string {
 		if !r.Enabled {
 			continue
 		}
+		d := strings.TrimSpace(r.Domain)
+		// 渲染层兜底：调用方若漏了 Validate，这里也不能把带换行/空白的
+		// 域名写进 dnsmasq —— 那等于往配置里插任意指令（DNS 劫持）。
+		if d == "" || strings.ContainsAny(d, " 	\r\n\v\f,") || !isPlainDomain(d) {
+			continue
+		}
 		switch r.Action {
 		case "block":
-			fmt.Fprintf(&b, "address=/%s/0.0.0.0\n", r.Domain)
-			fmt.Fprintf(&b, "address=/%s/::\n", r.Domain)
+			fmt.Fprintf(&b, "address=/%s/0.0.0.0\n", d)
+			fmt.Fprintf(&b, "address=/%s/::\n", d)
 		case "allow":
-			fmt.Fprintf(&b, "# allow %s（真实白名单需 server=/%s/<上游>）\n", r.Domain, r.Domain)
+			fmt.Fprintf(&b, "# allow %s（真实白名单需 server=/%s/<上游>）\n", d, d)
 		}
 	}
 	return b.String()

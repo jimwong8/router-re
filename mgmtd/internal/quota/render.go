@@ -3,6 +3,7 @@ package quota
 import (
 	"fmt"
 	"net"
+	"net/netip"
 	"sort"
 	"strings"
 )
@@ -22,6 +23,46 @@ import (
 //   - app      —— **nft 无法直接按应用名匹配**。这里生成注释说明"由 DPI 模块对
 //     该应用打 meta mark 后按 mark 匹配"，并给每条 app 策略分配一个确定性 mark。
 //     绝不假装能直接按应用名匹配。
+// singleLine 去掉控制字符，让自由文本只能待在一行内。
+// 用于注释里展示的 Name/Target，防止换行把注释劈成两条指令。
+func singleLine(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r == '\r' || r == '\n' || r == '\t' || r == '\v' || r == '\f' {
+			b.WriteByte(' ')
+			continue
+		}
+		if r < 0x20 || r == 0x7f {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// renderableTarget 判断 Target 是否可以被安全地拼进 nft 表达式。
+func renderableTarget(p Policy) bool {
+	t := strings.TrimSpace(p.Target)
+	if t == "" || strings.ContainsAny(t, " \t\r\n\v\f") {
+		return false
+	}
+	switch p.TargetType {
+	case TargetIP:
+		return net.ParseIP(t) != nil
+	case TargetCIDR:
+		_, err := netip.ParsePrefix(t)
+		return err == nil
+	case TargetMAC:
+		mac, err := net.ParseMAC(t)
+		return err == nil && len(mac) == 6
+	case TargetApp:
+		// app 维度只用 mark，Target 不进入表达式；但仍拒绝换行以免进入注释行。
+		return !strings.ContainsAny(t, "\r\n")
+	}
+	return false
+}
+
+// RenderNft 生成 nftables 规则文本。
 func RenderNft(policies []Policy) string {
 	var b strings.Builder
 	b.WriteString("table inet router_quota {\n")
@@ -57,8 +98,18 @@ func RenderNft(policies []Policy) string {
 
 // renderOne 生成单条策略的规则文本。app 类额外输出依赖 mark 的说明。
 func renderOne(b *strings.Builder, p Policy, appMark map[string]int) {
-	// 描述行
-	b.WriteString("\t\t# quota: " + p.Name + " (" + string(p.TargetType) + " " + p.Target + ")\n")
+	// 描述行。Name 是自由文本，换行会把注释劈成两条——第二条直接生效。
+	name := singleLine(p.Name)
+
+	// 渲染层兜底：Target 会拼进 nft 表达式（ip saddr / ether saddr），
+	// 带换行或空格就能追加任意规则。这里按维度重新校验一次，不假设调用方
+	// 已经跑过 Validate —— 不合法就整条跳过，并留下可读的说明。
+	if !renderableTarget(p) {
+		b.WriteString("		# quota: " + name + " 已跳过（target 不合法）\n")
+		return
+	}
+
+	b.WriteString("		# quota: " + name + " (" + string(p.TargetType) + " " + singleLine(p.Target) + ")\n")
 
 	// 选择匹配头的表达式前缀（按维度）。
 	expr := ""
@@ -167,8 +218,12 @@ func itoa(n int) string {
 func RenderReport(policies []Policy) string {
 	var lines []string
 	for _, p := range policies {
+		// 报告是纯文本输出，不进入任何配置/执行路径，但换行会让一行变两行、
+		// 伪造出并不存在的策略条目，误导运维。统一压成单行。
+		name := singleLine(p.Name)
+		target := singleLine(p.Target)
 		if !p.Enabled {
-			lines = append(lines, fmt.Sprintf("[disabled] %s (%s %s)", p.Name, p.TargetType, p.Target))
+			lines = append(lines, fmt.Sprintf("[disabled] %s (%s %s)", name, p.TargetType, target))
 			continue
 		}
 		var acts []string
@@ -186,9 +241,9 @@ func RenderReport(policies []Policy) string {
 			action = "（无限速/连接限制）"
 		}
 		if p.TargetType == TargetApp {
-			lines = append(lines, fmt.Sprintf("[%s] %-12s app=%s（依赖 DPI 打 mark）：%s", p.ID, p.Name, p.App, action))
+			lines = append(lines, fmt.Sprintf("[%s] %-12s app=%s（依赖 DPI 打 mark）：%s", p.ID, name, singleLine(p.App), action))
 		} else {
-			lines = append(lines, fmt.Sprintf("[%s] %-12s %s %-18s：%s", p.ID, p.Name, p.TargetType, p.Target, action))
+			lines = append(lines, fmt.Sprintf("[%s] %-12s %s %-18s：%s", p.ID, name, p.TargetType, target, action))
 		}
 	}
 	sort.Strings(lines)
