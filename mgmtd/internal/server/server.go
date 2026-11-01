@@ -3856,14 +3856,40 @@ func (s *Server) currentActor(r *http.Request) string {
 	return ""
 }
 
-// requireAdmin denies non-admin callers with 403. It returns the actor name.
-func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) string {
+// requireAdmin denies non-admin callers with 403. It returns the actor name
+// (empty means the response was already written).
+//
+// 判定顺序：内置管理员（环境变量配置）恒为 admin → RBAC 表中角色为 admin 且未停用。
+// action 仅用于审计记录，可传空。
+func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request, action ...string) string {
 	actor := s.currentActor(r)
-	role, _ := s.rbacMgr.RoleOf(actor)
-	if role != rbac.RoleAdmin {
-		writeJSON(w, http.StatusForbidden, errBody(10210, "需要 admin 角色", fmt.Sprintf("角色为 %s，无权管理用户", role)))
+	if actor == "" {
+		// 未开启鉴权的旧部署：保持原有放行行为
 		return ""
 	}
+	if actor == s.cfg.AdminUser {
+		return actor
+	}
+	if s.rbacMgr != nil {
+		if role, ok := s.rbacMgr.RoleOf(actor); ok && role == rbac.RoleAdmin {
+			if u, ok := s.rbacMgr.Get(actor); ok && u.Enabled {
+				return actor
+			}
+		}
+		if role, _ := s.rbacMgr.RoleOf(actor); role != rbac.RoleAdmin {
+			act := ""
+			if len(action) > 0 {
+				act = action[0]
+			}
+			if act != "" {
+				s.logAudit(r, act, "", "fail", fmt.Sprintf("admin required (role=%s)", role))
+			}
+			writeJSON(w, http.StatusForbidden, errBody(10210, "需要 admin 角色",
+				fmt.Sprintf("角色为 %s，无权执行该操作", role)))
+			return ""
+		}
+	}
+	// 无 RBAC 管理器：沿用旧行为（不额外收紧）
 	return actor
 }
 

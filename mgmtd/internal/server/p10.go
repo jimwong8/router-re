@@ -270,6 +270,12 @@ func (s *Server) snapshotSections() map[string]json.RawMessage {
 }
 
 func (s *Server) handleExportConfig(w http.ResponseWriter, r *http.Request) {
+	// 配置包内含 wifi 密码、DDNS token、云端凭据、VPN 私钥等明文密钥，
+	// 只能由管理员导出：viewer 的"只读"不等于"可读取全部凭据"。
+	// （实测修复前 viewer GET /config/export 能拿到 ddns token 明文。）
+	if s.requireAdmin(w, r, "config.export") == "" {
+		return
+	}
 	sections := s.snapshotSections()
 	host, _ := os.Hostname()
 	b := cfgsync.NewBundle(host, time.Now().Unix(), sections)
@@ -300,6 +306,9 @@ func (s *Server) handlePreviewRestore(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/v1/config/restore —— 真正恢复。必须 confirm=true。
 func (s *Server) handleRestoreConfig(w http.ResponseWriter, r *http.Request) {
+	if s.requireAdmin(w, r, "config.restore") == "" {
+		return
+	}
 	var body struct {
 		Confirm bool           `json:"confirm"`
 		Bundle  cfgsync.Bundle `json:"bundle"`
