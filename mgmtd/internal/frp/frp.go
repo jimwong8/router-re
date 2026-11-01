@@ -33,8 +33,15 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.ServerAddr) == "" {
 		return fmt.Errorf("server_addr required")
 	}
+	if !isPlainHost(c.ServerAddr) {
+		return fmt.Errorf("server_addr contains illegal characters: %q", c.ServerAddr)
+	}
 	if c.ServerPort <= 0 || c.ServerPort > 65535 {
 		return fmt.Errorf("server_port must be 1..65535")
+	}
+	// token 会原样写进 INI，换行能让它变成新的一行指令。
+	if strings.ContainsAny(c.Token, "\r\n") {
+		return fmt.Errorf("token must not contain newlines")
 	}
 	seen := map[string]bool{}
 	for i, t := range c.Tunnels {
@@ -58,10 +65,18 @@ func (c Config) Validate() error {
 		if name == "" {
 			name = fmt.Sprintf("tunnel%d", i+1)
 		}
+		// 名字是 INI 的段头 [name]。带 "]" 或换行就能闭合本节并伪造新隧道
+		// ——例如把本机 22 端口暴露到公网。只能允许标识符字符。
+		if !isPlainTunnelName(name) {
+			return fmt.Errorf("tunnels[%d] invalid name %q", i, t.Name)
+		}
 		if seen[name] {
 			return fmt.Errorf("duplicate tunnel name %q", name)
 		}
 		seen[name] = true
+		if t.LocalIP != "" && !isPlainHost(t.LocalIP) {
+			return fmt.Errorf("tunnels[%d] invalid local_ip %q", i, t.LocalIP)
+		}
 		// keep type/proto in sync so both JSON keys round-trip
 		c.Tunnels[i].Type = tp
 		c.Tunnels[i].Proto = tp
@@ -69,16 +84,53 @@ func (c Config) Validate() error {
 	return nil
 }
 
+// isPlainTunnelName 允许字母数字与 _ - .（frp 段名不接受空白与括号）。
+func isPlainTunnelName(s string) bool {
+	if s == "" || len(s) > 64 {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '_' || r == '-' || r == '.':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// isPlainHost 判断主机名/IP 是否只含安全字符（不含空白、换行、引号、方括号）。
+func isPlainHost(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" || len(s) > 253 {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '.' || r == '-' || r == '_' || r == ':':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // RenderConfig renders an frpc (INI) configuration.
 func RenderConfig(c Config) string {
 	var b strings.Builder
 	b.WriteString("[common]\n")
-	b.WriteString(fmt.Sprintf("server_addr = %s\n", c.ServerAddr))
+	// 渲染层兜底：这些值都直接拼进 INI，任何一个带换行都会变成新的配置行。
+	// 不能假设调用方一定先跑过 Validate —— 非法值直接丢弃默认值。
+	if isPlainHost(c.ServerAddr) {
+		b.WriteString(fmt.Sprintf("server_addr = %s\n", strings.TrimSpace(c.ServerAddr)))
+	}
 	if c.ServerPort == 0 {
 		c.ServerPort = 7000
 	}
 	b.WriteString(fmt.Sprintf("server_port = %d\n", c.ServerPort))
-	if c.Token != "" {
+	if c.Token != "" && !strings.ContainsAny(c.Token, "\r\n") {
 		b.WriteString(fmt.Sprintf("token = %s\n", c.Token))
 	}
 	b.WriteString("\n")
@@ -87,6 +139,9 @@ func RenderConfig(c Config) string {
 		if name == "" {
 			name = fmt.Sprintf("tunnel%d", i+1)
 		}
+		if !isPlainTunnelName(name) {
+			continue
+		}
 		tp := strings.ToLower(strings.TrimSpace(t.Type))
 		if tp == "" {
 			tp = strings.ToLower(strings.TrimSpace(t.Proto))
@@ -94,13 +149,19 @@ func RenderConfig(c Config) string {
 		if tp == "" {
 			tp = "tcp"
 		}
+		if tp != "tcp" && tp != "udp" {
+			continue
+		}
 		localIP := t.LocalIP
 		if localIP == "" {
 			localIP = "127.0.0.1"
 		}
+		if !isPlainHost(localIP) {
+			continue
+		}
 		b.WriteString(fmt.Sprintf("[%s]\n", name))
 		b.WriteString(fmt.Sprintf("type = %s\n", tp))
-		b.WriteString(fmt.Sprintf("local_ip = %s\n", localIP))
+		b.WriteString(fmt.Sprintf("local_ip = %s\n", strings.TrimSpace(localIP)))
 		b.WriteString(fmt.Sprintf("local_port = %d\n", t.LocalPort))
 		b.WriteString(fmt.Sprintf("remote_port = %d\n", t.RemotePort))
 		b.WriteString("\n")

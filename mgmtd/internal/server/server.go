@@ -3466,6 +3466,12 @@ func (s *Server) handleSetPolicyRouteRules(w http.ResponseWriter, r *http.Reques
 	if req.TableIfaces == nil {
 		req.TableIfaces = map[int]string{}
 	}
+	// 接口名会拼进 ip route 命令并被重新分词成 argv，必须在这里拒掉，
+	// 让调用方拿到明确的 422 而不是 500 或静默注入。
+	if err := portmap.ValidateTableIfaces(req.TableIfaces); err != nil {
+		writeJSON(w, 422, errBody(10121, "validation failed", err.Error()))
+		return
+	}
 	applied := false
 	if s.aclApplier != nil {
 		if err := portmap.ApplyPolicy(s.aclApplier, req.Policies, req.TableIfaces); err != nil {

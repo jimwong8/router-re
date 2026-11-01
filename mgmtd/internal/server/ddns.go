@@ -103,6 +103,11 @@ func (s *Server) handleSetNTPConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, errBody(10115, "json decode fail", err.Error()))
 		return
 	}
+	// 服务器名会被拼进 timesyncd.conf 的 NTP= 行；换行等于插入新指令。
+	if err := ddns.ValidateNTPConfig(cfg); err != nil {
+		writeJSON(w, 422, errBody(10115, "validation failed", err.Error()))
+		return
+	}
 	b, _ := json.Marshal(cfg)
 	_ = s.store.Set("ntp", "config", string(b))
 	res := map[string]interface{}{

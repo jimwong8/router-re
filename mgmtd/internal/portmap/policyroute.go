@@ -4,10 +4,30 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"regexp"
 	"strings"
 
 	"github.com/jimwong/router-re/mgmtd/internal/execx"
 )
+
+// ifaceNameRe 限定接口名只能是标识符形态。
+//
+// 这里的接口名来自请求体的 table_ifaces，最终会拼进
+// "ip route replace default dev <iface> table <n>" 再被 strings.Fields 切成
+// argv —— 名字里带空格就等于追加任意 ip-route 参数（例如
+// "eth0 mtu 9000" 会把 mtu 9000 塞成额外参数）。与 bond/qos 用同一套规则。
+var ifaceNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.@:-]{0,31}$`)
+
+// ValidateTableIfaces 校验 table→接口名映射。接口名不合法时整批拒绝，
+// 而不是静默跳过：调用方应当看到明确的 422。
+func ValidateTableIfaces(m map[int]string) error {
+	for tbl, iface := range m {
+		if !ifaceNameRe.MatchString(iface) {
+			return fmt.Errorf("table %d: invalid interface name %q", tbl, iface)
+		}
+	}
+	return nil
+}
 
 // Policy 描述一条策略路由规则（ip rule + 对应 default 路由）。
 type Policy struct {
@@ -74,8 +94,15 @@ func RenderCommands(ps []Policy, ifaceByTable map[int]string) []string {
 }
 
 // ApplyPolicy 逐条执行策略路由命令。错误含 "File exists" 时忽略继续（重复添加同一规则）。
+//
+// 执行前先校验 table→接口名：这些名字会被 strings.Fields 重新切分成 argv，
+// 带空格就能追加任意 ip route 参数。校验放在这里而不是只放 handler，
+// 是为了让任何调用路径（含将来的内部调用）都受保护。
 func ApplyPolicy(r execx.Runner, ps []Policy, ifaceByTable map[int]string) error {
 	if err := ValidatePolicy(ps); err != nil {
+		return err
+	}
+	if err := ValidateTableIfaces(ifaceByTable); err != nil {
 		return err
 	}
 	for _, cmd := range RenderCommands(ps, ifaceByTable) {
