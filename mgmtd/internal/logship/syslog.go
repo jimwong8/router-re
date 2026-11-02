@@ -60,7 +60,9 @@ func ValidateTarget(t SyslogTarget) error {
 // them silently drops logs and is hard to diagnose, hence the comment.
 func RenderRsyslog(t SyslogTarget) string {
 	host, port, _ := net.SplitHostPort(t.Address)
-	addr := host + ":" + port
+	// 渲染层兜底：Address 里一个换行就能追加 rsyslog 动作模块
+	// （action(type="omprog" binary="/bin/sh")）—— 等于远程命令执行。
+	addr := oneLine(host) + ":" + oneLine(port)
 	var b strings.Builder
 	if t.Facility != "" && strings.HasPrefix(t.Facility, "local") {
 		fmt.Fprintf(&b, "local%s.* ", t.Facility[len("local"):])
@@ -103,4 +105,20 @@ func TestTarget(r execx.Runner, t SyslogTarget) (bool, string) {
 		return true, "logger -T unsupported; nc port probe ok: " + strings.TrimSpace(out)
 	}
 	return false, fmt.Sprintf("logger -T failed: %v", err)
+}
+
+// oneLine 把任意字符串压成单行，渲染层兜底用。
+func oneLine(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r == '\t' || r == '\n' || r == '\r' || r == '\v' || r == '\f':
+			b.WriteByte(' ')
+		case r < 0x20 || r == 0x7f:
+			// 丢弃
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }

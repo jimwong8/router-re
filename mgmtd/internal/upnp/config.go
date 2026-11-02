@@ -50,6 +50,22 @@ func Validate(c Config) error {
 	if c.ExternalIface == c.InternalIface {
 		return fmt.Errorf("external_iface and internal_iface must differ, both are %q", c.ExternalIface)
 	}
+	// 两个接口名都只查了非空，然后原样拼进 ext_ifname= / listening_ip=。
+	// "eth0\nextra_option=1" 会在 miniupnpd.conf 里多出一行配置。
+	for _, f := range []struct{ name, val string }{
+		{"external_iface", c.ExternalIface}, {"internal_iface", c.InternalIface},
+	} {
+		for _, r := range f.val {
+			ok := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+				(r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' || r == '@' || r == ':'
+			if !ok {
+				return fmt.Errorf("%s 只能包含字母数字和 _-.:@（发现 %q）", f.name, r)
+			}
+		}
+		if len(f.val) > 15 {
+			return fmt.Errorf("%s 名不能超过 15 字节", f.name)
+		}
+	}
 	if strings.TrimSpace(c.AllowCIDR) != "" {
 		ip, ipnet, err := net.ParseCIDR(strings.TrimSpace(c.AllowCIDR))
 		if err != nil {
@@ -121,9 +137,10 @@ func ValidateMapping(m Mapping, c Config) error {
 // RenderMiniupnpd renders the miniupnpd configuration.
 func RenderMiniupnpd(c Config) string {
 	var b strings.Builder
-	ext := strings.TrimSpace(c.ExternalIface)
-	intf := strings.TrimSpace(c.InternalIface)
-	cidr := strings.TrimSpace(c.AllowCIDR)
+	// 渲染层兜底：接口名里的换行会在 conf 里多加一行
+	ext := oneLine(strings.TrimSpace(c.ExternalIface))
+	intf := oneLine(strings.TrimSpace(c.InternalIface))
+	cidr := oneLine(strings.TrimSpace(c.AllowCIDR))
 	if ext == "" {
 		ext = "eth0"
 	}
@@ -251,4 +268,20 @@ func ActiveMappings(r execx.Runner) ([]Mapping, error) {
 		})
 	}
 	return ms, nil
+}
+
+// oneLine 把任意字符串压成单行，渲染层兜底用。
+func oneLine(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r == '\t' || r == '\n' || r == '\r' || r == '\v' || r == '\f':
+			b.WriteByte(' ')
+		case r < 0x20 || r == 0x7f:
+			// 丢弃
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }

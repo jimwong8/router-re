@@ -31,6 +31,22 @@ type RAConfig struct {
 	PreferredLifetime int    `json:"preferred_lifetime"`
 }
 
+// oneLine 把任意字符串压成单行，渲染层兜底用。
+func oneLine(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r == '\t' || r == '\n' || r == '\r' || r == '\v' || r == '\f':
+			b.WriteByte(' ')
+		case r < 0x20 || r == 0x7f:
+			// 丢弃
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 // ValidateAddr checks an IPv6 address.
 func ValidateAddr(a Address) error {
 	if strings.TrimSpace(a.Iface) == "" {
@@ -50,6 +66,20 @@ func ValidateAddr(a Address) error {
 func ValidateRA(c RAConfig) error {
 	if strings.TrimSpace(c.Iface) == "" {
 		return fmt.Errorf("iface required")
+	}
+	// Iface 只查了非空，然后被拼进 "interface %s {"。一个换行就能闭合
+	// 当前块并开出新块："eth0\n}; interface eth1 {"
+	// 后果是给另一块网卡也广播 RA —— 可能把 IPv6 前缀通告到不该通的网段。
+	// 而且关闭状态下渲染器用 "# " 前缀注释，那只保护第一行，注入行照样生效。
+	for _, r := range c.Iface {
+		ok := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' || r == '@' || r == ':'
+		if !ok {
+			return fmt.Errorf("iface 只能包含字母数字和 _-.:@（发现 %q）", r)
+		}
+	}
+	if len(c.Iface) > 15 {
+		return fmt.Errorf("iface 名不能超过 15 字节")
 	}
 	if c.MaxInterval < 4 || c.MaxInterval > 1800 {
 		return fmt.Errorf("max_interval must be in [4,1800], got %d", c.MaxInterval)
@@ -160,14 +190,17 @@ func RenderRadvd(c RAConfig) string {
 		other = "on"
 	}
 	minInt := float64(c.MaxInterval) * 0.33
+	// 渲染层兜底：注释前缀 "# " 只保护整段字符串的第一行，
+	// Iface 里的换行会闭合当前块并开出新块，且不受注释影响。
+	iface := oneLine(c.Iface)
 	var b strings.Builder
-	fmt.Fprintf(&b, "%sinterface %s {\n", pfx, c.Iface)
+	fmt.Fprintf(&b, "%sinterface %s {\n", pfx, iface)
 	fmt.Fprintf(&b, "%s\tAdvSendAdvert on;\n", pfx)
 	fmt.Fprintf(&b, "%s\tMinRtrAdvInterval %.1f;\n", pfx, minInt)
 	fmt.Fprintf(&b, "%s\tMaxRtrAdvInterval %d;\n", pfx, c.MaxInterval)
 	fmt.Fprintf(&b, "%s\tAdvManagedFlag %s;\n", pfx, managed)
 	fmt.Fprintf(&b, "%s\tAdvOtherConfigFlag %s;\n", pfx, other)
-	fmt.Fprintf(&b, "%s\tprefix %s/%d\n", pfx, c.Prefix, c.PrefixLen)
+	fmt.Fprintf(&b, "%s\tprefix %s/%d\n", pfx, oneLine(c.Prefix), c.PrefixLen)
 	if !c.Enabled {
 		// continuation lines inside a commented block still need the prefix; we
 		// comment each line so the block reads as comments.
