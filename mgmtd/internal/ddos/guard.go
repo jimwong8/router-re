@@ -91,9 +91,18 @@ func Render(c Config) string {
 		elems := make([]string, 0, len(c.Whitelist))
 		for _, w := range c.Whitelist {
 			w = strings.TrimSpace(w)
-			if w != "" {
-				elems = append(elems, w)
+			// 渲染层兜底：白名单直接进 "elements = { ... }"，一个逗号或
+			// 花括号就能改写集合内容。Validate 已做 IP/CIDR 校验，但渲染层
+			// 不能依赖调用方 —— 非法条目一律跳过。
+			if w == "" {
+				continue
 			}
+			if net.ParseIP(w) == nil {
+				if _, _, err := net.ParseCIDR(w); err != nil {
+					continue
+				}
+			}
+			elems = append(elems, w)
 		}
 		if len(elems) > 0 {
 			b.WriteString("    elements = { " + strings.Join(elems, ", ") + " }\n")

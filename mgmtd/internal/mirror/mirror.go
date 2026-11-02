@@ -19,7 +19,46 @@ type Config struct {
 	Enabled     bool   `json:"enabled"`
 }
 
-// Validate 校验配置。
+// validIfaceName 校验 Linux 网卡名。
+//
+// 注：这些字段当前都经 execx.DefaultRunner 走 exec.Command 的 argv（全仓
+// 没有任何 sh -c/bash -c），所以 `;` `|` `$()` 不会被 shell 解释 —— 这里
+// 不是命令注入。加白名单是纵深防御：渲染出的 tc/nft 文本会被返回给前端、
+// 也可能被运维复制到 shell 里手工执行，非法字符应尽早失败而不是留下畸形命令。
+func validIfaceName(field, s string) error {
+	if s == "" {
+		return fmt.Errorf("%s must not be empty", field)
+	}
+	if len(s) > 15 {
+		return fmt.Errorf("%s 名不能超过 15 字节（IFNAMSIZ），收到 %q", field, s)
+	}
+	for _, r := range s {
+		ok := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' || r == '@' || r == ':'
+		if !ok {
+			return fmt.Errorf("%s 只能包含字母数字和 _-.:@（发现 %q）", field, r)
+		}
+	}
+	return nil
+}
+
+// oneLine 把任意字符串压成单行，渲染层兜底用。
+func oneLine(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r == '\t' || r == '\n' || r == '\r' || r == '\v' || r == '\f':
+			b.WriteByte(' ')
+		case r < 0x20 || r == 0x7f:
+			// 丢弃
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// Validate 校验镜像配置。
 // 规则：
 //   - 两个接口都非空，且不能相同（镜像到自己没意义，还会环回放大流量）
 //   - 都不能是 "lo"（对 lo 做 tc 会把本地回环卡死）
@@ -30,6 +69,12 @@ func Validate(c Config) error {
 	}
 	if c.TargetIface == "" {
 		return fmt.Errorf("target_iface must not be empty")
+	}
+	if err := validIfaceName("source_iface", c.SourceIface); err != nil {
+		return err
+	}
+	if err := validIfaceName("target_iface", c.TargetIface); err != nil {
+		return err
 	}
 	if c.SourceIface == c.TargetIface {
 		return fmt.Errorf("source_iface and target_iface must differ (mirroring an interface onto itself is meaningless and would loop-amplify traffic): both %q", c.SourceIface)
@@ -74,22 +119,26 @@ func RenderScript(c Config) string {
 		return ""
 	}
 	var b strings.Builder
+	// 渲染层兜底：tc 命令以行为单位，接口名里的换行会多出一条命令
+	src := oneLine(c.SourceIface)
+	tgt := oneLine(c.TargetIface)
 	switch c.Direction {
 	case "ingress":
-		b.WriteString(ingressScript(c.SourceIface, c.TargetIface))
+		b.WriteString(ingressScript(src, tgt))
 	case "egress":
-		b.WriteString(egressScript(c.SourceIface, c.TargetIface))
+		b.WriteString(egressScript(src, tgt))
 	case "both":
-		b.WriteString(ingressScript(c.SourceIface, c.TargetIface))
-		b.WriteString(egressScript(c.SourceIface, c.TargetIface))
+		b.WriteString(ingressScript(src, tgt))
+		b.WriteString(egressScript(src, tgt))
 	}
 	return b.String()
 }
 
 // Cleanup 生成清理命令，把 ingress 和 root 上的镜像规则都删掉。
 func Cleanup(c Config) string {
-	return fmt.Sprintf("tc qdisc del dev %s ingress 2>/dev/null || true\n", c.SourceIface) +
-		fmt.Sprintf("tc qdisc del dev %s root 2>/dev/null || true\n", c.SourceIface)
+	src := oneLine(c.SourceIface)
+	return fmt.Sprintf("tc qdisc del dev %s ingress 2>/dev/null || true\n", src) +
+		fmt.Sprintf("tc qdisc del dev %s root 2>/dev/null || true\n", src)
 }
 
 // Apply 执行 RenderScript 里的每条命令。
