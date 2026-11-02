@@ -2,6 +2,7 @@ package ips
 
 import (
 	"fmt"
+	"net/netip"
 	"sort"
 	"strings"
 	"sync"
@@ -93,13 +94,22 @@ func RenderNft(blocked map[string]bool) string {
 	b.WriteString("    set blackhole {\n")
 	b.WriteString("        type ipv4_addr;\n")
 	b.WriteString("        flags timeout;\n")
+	// 渲染层兜底：key 直接进 "elements = { ... }"，一个逗号或花括号就能
+	// 改写集合内容甚至另开一张表。当前 handler 用 net.ParseIP 挡着，
+	// 但渲染层不能依赖调用方 —— 非法的 key 一律跳过。
 	if len(blocked) > 0 {
 		elems := make([]string, 0, len(blocked))
 		for ip := range blocked {
-			elems = append(elems, ip)
+			addr, err := netip.ParseAddr(strings.TrimSpace(ip))
+			if err != nil || !addr.Is4() {
+				continue
+			}
+			elems = append(elems, addr.String())
 		}
 		sort.Strings(elems)
-		b.WriteString("        elements = { " + strings.Join(elems, ", ") + " }\n")
+		if len(elems) > 0 {
+			b.WriteString("        elements = { " + strings.Join(elems, ", ") + " }\n")
+		}
 	}
 	b.WriteString("    }\n")
 	b.WriteString("}\n")

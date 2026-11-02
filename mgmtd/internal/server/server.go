@@ -845,14 +845,23 @@ func (s *Server) handleGetDHCPConfig(w http.ResponseWriter, r *http.Request) {
 
 // handleSetDHCPConfig stores the submitted DHCP config and returns rendered dnsmasq text.
 func (s *Server) handleSetDHCPConfig(w http.ResponseWriter, r *http.Request) {
-	var cfg dhcp.DHCPConfig
+	// 解码完整的 ServerConfig（含 domain、static_leases），嵌入了 DHCPConfig
+	var cfg dhcp.ServerConfig
 	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
 		s.logAudit(r, "dhcp.config.set", cfg.Interface, "fail", "json decode: "+err.Error())
 		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
 		return
 	}
+	// 必须先校验：Interface 只查了非空，会被拼进 "interface=%s"；
+	// Domain、Hostname 也会进配置行。这三处全是零校验，注入可改写
+	// dnsmasq.conf（dhcp-option=3 改网关、dhcp-range 改地址池等）。
+	if err := dhcp.ValidateConfig(cfg); err != nil {
+		s.logAudit(r, "dhcp.config.set", cfg.Interface, "fail", "validate: "+err.Error())
+		writeJSON(w, 422, errBody(10009, "dhcp validation failed", err.Error()))
+		return
+	}
 	// 真实执行：通过 Applier 写入 dnsmasq 配置并重载
-	if applyErr := s.dhcpApplier.Apply(cfg); applyErr != nil {
+	if applyErr := s.dhcpApplier.Apply(cfg.DHCPConfig); applyErr != nil {
 		s.logAudit(r, "dhcp.config.set", cfg.Interface, "fail", "apply: "+applyErr.Error())
 		writeJSON(w, 500, errBody(10009, "dhcp apply failed", applyErr.Error()))
 		return
@@ -871,10 +880,13 @@ func (s *Server) handleSetDHCPConfig(w http.ResponseWriter, r *http.Request) {
 	if len(cfg.DNS) > 0 {
 		s.store.Set("dhcp", "dns", strings.Join(cfg.DNS, ","))
 	}
+	if cfg.Domain != "" {
+		s.store.Set("dhcp", "domain", cfg.Domain)
+	}
 	s.logAudit(r, "dhcp.config.set", cfg.Interface, "ok", "")
 	writeJSON(w, 200, map[string]interface{}{
 		"config":  cfg,
-		"dnsmasq": dhcp.RenderDnsmasq(dhcp.Config{DHCPConfig: cfg}),
+		"dnsmasq": cfg.RenderDnsmasq(),
 		"applied": true,
 	})
 }

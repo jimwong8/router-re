@@ -164,6 +164,32 @@ func ValidateConfig(c ServerConfig) error {
 	if c.Interface == "" {
 		return fmt.Errorf("interface is required")
 	}
+	// Interface 只查了非空，然后拼进 "interface=%s"。一个换行就能在
+	// dnsmasq 里插入任意指令（no-resolv / dhcp-option=3,<攻击者IP> ...）。
+	// 这是 pppoe/ipv6/upnp 之后第四处同型缺陷。
+	for _, r := range c.Interface {
+		ok := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' || r == '@' || r == ':'
+		if !ok {
+			return fmt.Errorf("interface 只能包含字母数字和 _-.:@（发现 %q）", r)
+		}
+	}
+	if len(c.Interface) > 15 {
+		return fmt.Errorf("interface 名不能超过 15 字节")
+	}
+	// Domain 拼进 "domain=%s"，同样只挡住了"非空"。
+	if c.Domain != "" {
+		for _, r := range c.Domain {
+			ok := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+				(r >= '0' && r <= '9') || r == '-' || r == '.' || r == '_'
+			if !ok {
+				return fmt.Errorf("domain 只能包含字母数字和 -._（发现 %q）", r)
+			}
+		}
+		if len(c.Domain) > 253 {
+			return fmt.Errorf("domain 不能超过 253 字节")
+		}
+	}
 	startIP := net.ParseIP(c.RangeStart)
 	endIP := net.ParseIP(c.RangeEnd)
 	if startIP == nil {
@@ -216,6 +242,23 @@ func ValidateConfig(c ServerConfig) error {
 		if sl.MAC == "" {
 			return fmt.Errorf("static_lease[%d] mac is empty", i)
 		}
+		// Hostname 拼进 "dhcp-host=<mac>,<ip>,<hostname>"，原来完全没有校验。
+		// RFC 952/1123 主机名：字母数字、连字符、点；不能以连字符开头结尾。
+		if sl.Hostname != "" {
+			if len(sl.Hostname) > 253 {
+				return fmt.Errorf("static_lease[%d] hostname 不能超过 253 字节", i)
+			}
+			for _, r := range sl.Hostname {
+				ok := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+					(r >= '0' && r <= '9') || r == '-' || r == '.' || r == '_'
+				if !ok {
+					return fmt.Errorf("static_lease[%d] hostname 只能包含字母数字和 -._（发现 %q）", i, r)
+				}
+			}
+			if sl.Hostname[0] == '-' || sl.Hostname[len(sl.Hostname)-1] == '-' {
+				return fmt.Errorf("static_lease[%d] hostname 不能以连字符开头或结尾: %q", i, sl.Hostname)
+			}
+		}
 		ip := net.ParseIP(sl.IP)
 		if ip == nil {
 			return fmt.Errorf("static_lease[%d] ip invalid: %s", i, sl.IP)
@@ -255,9 +298,10 @@ func (c ServerConfig) RenderDnsmasq() string {
 		}
 		return s
 	}
+	// 渲染层兜底：prefix("# ") 只保护整段的第一行，字段里的换行会逃出注释。
 	if c.Interface != "" {
 		b.WriteString(prefix("bind-interfaces\n"))
-		b.WriteString(prefix("interface=" + c.Interface + "\n"))
+		b.WriteString(prefix("interface=" + oneLine(c.Interface) + "\n"))
 	}
 	if c.RangeStart != "" && c.RangeEnd != "" {
 		rangeLine := "dhcp-range=" + c.RangeStart + "," + c.RangeEnd
@@ -276,12 +320,12 @@ func (c ServerConfig) RenderDnsmasq() string {
 		b.WriteString(prefix("dhcp-option=6," + strings.Join(c.DNS, ",") + "\n"))
 	}
 	if c.Domain != "" {
-		b.WriteString(prefix("domain=" + c.Domain + "\n"))
+		b.WriteString(prefix("domain=" + oneLine(c.Domain) + "\n"))
 	}
 	for _, sl := range c.StaticLeases {
-		line := "dhcp-host=" + sl.MAC + "," + sl.IP
+		line := "dhcp-host=" + oneLine(sl.MAC) + "," + oneLine(sl.IP)
 		if sl.Hostname != "" {
-			line += "," + sl.Hostname
+			line += "," + oneLine(sl.Hostname)
 		}
 		line += "\n"
 		b.WriteString(prefix(line))
@@ -320,4 +364,21 @@ func SortStaticLeases(sl []StaticLease) {
 	sort.Slice(sl, func(i, j int) bool {
 		return sl[i].MAC < sl[j].MAC
 	})
+}
+
+// oneLine 把任意字符串压成单行，渲染层兜底用。
+// dnsmasq 配置以行为单位，注释前缀只保护第一行。
+func oneLine(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r == '\t' || r == '\n' || r == '\r' || r == '\v' || r == '\f':
+			b.WriteByte(' ')
+		case r < 0x20 || r == 0x7f:
+			// 丢弃
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
