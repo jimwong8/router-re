@@ -2511,6 +2511,15 @@ func (s *Server) handleSetPPPoEConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 422, errBody(10021, "pppoe validation failed", err.Error()))
 		return
 	}
+	// 这个端点也会整体覆盖 users，同样要逐个校验 ——
+	// 否则从一个入口堵住的 chap-secrets 注入可以从这里绕过去。
+	for i, u := range req.Users {
+		if err := u.Validate(); err != nil {
+			writeJSON(w, 422, errBody(10053, "pppoe user invalid",
+				fmt.Sprintf("users[%d]: %v", i, err)))
+			return
+		}
+	}
 	// 持久化到 store（整体覆盖）
 	storeJSON(s.store, "pppoe", "config", req.Config)
 	storeJSON(s.store, "pppoe", "users", req.Users)
@@ -2562,6 +2571,15 @@ func (s *Server) handleSetPPPoEUsers(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 422, errBody(10052, "users must not be empty",
 			"to clear all pppoe users, send {users:[],confirm:true}"))
 		return
+	}
+	// 逐个校验：账号名/密码进 chap-secrets 的引号字段，一个引号就能
+	// 闭合字段、新开一条记录 —— 等于凭空加一个已知密码的拨号账号。
+	for i, u := range req.Users {
+		if err := u.Validate(); err != nil {
+			writeJSON(w, 422, errBody(10053, "pppoe user invalid",
+				fmt.Sprintf("users[%d]: %v", i, err)))
+			return
+		}
 	}
 	storeJSON(s.store, "pppoe", "users", req.Users)
 	s.pppoeUsers = append([]pppoe.User{}, req.Users...)
