@@ -33,6 +33,23 @@ type Decision struct {
 
 // Validate checks a single Rule.
 func Validate(r Rule) error {
+	// ID 会进 Render 的注释行 "# active rule: %s"。注释只保护到行尾，
+	// 一个换行就能在 nft 表里插入任意规则 —— 例如
+	//     ip saddr 0.0.0.0/0 accept
+	// 即整体放通。ID 原来完全没有校验（Name 也查非空，但不进渲染）。
+	if strings.TrimSpace(r.ID) == "" {
+		return fmt.Errorf("id required")
+	}
+	if len(r.ID) > 64 {
+		return fmt.Errorf("id must not exceed 64 bytes")
+	}
+	for _, c := range r.ID {
+		ok := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+			(c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.'
+		if !ok {
+			return fmt.Errorf("id may only contain letters, digits, '_', '-', '.', got %q", c)
+		}
+	}
 	if strings.TrimSpace(r.Name) == "" {
 		return fmt.Errorf("name required")
 	}
@@ -221,7 +238,8 @@ func Render(rules []Rule, now int64, loc *time.Location) string {
 		b.WriteString("\t\t# no active rules\n")
 	} else {
 		for _, id := range ids {
-			fmt.Fprintf(&b, "\t\t# active rule: %s\n", id)
+			// 渲染层兜底：注释只保护到行尾
+			fmt.Fprintf(&b, "\t\t# active rule: %s\n", oneLine(id))
 		}
 	}
 	b.WriteString("\t}\n")
@@ -233,3 +251,19 @@ func Render(rules []Rule, now int64, loc *time.Location) string {
 
 // ensure execx is referenced so the import is not unused if future work uses it
 var _ = execx.Runner(nil)
+
+// oneLine 把任意字符串压成单行，渲染层兜底用。
+func oneLine(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r == '\t' || r == '\n' || r == '\r' || r == '\v' || r == '\f':
+			b.WriteByte(' ')
+		case r < 0x20 || r == 0x7f:
+			// 丢弃
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
