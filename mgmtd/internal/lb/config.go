@@ -3,7 +3,9 @@ package lb
 import (
 	"fmt"
 	"net"
+	"regexp"
 	"strings"
+	"unicode"
 )
 
 // Member is one WAN link in the load balancer.
@@ -38,6 +40,29 @@ type Config struct {
 //	per-connection: each new connection is hashed to a member (sticky).
 //	per-packet: round-robin per packet — generally not recommended as it
 //	  causes out-of-order delivery for TCP.
+// regexp 白名单：Iface 必须是合法的 Linux 接口名（IFNAMSIZ=15），
+// 且会被渲染进注释行 —— ApplyIpRules 逐行执行，换行即可注入一条新命令。
+var memberIfaceRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.@:-]{0,14}$`)
+
+// validMemberName 允许中文等 Unicode 字母数字，但拒绝空白与不可打印字符。
+// 名字会进注释行 `# <name> (...)`；注释只保护到行尾，所以换行必须禁止。
+// 同时禁止空白，避免名字被 strings.Fields 切成额外 argv。
+func validMemberName(s string) bool {
+	if s == "" || len([]rune(s)) > 64 {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case unicode.IsLetter(r), unicode.IsDigit(r):
+		case r == '_' || r == '.' || r == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// Validate checks the load-balancer configuration.
 func Validate(c Config) error {
 	switch c.Mode {
 	case "weighted", "failover", "per-connection", "per-packet":
@@ -50,6 +75,14 @@ func Validate(c Config) error {
 	ifaces := map[string]string{}
 	totalWeight := 0
 	for _, m := range c.Members {
+		// Name 会进注释行 `# <name> (...)`，换行即可注入一条被执行的命令。
+		if !validMemberName(m.Name) {
+			return fmt.Errorf("member name %q is invalid: 只允许字母/数字/_ . -（最长 64 字符），不能含空白或换行", m.Name)
+		}
+		// Iface 同样进注释行，且必须是合法的 Linux 接口名（IFNAMSIZ=15）。
+		if !memberIfaceRe.MatchString(m.Iface) {
+			return fmt.Errorf("member %q: iface %q is invalid: must match ^[A-Za-z0-9][A-Za-z0-9_.@:-]{0,14}$", m.Name, m.Iface)
+		}
 		if strings.TrimSpace(m.Iface) == "" {
 			return fmt.Errorf("member %q: iface required", m.Name)
 		}

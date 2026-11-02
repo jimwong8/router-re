@@ -14,7 +14,9 @@ package htb
 import (
 	"fmt"
 	"net"
+	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/jimwong/router-re/mgmtd/internal/dpi"
 	"github.com/jimwong/router-re/mgmtd/internal/execx"
@@ -38,6 +40,46 @@ type Config struct {
 	DefaultClass string  `json:"default_class"`  // 默认类名（可空）
 	Classes      []Class `json:"classes"`
 	Enabled      bool    `json:"enabled"`
+}
+
+// classLineRe 是 Apply 允许执行的唯一命令行形态。
+// 执行侧按白名单匹配，而不是「切分后执行 argv[0]」——渲染文本里含用户可控的
+// 类名（进注释行），一旦换行逃出注释，切分执行就等于把注入行的第一个词当
+// 程序名 exec（root 下即任意命令执行）。
+var classLineRe = regexp.MustCompile(`^tc (qdisc|class|filter) `)
+
+// validClassName 允许中文等 Unicode 字母数字，但拒绝空白与不可打印字符。
+// 类名会进注释行 `# 叶子类 <name>：...`，而 Apply 逐行执行渲染文本，
+// 注释只保护到行尾，所以换行必须禁止。
+func validClassName(s string) bool {
+	if s == "" || len([]rune(s)) > 64 {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case unicode.IsLetter(r), unicode.IsDigit(r):
+		case r == '_' || r == '.' || r == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// oneLine 把任意字符串压成单行，渲染层兜底。
+func oneLine(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r == '\t' || r == '\n' || r == '\r' || r == '\v' || r == '\f':
+			b.WriteByte(' ')
+		case r < 0x20 || r == 0x7f:
+			// 丢弃控制字符
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // ValidateIface 校验接口名。拒绝空串、含空格、以及 lo。
@@ -72,6 +114,10 @@ func Validate(c Config) error {
 	for i, cl := range c.Classes {
 		if cl.Name == "" {
 			return fmt.Errorf("class %d: name must not be empty", i)
+		}
+		// 类名会进注释行，且渲染文本逐行切分后执行 —— 换行等于注入一条命令。
+		if !validClassName(cl.Name) {
+			return fmt.Errorf("class %d: name %q 只允许字母/数字/_ . -（最长 64 字符），不能含空白或换行", i, cl.Name)
 		}
 		if seen[cl.Name] {
 			return fmt.Errorf("duplicate class name %q", cl.Name)
@@ -137,12 +183,12 @@ func RenderScript(c Config) string {
 	// 4) 叶子类：classid 从 1:10 开始
 	for i, cl := range c.Classes {
 		classID := 10 + i
-		b.WriteString(fmt.Sprintf("# 叶子类 %s：保证 %gmbit，峰值 %gmbit，优先级 %d\n", cl.Name, cl.RateMbit, cl.CeilMbit, cl.Priority))
+		b.WriteString(fmt.Sprintf("# 叶子类 %s：保证 %gmbit，峰值 %gmbit，优先级 %d\n", oneLine(cl.Name), cl.RateMbit, cl.CeilMbit, cl.Priority))
 		b.WriteString(fmt.Sprintf("tc class add dev %s parent 1:1 classid 1:%d htb rate %gmbit ceil %gmbit prio %d\n",
 			c.Iface, classID, cl.RateMbit, cl.CeilMbit, cl.Priority))
 		// 5) 端口匹配
 		for _, port := range cl.MatchPorts {
-			b.WriteString(fmt.Sprintf("#   %s: 目的端口 %d → classid 1:%d\n", cl.Name, port, classID))
+			b.WriteString(fmt.Sprintf("#   %s: 目的端口 %d → classid 1:%d\n", oneLine(cl.Name), port, classID))
 			b.WriteString(fmt.Sprintf("tc filter add dev %s protocol ip parent 1:0 prio %d u32 match ip dport %d 0xffff flowid 1:%d\n",
 				c.Iface, cl.Priority, port, classID))
 		}
@@ -154,13 +200,13 @@ func RenderScript(c Config) string {
 			} else {
 				ip = ip + mask
 			}
-			b.WriteString(fmt.Sprintf("#   %s: 目的地址 %s → classid 1:%d\n", cl.Name, ip, classID))
+			b.WriteString(fmt.Sprintf("#   %s: 目的地址 %s → classid 1:%d\n", oneLine(cl.Name), ip, classID))
 			b.WriteString(fmt.Sprintf("tc filter add dev %s protocol ip parent 1:0 prio %d u32 match ip dst %s flowid 1:%d\n",
 				c.Iface, cl.Priority, ip, classID))
 		}
 		// 7) fwmark 匹配（DPI 按应用打标后在此整形）
 		if cl.MatchMark > 0 {
-			b.WriteString(fmt.Sprintf("#   %s: fwmark %d → classid 1:%d\n", cl.Name, cl.MatchMark, classID))
+			b.WriteString(fmt.Sprintf("#   %s: fwmark %d → classid 1:%d\n", oneLine(cl.Name), cl.MatchMark, classID))
 			b.WriteString(fmt.Sprintf("tc filter add dev %s protocol ip parent 1:0 prio %d handle %d fw flowid 1:%d\n",
 				c.Iface, cl.Priority, cl.MatchMark, classID))
 		}
@@ -209,7 +255,12 @@ func Apply(r execx.Runner, c Config) (bool, string) {
 		if len(fields) == 0 {
 			continue
 		}
-		// 渲染器只产出简单 tc 命令，无 shell 元字符，可直接按空白切分。
+		// 执行侧白名单：渲染文本里含用户可控的类名（进注释行），
+		// 换行一旦逃出注释就会变成一行「命令」，切分后 argv[0] 直接被 exec。
+		// 因此只放行 tc 命令，其余一律拒绝。
+		if !classLineRe.MatchString(t) {
+			return false, fmt.Sprintf("refusing to execute unexpected line %q", t)
+		}
 		if _, err := r.Run(fields[0], fields[1:]...); err != nil {
 			// `tc qdisc del` 在根 qdisc 不存在时返回非零——这是预期行为，吞掉。
 			if strings.Contains(t, "qdisc del") {

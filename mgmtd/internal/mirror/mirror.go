@@ -171,6 +171,11 @@ func Apply(r execx.Runner, c Config) (bool, string) {
 		if len(fields) == 0 {
 			continue
 		}
+		// 执行侧白名单：渲染文本只有 tc 命令；接口名已在 Validate 限制字符集，
+		// 这里再做一层 fail-closed，保证任何渲染层缺陷都不会变成任意 argv 执行。
+		if fields[0] != "tc" {
+			return false, fmt.Sprintf("refusing to execute unexpected line %q", t)
+		}
 		if _, err := r.Run(fields[0], fields[1:]...); err != nil {
 			// `tc qdisc del` 在无 qdisc 时返回非零——预期行为，吞掉。
 			if strings.Contains(t, "qdisc del") {

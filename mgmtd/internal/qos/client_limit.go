@@ -115,6 +115,12 @@ func RenderClientTcCommands(limits []ClientLimit, dev string) ([]string, error) 
 	if dev == "" {
 		dev = "eth0"
 	}
+	// 渲染层兜底：dev 直接进 tc 命令行，而 ApplyClientLimits 会把每行
+	// 按空白切分后 exec —— dev 里的换行等于凭空多出一条被执行的命令。
+	// 本包 apply.go 已有同一套 ifaceNameRe，这里再拦一次。
+	if err := validateIface(dev); err != nil {
+		return nil, err
+	}
 	if len(limits) == 0 {
 		return nil, fmt.Errorf("no client limits")
 	}
@@ -178,6 +184,10 @@ func ApplyClientLimits(r execx.Runner, limits []ClientLimit, dev string) error {
 		fields := strings.Fields(cmd)
 		if len(fields) == 0 {
 			continue
+		}
+		// 执行侧白名单：渲染文本只有 tc 命令，其余形态一律拒绝。
+		if fields[0] != "tc" {
+			return fmt.Errorf("refusing to execute unexpected line %q", cmd)
 		}
 		if _, err := r.Run(fields[0], fields[1:]...); err != nil {
 			// `tc qdisc del` fails when no qdisc exists — expected on a fresh
