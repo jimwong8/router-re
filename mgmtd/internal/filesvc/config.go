@@ -99,6 +99,19 @@ func validRoot(root string) error {
 	if !strings.HasPrefix(root, "/") {
 		return fmt.Errorf("共享目录必须是绝对路径")
 	}
+	// 控制字符必须挡在这里。filepath.Clean 会原样保留换行，于是
+	//     /etc/disk_user/x\n   path = /etc
+	// 能通过下面所有检查，渲染进 smb.conf 就是第二条 path —— samba 以最后
+	// 一条为准，共享目录直接变成 /etc。samba / vsftpd / lighttpd 三条服务
+	// 都会被这一手绕过，"必须落在 StorageRoot 内"这个约束形同虚设。
+	for _, r := range root {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("共享目录不能包含控制字符或换行（发现 %#U）", r)
+		}
+		if r == '"' || r == '\'' || r == '\\' {
+			return fmt.Errorf("共享目录不能包含引号或反斜杠（发现 %q）", r)
+		}
+	}
 	for _, seg := range strings.Split(root, "/") {
 		if seg == ".." {
 			return fmt.Errorf("共享目录不能包含 ..")
@@ -165,6 +178,15 @@ func ValidateSamba(c SambaConfig) error {
 	if c.Workgroup == "" || len(c.Workgroup) > 15 {
 		return fmt.Errorf("工作组名必须 1-15 个字符")
 	}
+	// Workgroup 原来只查长度。14 个字符就够拼出 "W\n[etc]\npath=/"，
+	// 在 smb.conf 里开出一个指向 / 的新共享段。
+	for _, r := range c.Workgroup {
+		ok := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.'
+		if !ok {
+			return fmt.Errorf("工作组名只能包含字母、数字、下划线、短横线和点（发现 %q）", r)
+		}
+	}
 	for _, r := range c.ShareName {
 		ok := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
 			(r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.'
@@ -196,6 +218,9 @@ func ValidateHTTP(c HTTPConfig) error {
 
 // RenderFTP 渲染 vsftpd.conf。密码不写进配置（vsftpd 用系统用户 + PAM）。
 func RenderFTP(c FTPConfig) string {
+	// 渲染层兜底：vsftpd.conf 以行为单位，Root 里一个换行就能追加
+	// "local_root=/" 之类的新指令。校验层已挡，但不依赖调用方。
+	root := oneLine(c.Root)
 	var b strings.Builder
 	b.WriteString("# 由 mgmtd 生成，请勿手工编辑\n")
 	if c.Enabled {
@@ -208,10 +233,10 @@ func RenderFTP(c FTPConfig) string {
 		b.WriteString("anonymous_enable=YES\n")
 	} else {
 		b.WriteString("anonymous_enable=NO\nlocal_enable=YES\n")
-		fmt.Fprintf(&b, "local_root=%s\n", c.Root)
+		fmt.Fprintf(&b, "local_root=%s\n", root)
 	}
 	if !c.Anonymous && c.Root != "" {
-		fmt.Fprintf(&b, "anon_root=%s\n", c.Root)
+		fmt.Fprintf(&b, "anon_root=%s\n", root)
 	}
 	if c.MaxConn > 0 {
 		fmt.Fprintf(&b, "max_clients=%d\n", c.MaxConn)
@@ -226,30 +251,54 @@ func RenderFTP(c FTPConfig) string {
 
 // RenderSamba 渲染 smb.conf 的一个共享段。
 func RenderSamba(c SambaConfig) string {
+	wg := oneLine(c.Workgroup)
+	root := oneLine(c.Root)
+	user := oneLine(c.User)
 	var b strings.Builder
 	b.WriteString("# 由 mgmtd 生成，请勿手工编辑\n[global]\n")
-	fmt.Fprintf(&b, "   workgroup = %s\n", c.Workgroup)
+	fmt.Fprintf(&b, "   workgroup = %s\n", wg)
 	b.WriteString("   server string = router-re file service\n")
 	b.WriteString("   security = user\n   map to guest = Bad User\n\n")
 	fmt.Fprintf(&b, "[%s]\n", c.ShareName)
-	fmt.Fprintf(&b, "   path = %s\n", c.Root)
+	fmt.Fprintf(&b, "   path = %s\n", root)
 	fmt.Fprintf(&b, "   read only = %s\n", yesNo(c.ReadOnly))
 	b.WriteString("   browseable = yes\n   create mask = 0644\n   directory mask = 0755\n")
 	if c.User != "" && !c.ReadOnly {
-		fmt.Fprintf(&b, "   valid users = %s\n", c.User)
+		fmt.Fprintf(&b, "   valid users = %s\n", user)
 	}
 	return b.String()
 }
 
 // RenderHTTP 渲染一个 lighttpd 风格的静态文件服务片段。
 func RenderHTTP(c HTTPConfig) string {
+	// document-root 用双引号包裹，这里额外去掉引号：闭合引号能新开一条指令。
+	root := oneLine(c.Root)
 	var b strings.Builder
 	b.WriteString("# 由 mgmtd 生成，请勿手工编辑\n")
 	fmt.Fprintf(&b, "server.port = %d\n", c.Port)
-	fmt.Fprintf(&b, "server.document-root = \"%s\"\n", c.Root)
+	fmt.Fprintf(&b, "server.document-root = \"%s\"\n", root)
 	b.WriteString("server.modules += ( \"mod_dirlisting\", \"mod_staticfile\" )\n")
 	fmt.Fprintf(&b, "dir-listing.activate = \"%s\"\n", enabled(c.Listing))
 	b.WriteString("server.follow-symlink = \"disable\"\n")
+	return b.String()
+}
+
+// oneLine 把任意字符串压成单行，并去掉会破坏配置语法的引号与反斜杠。
+// 渲染层兜底用，不依赖调用方跑过 Validate。
+func oneLine(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r == '\t' || r == '\n' || r == '\r' || r == '\v' || r == '\f':
+			b.WriteByte(' ')
+		case r == '"' || r == '\'' || r == '\\':
+			// 丢弃：smb.conf / lighttpd 里引号能闭合字段改写后续指令
+		case r < 0x20 || r == 0x7f:
+			// 丢弃
+		default:
+			b.WriteRune(r)
+		}
+	}
 	return b.String()
 }
 

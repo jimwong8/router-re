@@ -1564,6 +1564,13 @@ func (s *Server) handlePostWirelessSSIDs(w http.ResponseWriter, r *http.Request)
 		if ssid.Name == "" {
 			continue
 		}
+		// 写入前校验：Security 只允许 open/wpa2/wpa3。
+		// 不校验的话 "WPA2"（大写）会一路存进配置并渲染成 wpa=0 —— 静默变开放网络。
+		if err := wireless.Validate(ssid); err != nil {
+			s.logAudit(r, "wireless.ssids.set", ssid.Name, "fail", err.Error())
+			writeJSON(w, 422, errBody(10032, "ssid invalid", err.Error()))
+			return
+		}
 		replaced := false
 		for i := range list {
 			if list[i].Name == ssid.Name {
