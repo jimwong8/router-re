@@ -1878,6 +1878,12 @@ func (s *Server) handleSetBGP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
 		return
 	}
+	// frr.conf 以行为单位，peers[].password / address 里一个换行就能插入
+	// 任意 FRR 指令（例如与攻击者的路由器建立 BGP peering）。
+	if err := route.ValidateBGP(cfg); err != nil {
+		writeJSON(w, 422, errBody(10054, "bgp config invalid", err.Error()))
+		return
+	}
 	s.store.Set("route", "bgp.local_as", itoa(cfg.LocalAS))
 	s.store.Set("route", "bgp.router_id", cfg.RouterID)
 	for i, p := range cfg.Peers {
@@ -1925,6 +1931,12 @@ func (s *Server) handleSetOSPF(w http.ResponseWriter, r *http.Request) {
 	var cfg route.OSPFConfig
 	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
 		writeJSON(w, 400, errBody(10007, "json decode fail", err.Error()))
+		return
+	}
+	// area 注入 "0\n default-information originate" 会让本机向全网
+	// 宣告自己是默认网关 —— 流量直接改道。
+	if err := route.ValidateOSPF(cfg); err != nil {
+		writeJSON(w, 422, errBody(10055, "ospf config invalid", err.Error()))
 		return
 	}
 	s.store.Set("route", "ospf.router_id", cfg.RouterID)
