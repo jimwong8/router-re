@@ -159,6 +159,11 @@
                 <el-tag :type="row.active_now ? 'success' : 'info'" size="small">{{ row.active_now ? '生效' : '未生效' }}</el-tag>
               </template>
             </el-table-column>
+            <el-table-column label="操作" width="80">
+              <template #default="{ row }">
+                <el-button size="small" type="danger" @click="deleteTimeSchedule(row.id)">删除</el-button>
+              </template>
+            </el-table-column>
           </el-table>
 
           <!-- 后端拒绝跨零点的 detail 显示在这里 -->
@@ -356,6 +361,31 @@
             <div style="font-weight:bold; margin-bottom:4px">渲染的 nftables：</div>
             <pre class="tool-pre">{{ natNft }}</pre>
           </div>
+        </el-tab-pane>
+
+        <!-- ===== Tab 5b: 端口映射 ===== -->
+        <el-tab-pane label="端口映射" name="portmap">
+          <el-alert v-if="portmapDetail" type="error" :closable="false" show-icon :title="portmapDetail" style="margin-bottom:12px" />
+          <el-form inline size="small" label-width="70px" style="margin-bottom:10px">
+            <el-form-item>
+              <el-button type="primary" size="small" :loading="portmapLoading" @click="loadPortmap">加载</el-button>
+            </el-form-item>
+          </el-form>
+          <el-table :data="portmapRules" size="small" border style="width:100%" empty-text="暂无端口映射规则">
+            <el-table-column prop="name" label="名称" min-width="120" />
+            <el-table-column prop="proto" label="协议" width="80" />
+            <el-table-column prop="ext_port" label="外部端口" width="100" />
+            <el-table-column prop="int_ip" label="内网 IP" min-width="140" />
+            <el-table-column prop="int_port" label="内网端口" width="100" />
+            <el-table-column label="启用" width="70">
+              <template #default="{ row }">{{ row.enabled ? '是' : '否' }}</template>
+            </el-table-column>
+            <el-table-column label="操作" width="80">
+              <template #default="{ row }">
+                <el-button size="small" type="danger" @click="deletePortmapRule(row.id)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
         </el-tab-pane>
 
         <!-- ===== Tab 5: Webfilter ===== -->
@@ -912,6 +942,66 @@ async function loadWebfilterStatus() {
 }
 
 onMounted(() => { loadDDoS(); loadTimeSchedule(); });
+
+// ---------- Tab 2: TimeSchedule Delete ----------
+async function deleteTimeSchedule(id: string) {
+  try {
+    await ElMessageBox.confirm('确定删除该时间段规则？', '提示', { type: 'warning' });
+  } catch {
+    return;
+  }
+  try {
+    const res = await api.delete('/api/v1/policy/timeschedule/' + encodeURIComponent(id));
+    if (res.data?.deleted) {
+      ElMessage.success('已删除');
+    } else {
+      ElMessage.warning('规则不存在或已删除');
+    }
+    await loadTimeSchedule();
+  } catch (e: any) {
+    showError(e, '删除失败');
+  }
+}
+
+// ---------- Portmap ----------
+const portmapLoading = ref(false);
+const portmapDetail = ref('');
+const portmapRules = ref<any[]>([]);
+
+async function loadPortmap() {
+  portmapLoading.value = true;
+  portmapDetail.value = '';
+  try {
+    const res = await api.get('/api/v1/portmap/rules');
+    const d = res.data || {};
+    portmapRules.value = d.rules || [];
+  } catch (e: any) {
+    portmapDetail.value = errDetail(e) || '加载端口映射规则失败';
+    showError(e, '加载端口映射规则失败');
+  } finally {
+    portmapLoading.value = false;
+  }
+}
+
+async function deletePortmapRule(id: number) {
+  try {
+    await ElMessageBox.confirm('确定删除该端口映射规则？', '提示', { type: 'warning' });
+  } catch {
+    return;
+  }
+  try {
+    const res = await api.delete('/api/v1/portmap/rules/' + encodeURIComponent(String(id)));
+    if (res.data?.deleted) {
+      ElMessage.success('已删除');
+    } else {
+      ElMessage.warning('规则不存在或已删除');
+    }
+    await loadPortmap();
+  } catch (e: any) {
+    portmapDetail.value = errDetail(e) || '删除失败';
+    showError(e, '删除失败');
+  }
+}
 
 // ---------- 防火墙日志分析 ----------
 // GET /api/v1/firewall/log/analysis -> {available, reason?, count, summary, top_talkers, suspicious, suggestions}

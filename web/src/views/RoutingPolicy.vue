@@ -43,6 +43,11 @@
           <el-table-column prop="table" label="目标表" width="90" />
           <el-table-column prop="iif" label="入接口(iif)" />
           <el-table-column prop="hits" label="命中数" width="90" />
+          <el-table-column label="操作" width="100">
+            <template #default="{ $index, row }">
+              <el-button link size="small" type="danger" @click="removeRule($index, row)">删除</el-button>
+            </template>
+          </el-table-column>
         </el-table>
       </el-card>
 
@@ -112,7 +117,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import api from '../api';
 
 const loading = ref(false);
@@ -245,6 +250,28 @@ async function saveRule() {
     showError(e);
   } finally {
     saving.value = false;
+  }
+}
+
+async function removeRule(idx: number, row: any) {
+  try {
+    await ElMessageBox.confirm(`确认删除优先级 ${row.priority} 的策略规则？`, '确认删除', {
+      confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning',
+    });
+  } catch {
+    return;
+  }
+  try {
+    const res = await api.delete(`/api/v1/policyroute/rules/${encodeURIComponent(String(row.id ?? row.priority))}`);
+    const d = res.data || {};
+    if (d.deleted) {
+      ElMessage.success('规则已删除');
+      await loadRules();
+    } else {
+      ElMessage.warning('规则不存在，可能已被删除');
+    }
+  } catch (e: any) {
+    showError(e);
   }
 }
 

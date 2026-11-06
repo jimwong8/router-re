@@ -56,7 +56,7 @@
         <el-table-column label="操作" width="160">
           <template #default="{ $index, row }">
             <el-button link type="primary" size="small" :loading="probing === row.id" @click="probe(row)">立即探测</el-button>
-            <el-button link type="danger" size="small" @click="removeTarget($index)">删除</el-button>
+            <el-button link type="danger" size="small" @click="removeTarget(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -180,14 +180,23 @@ function addTarget() {
   ElMessage.success('已添加（记得保存生效）');
 }
 
-async function removeTarget(idx: number) {
+async function removeTarget(row: Target) {
   try {
     await ElMessageBox.confirm('确定删除该目标？', '提示', { type: 'warning' });
   } catch {
     return;
   }
-  targets.value.splice(idx, 1);
-  ElMessage.success('已删除（记得保存生效）');
+  try {
+    const res = await api.delete('/api/v1/linkcheck/targets/' + encodeURIComponent(row.id));
+    if (res.data?.deleted) {
+      ElMessage.success('已删除');
+    } else {
+      ElMessage.warning('目标不存在或已删除');
+    }
+    await load();
+  } catch (e: any) {
+    showError(e, '删除失败');
+  }
 }
 
 async function saveAll() {

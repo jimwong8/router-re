@@ -89,6 +89,31 @@
       </el-form>
     </el-card>
 
+    <!-- 远程访问运行状态 -->
+    <el-card shadow="never">
+      <template #header>
+        <div style="display:flex; align-items:center; gap:12px; justify-content:space-between; flex-wrap:wrap">
+          <span>远程访问运行状态</span>
+          <el-button size="small" :loading="remoteStatusLoading" @click="loadRemoteStatus">刷新</el-button>
+        </div>
+      </template>
+      <el-alert v-if="remoteStatusErr" type="error" :closable="false" show-icon :title="remoteStatusErr" style="margin-bottom:12px" />
+      <el-descriptions :column="3" border size="small">
+        <el-descriptions-item label="SSH 状态">
+          <el-tag :type="remoteStatus.ssh_active === 'active' ? 'success' : 'info'" size="small">{{ remoteStatus.ssh_active || '-' }}</el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="SSH 端口">{{ remoteStatus.ssh_port || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="SSH 监听">{{ remoteStatus.ssh_listen || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="Telnet 状态">
+          <el-tag :type="remoteStatus.telnet_active === 'active' ? 'success' : 'info'" size="small">{{ remoteStatus.telnet_active || '-' }}</el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="FTP 状态">
+          <el-tag :type="remoteStatus.ftp_active === 'active' ? 'success' : 'info'" size="small">{{ remoteStatus.ftp_active || '-' }}</el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="FTP 端口">{{ remoteStatus.ftp_port || '-' }}</el-descriptions-item>
+      </el-descriptions>
+    </el-card>
+
     <!-- 网络唤醒 -->
     <el-card shadow="never">
       <template #header>
@@ -299,6 +324,24 @@ const ntpSaving = ref(false);
 const ntpError = ref('');
 const ntpStatus = ref<NTPStatus>({});
 
+const remoteStatus = ref<Record<string, string>>({});
+const remoteStatusLoading = ref(false);
+const remoteStatusErr = ref('');
+
+async function loadRemoteStatus() {
+  remoteStatusLoading.value = true;
+  remoteStatusErr.value = '';
+  try {
+    const res = await api.get('/api/v1/remote/access/status');
+    remoteStatus.value = res.data || {};
+  } catch (e: any) {
+    remoteStatusErr.value = e?.response?.data?.message || e?.response?.data?.detail || e?.message || '加载远程访问状态失败';
+    showError(e);
+  } finally {
+    remoteStatusLoading.value = false;
+  }
+}
+
 let timer: number | undefined;
 
 async function loadAll() {
@@ -452,7 +495,7 @@ async function loadNtp() {
     if (c) ntp.value = { servers: c.servers || [], enabled: c.enabled || false };
     ntpStatus.value = st.data || {};
   } catch (e: any) {
-    ntpError.value = e?.response?.data?.detail || e?.response?.data?.message || e.message || '加载 NTP 配置失败';
+    ntpError.value = e?.response?.data?.message || e?.response?.data?.detail || e.message || '加载 NTP 配置失败';
     ElMessage.error(ntpError.value);
   }
 }
@@ -465,7 +508,7 @@ async function saveNtp() {
     if (res.data?.applied) ElMessage.success('NTP 配置已保存并应用');
     else ElMessage.warning(res.data?.reason || 'NTP 配置已保存，未应用');
   } catch (e: any) {
-    ntpError.value = e?.response?.data?.detail || e?.response?.data?.message || e.message || '保存 NTP 配置失败';
+    ntpError.value = e?.response?.data?.message || e?.response?.data?.detail || e.message || '保存 NTP 配置失败';
     ElMessage.error(ntpError.value);
   } finally {
     ntpSaving.value = false;
@@ -499,7 +542,7 @@ function removeTunnel(row: FrpTunnel) {
 function startRefresh() { stopRefresh(); timer = window.setInterval(loadAll, 5000); }
 function stopRefresh() { if (timer) { clearInterval(timer); timer = undefined; } }
 
-onMounted(() => { loadAll(); loadFrp(); loadNtp(); startRefresh(); });
+onMounted(() => { loadAll(); loadFrp(); loadNtp(); loadRemoteStatus(); startRefresh(); });
 onBeforeUnmount(stopRefresh);
 </script>
 

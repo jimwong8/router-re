@@ -29,6 +29,9 @@
             <span class="mono">{{ p.binary }}</span>
             <span v-if="p.version" class="ver" :title="p.version">{{ p.version }}</span>
           </div>
+          <div class="meta" v-if="probedVersions[p.id]">
+            探测版本：<span class="mono">{{ probedVersions[p.id] }}</span>
+          </div>
           <div class="meta" v-if="p.ports && p.ports.length">
             端口：<span class="mono">{{ p.ports.join(', ') }}</span>
           </div>
@@ -44,6 +47,7 @@
                 {{ p.enabled ? '取消自启' : '开机自启' }}
               </el-button>
               <el-button size="small" link @click="showLog(p)">日志</el-button>
+              <el-button size="small" link :loading="versionBusy === p.id" @click="checkVersion(p)">检查版本</el-button>
             </template>
             <template v-else>
               <span class="hint">未安装，需先把 {{ p.binary }} 放到 PATH</span>
@@ -142,6 +146,25 @@ async function showLog(p: P) {
     if (!logLines.value.length && res.data?.note) logLines.value = ['（' + res.data.note + '）'];
   } catch (e: any) {
     logLines.value = ['读取日志失败：' + (e?.response?.data?.message || e?.message)];
+  }
+}
+
+const probedVersions = ref<Record<string, string>>({});
+const versionBusy = ref('');
+const versionError = ref('');
+
+async function checkVersion(p: P) {
+  versionBusy.value = p.id;
+  versionError.value = '';
+  try {
+    const res = await api.get(`/api/v1/plugins/${p.id}/version`);
+    probedVersions.value = { ...probedVersions.value, [p.id]: res.data?.version || '' };
+    ElMessage.success(`${p.name} 版本：${res.data?.version || '未知'}`);
+  } catch (e: any) {
+    versionError.value = e?.response?.data?.message || e?.response?.data?.detail || e?.message || '检查版本失败';
+    ElMessage.error(versionError.value);
+  } finally {
+    versionBusy.value = '';
   }
 }
 

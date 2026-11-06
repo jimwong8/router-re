@@ -109,6 +109,39 @@
           <div v-if="applyResult.note" style="margin-top:8px; color:#909399">{{ applyResult.note }}</div>
         </div>
       </el-card>
+
+      <!-- 系统在线升级 -->
+      <el-card shadow="never" style="margin-top:16px;">
+        <template #header>系统在线升级</template>
+        <el-form label-width="130px">
+          <el-form-item label="升级包 URL">
+            <el-input v-model="upgradeUrl" placeholder="http/https 绝对地址，如 https://example.com/firmware.bin" style="width:420px;" />
+            <div style="color:#909399; font-size:12px; margin-top:4px">仅接受 http/https 绝对地址，禁止本地 file 路径；不自动预填危险值</div>
+          </el-form-item>
+          <el-form-item label="SHA256 Checksum">
+            <el-input v-model="upgradeChecksum" placeholder="64 位十六进制 SHA256" style="width:420px;" />
+            <div style="color:#909399; font-size:12px; margin-top:4px">必须提供 64 位十六进制 SHA256，没有完整性校验的升级一律拒绝</div>
+          </el-form-item>
+          <el-form-item label="二次确认">
+            <el-checkbox v-model="upgradeConfirm">我确认要下载并安装该固件，设备将重启并中断网络</el-checkbox>
+          </el-form-item>
+          <el-form-item>
+            <el-button type="danger" :loading="upgradeApplying" :disabled="!upgradeConfirm" @click="doSystemUpgrade">在线升级</el-button>
+          </el-form-item>
+        </el-form>
+        <el-alert v-if="upgradeError" :title="upgradeError" type="error" :closable="false" style="margin-top:12px;" />
+        <div v-if="upgradeResult">
+          <el-alert title="升级已提交，设备即将重启" type="warning" :closable="false" style="margin:12px 0;" />
+          <el-descriptions title="升级结果" :column="2" border style="margin-bottom:12px">
+            <el-descriptions-item label="upgrade">{{ upgradeResult.upgrade }}</el-descriptions-item>
+            <el-descriptions-item label="size">{{ upgradeResult.size }} bytes</el-descriptions-item>
+            <el-descriptions-item label="checksum">{{ upgradeResult.checksum }}</el-descriptions-item>
+            <el-descriptions-item label="backup">{{ upgradeResult.backup }}</el-descriptions-item>
+            <el-descriptions-item label="service">{{ upgradeResult.service }}</el-descriptions-item>
+            <el-descriptions-item label="watchdog">{{ upgradeResult.watchdog }}</el-descriptions-item>
+          </el-descriptions>
+        </div>
+      </el-card>
     </el-card>
   </div>
 </template>
@@ -135,6 +168,14 @@ const applyResult = ref<any>(null);
 const confirming = ref(false);
 const confirmError = ref('');
 const confirmResult = ref<any>(null);
+
+// ---- 系统在线升级（POST /api/v1/system/upgrade） ----
+const upgradeUrl = ref('');
+const upgradeChecksum = ref('');
+const upgradeConfirm = ref(false);
+const upgradeApplying = ref(false);
+const upgradeError = ref('');
+const upgradeResult = ref<any>(null);
 
 async function verifyImage() {
   confirming.value = true;
@@ -219,6 +260,27 @@ async function applyUpgrade() {
   }
 }
 
+async function doSystemUpgrade() {
+  upgradeApplying.value = true;
+  upgradeError.value = '';
+  upgradeResult.value = null;
+  try {
+    const res = await api.post('/api/v1/system/upgrade', {
+      url: upgradeUrl.value.trim(),
+      checksum: upgradeChecksum.value.trim(),
+      confirm: true,
+    });
+    const d = res.data || {};
+    upgradeResult.value = d;
+    ElMessage.success('系统在线升级已提交，设备即将重启');
+  } catch (e: any) {
+    upgradeError.value = e?.response?.data?.message || e?.response?.data?.detail || e.message || '系统升级失败';
+    ElMessage.error(upgradeError.value);
+  } finally {
+    upgradeApplying.value = false;
+  }
+}
+
 const inspectPath = ref('/tmp/openwrt-sysupgrade.bin');
 const inspecting = ref(false);
 const inspectError = ref('');
@@ -233,7 +295,7 @@ async function inspectFirmware() {
     inspectImage.value = res.data?.image ?? null;
     ElMessage.success('固件检查完成');
   } catch (e: any) {
-    inspectError.value = e?.response?.data?.detail || e?.response?.data?.message || e?.message || '检查固件失败';
+    inspectError.value = e?.response?.data?.message || e?.response?.data?.detail || e?.message || '检查固件失败';
     ElMessage.error(inspectError.value);
   } finally {
     inspecting.value = false;
