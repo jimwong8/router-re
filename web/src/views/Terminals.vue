@@ -147,7 +147,7 @@ function nextPage() {
 }
 
 // 后端分页端点（终端列表）。
-const TERMINALS_URL = '/api/v1/terminals';
+const TERMINALS_URL = '/api/v1/conntrack/terminals';
 
 async function fetchTerminalsPage(limit: number, offset: number) {
   const res = await api.get(TERMINALS_URL, { params: { limit, offset } });
