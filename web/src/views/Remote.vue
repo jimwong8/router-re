@@ -204,6 +204,45 @@
       </el-form>
     </el-card>
 
+    <!-- NTP 服务（独立于 /system/time） -->
+    <el-card shadow="never">
+      <template #header>
+        <div style="display:flex; align-items:center; gap:12px; justify-content:space-between; flex-wrap:wrap">
+          <span>NTP 服务</span>
+          <div style="display:flex; align-items:center; gap:8px">
+            <el-button size="small" type="primary" :loading="ntpSaving" @click="saveNtp">保存</el-button>
+            <el-button size="small" @click="refreshNtpStatus">刷新状态</el-button>
+          </div>
+        </div>
+      </template>
+
+      <el-form label-width="130px" label-position="left">
+        <el-form-item label="启用">
+          <el-switch v-model="ntp.enabled" />
+        </el-form-item>
+        <el-form-item label="NTP 服务器">
+          <el-select
+            v-model="ntp.servers"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            placeholder="输入 NTP 服务器后回车，最多 16 条"
+            style="width:360px"
+          />
+          <span class="hint">示例：ntp.aliyun.com、cn.pool.ntp.org、time.windows.com</span>
+        </el-form-item>
+        <el-form-item label="同步状态">
+          <div class="status-line">
+            <el-tag v-if="ntpStatus.ntpsynchronized === 'yes'" type="success" size="small">已同步</el-tag>
+            <el-tag v-else type="warning" size="small">未同步</el-tag>
+            <span class="hint">NTP={{ ntpStatus.ntp }} · 时区={{ ntpStatus.timezone }} · 本地RTC={{ ntpStatus.localrtc }}</span>
+          </div>
+        </el-form-item>
+        <el-alert v-if="ntpError" :title="ntpError" type="error" show-icon :closable="false" style="margin-top: 12px;" />
+      </el-form>
+    </el-card>
+
   </div>
 </template>
 
@@ -230,6 +269,8 @@ interface WOLTarget { name: string; mac: string; iface: string; broadcast: strin
 interface FrpTunnel { name: string; type: string; local_ip: string; local_port: number; remote_port: number }
 interface FrpConfig { server_addr: string; server_port: number; token: string; tunnels: FrpTunnel[] }
 interface FrpStatus { running: boolean; pid?: number; binary?: string; config?: string; binary_exists?: boolean }
+interface NTPConfig { servers: string[]; enabled: boolean }
+interface NTPStatus { [k: string]: string }
 
 const access = ref<Access>({ ssh_enabled: false, ssh_port: 22, web_enabled: true, web_port: 443, allow_sources: [], telnet_enabled: false });
 const accessSaving = ref(false);
@@ -251,6 +292,12 @@ const frpSaving = ref(false);
 const frpApplying = ref(false);
 const frpStopping = ref(false);
 const newTunnel = ref<FrpTunnel>({ name: '', type: 'tcp', local_ip: '127.0.0.1', local_port: 0, remote_port: 0 });
+
+// ---- NTP 服务（独立 /api/v1/ntp/*，不与 /system/time 混用） ----
+const ntp = ref<NTPConfig>({ servers: ['ntp.aliyun.com'], enabled: true });
+const ntpSaving = ref(false);
+const ntpError = ref('');
+const ntpStatus = ref<NTPStatus>({});
 
 let timer: number | undefined;
 
@@ -394,6 +441,47 @@ async function stopFrp() {
   }
 }
 
+async function loadNtp() {
+  ntpError.value = '';
+  try {
+    const [cfg, st] = await Promise.all([
+      api.get('/api/v1/ntp/config'),
+      api.get('/api/v1/ntp/status'),
+    ]);
+    const c = cfg.data?.config;
+    if (c) ntp.value = { servers: c.servers || [], enabled: c.enabled || false };
+    ntpStatus.value = st.data || {};
+  } catch (e: any) {
+    ntpError.value = e?.response?.data?.detail || e?.response?.data?.message || e.message || '加载 NTP 配置失败';
+    ElMessage.error(ntpError.value);
+  }
+}
+
+async function saveNtp() {
+  ntpSaving.value = true;
+  ntpError.value = '';
+  try {
+    const res = await api.post('/api/v1/ntp/config', { servers: ntp.value.servers, enabled: ntp.value.enabled });
+    if (res.data?.applied) ElMessage.success('NTP 配置已保存并应用');
+    else ElMessage.warning(res.data?.reason || 'NTP 配置已保存，未应用');
+  } catch (e: any) {
+    ntpError.value = e?.response?.data?.detail || e?.response?.data?.message || e.message || '保存 NTP 配置失败';
+    ElMessage.error(ntpError.value);
+  } finally {
+    ntpSaving.value = false;
+  }
+}
+
+async function refreshNtpStatus() {
+  try {
+    const res = await api.get('/api/v1/ntp/status');
+    ntpStatus.value = res.data || {};
+    ElMessage.success('NTP 状态已刷新');
+  } catch (e: any) {
+    showError(e);
+  }
+}
+
 function addTunnel() {
   if (!newTunnel.value.name || !newTunnel.value.local_port || !newTunnel.value.remote_port) {
     ElMessage.warning('请填写名称、本地端口和远程端口');
@@ -411,7 +499,7 @@ function removeTunnel(row: FrpTunnel) {
 function startRefresh() { stopRefresh(); timer = window.setInterval(loadAll, 5000); }
 function stopRefresh() { if (timer) { clearInterval(timer); timer = undefined; } }
 
-onMounted(() => { loadAll(); loadFrp(); startRefresh(); });
+onMounted(() => { loadAll(); loadFrp(); loadNtp(); startRefresh(); });
 onBeforeUnmount(stopRefresh);
 </script>
 

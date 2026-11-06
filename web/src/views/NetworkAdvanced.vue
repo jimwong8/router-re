@@ -182,6 +182,40 @@
             <pre v-if="ospfResult.frr">{{ ospfResult.frr }}</pre>
           </div>
         </el-tab-pane>
+        <!-- Tab 6: 端口镜像 -->
+        <el-tab-pane name="mirror" label="端口镜像">
+          <el-form :model="mirrorForm" label-width="110px" style="max-width:640px">
+            <el-form-item label="源接口">
+              <el-input v-model="mirrorForm.source_iface" placeholder="eth0" />
+            </el-form-item>
+            <el-form-item label="目标接口">
+              <el-input v-model="mirrorForm.target_iface" placeholder="eth1" />
+            </el-form-item>
+            <el-form-item label="方向">
+              <el-select v-model="mirrorForm.direction" style="width:100%">
+                <el-option label="ingress" value="ingress" />
+                <el-option label="egress" value="egress" />
+                <el-option label="both" value="both" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="启用">
+              <el-switch v-model="mirrorForm.enabled" />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" :loading="mirrorPreviewing" @click="previewMirror">预览</el-button>
+              <el-button type="danger" :loading="mirrorApplying" @click="applyMirror">应用</el-button>
+            </el-form-item>
+          </el-form>
+          <el-alert v-if="mirrorError" :title="mirrorError" type="error" :closable="false" style="margin:12px 0" />
+          <div v-if="mirrorResult">
+            <div style="margin:8px 0 4px; font-weight:bold">applied: {{ mirrorResult.applied }}　detail: {{ mirrorResult.detail }}</div>
+            <pre v-if="mirrorResult.script">{{ mirrorResult.script }}</pre>
+          </div>
+          <div v-if="mirrorCleanup" style="margin-top:8px">
+            <div style="font-weight:bold; margin-bottom:4px">清理命令:</div>
+            <pre>{{ mirrorCleanup }}</pre>
+          </div>
+        </el-tab-pane>
       </el-tabs>
     </el-card>
   </div>
@@ -222,6 +256,21 @@ function bondConfig() {
     miimon: bondForm.value.miimon,
     mtu: bondForm.value.mtu,
   };
+}
+
+async function loadBond() {
+  try {
+    const res = await api.get('/api/v1/bond');
+    const c = res.data?.config || {};
+    if (c.name) bondForm.value.name = c.name;
+    if (Array.isArray(c.slaves)) bondForm.value.slavesText = c.slaves.join(',');
+    if (c.mode) bondForm.value.mode = c.mode;
+    if (c.miimon) bondForm.value.miimon = c.miimon;
+    if (c.mtu) bondForm.value.mtu = c.mtu;
+  } catch (e: any) {
+    bondError.value = e?.response?.data?.detail || e?.response?.data?.message || e.message;
+    showError(e, '加载 Bond 配置失败');
+  }
 }
 
 async function previewBond() {
@@ -316,6 +365,44 @@ const algSelected = ref<string[]>([]);
 const algSaving = ref(false);
 const algError = ref('');
 const algScript = ref('');
+
+async function loadTrigger() {
+  try {
+    const res = await api.get('/api/v1/porttrigger');
+    const rules = res.data?.rules || [];
+    triggerRules.value = rules.map((r: any) => ({
+      name: r.name || '',
+      trigger_port: r.trigger_port || 0,
+      open_port: r.open_port || 0,
+      protocol: r.protocol || 'tcp',
+      timeout_sec: r.timeout_sec || 60,
+      enabled: !!r.enabled,
+    }));
+    if (res.data?.nft) triggerNft.value = res.data.nft;
+  } catch (e: any) {
+    triggerError.value = e?.response?.data?.detail || e?.response?.data?.message || e.message;
+    showError(e, '加载端口触发规则失败');
+  }
+}
+
+async function loadAlg() {
+  try {
+    const res = await api.get('/api/v1/alg');
+    const c = res.data?.config || {};
+    const selected: string[] = [];
+    if (c.ftp) selected.push('ftp');
+    if (c.sip) selected.push('sip');
+    if (c.h323) selected.push('h323');
+    if (c.tftp) selected.push('tftp');
+    if (c.irc) selected.push('irc');
+    if (c.pptp) selected.push('pptp');
+    algSelected.value = selected;
+    if (res.data?.script) algScript.value = res.data.script;
+  } catch (e: any) {
+    algError.value = e?.response?.data?.detail || e?.response?.data?.message || e.message;
+    showError(e, '加载 ALG 配置失败');
+  }
+}
 
 async function saveTrigger() {
   triggerSaving.value = true;
@@ -479,9 +566,74 @@ async function saveOspf() {
   }
 }
 
+const mirrorForm = ref({
+  source_iface: '',
+  target_iface: '',
+  direction: 'both',
+  enabled: false,
+});
+const mirrorPreviewing = ref(false);
+const mirrorApplying = ref(false);
+const mirrorError = ref('');
+const mirrorResult = ref<any>(null);
+const mirrorCleanup = ref('');
+
+async function loadMirror() {
+  try {
+    const res = await api.get('/api/v1/mirror');
+    const c = res.data?.config || {};
+    mirrorForm.value.source_iface = c.source_iface || '';
+    mirrorForm.value.target_iface = c.target_iface || '';
+    mirrorForm.value.direction = c.direction || 'both';
+    mirrorForm.value.enabled = !!c.enabled;
+    if (res.data?.cleanup) mirrorCleanup.value = res.data.cleanup;
+  } catch (e: any) {
+    mirrorError.value = e?.response?.data?.detail || e?.response?.data?.message || e.message;
+    showError(e, '加载镜像配置失败');
+  }
+}
+
+async function previewMirror() {
+  mirrorPreviewing.value = true;
+  mirrorError.value = '';
+  mirrorResult.value = null;
+  try {
+    const res = await api.post('/api/v1/mirror', { config: mirrorForm.value, confirm: false });
+    mirrorResult.value = res.data || {};
+    if (res.data?.cleanup) mirrorCleanup.value = res.data.cleanup;
+  } catch (e: any) {
+    mirrorError.value = e?.response?.data?.detail || e?.response?.data?.message || e.message;
+    showError(e, '预览失败');
+  } finally {
+    mirrorPreviewing.value = false;
+  }
+}
+
+async function applyMirror() {
+  mirrorApplying.value = true;
+  mirrorError.value = '';
+  mirrorResult.value = null;
+  try {
+    const res = await api.post('/api/v1/mirror', { config: mirrorForm.value, confirm: true });
+    mirrorResult.value = res.data || {};
+    if (res.data?.cleanup) mirrorCleanup.value = res.data.cleanup;
+    if (res.data?.detail) ElMessage.success(res.data.detail);
+  } catch (e: any) {
+    mirrorError.value = e?.response?.data?.detail || e?.response?.data?.message || e.message;
+    showError(e, '应用失败');
+  } finally {
+    mirrorApplying.value = false;
+  }
+}
+
 const activeTab = ref('bond');
 
-onMounted(() => {});
+onMounted(() => {
+  loadBond();
+  loadTrigger();
+  loadAlg();
+  loadMirror();
+});
 </script>
 
 <style scoped>

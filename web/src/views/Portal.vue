@@ -38,6 +38,49 @@
       </el-form>
     </el-card>
 
+    <!-- Portal 状态 -->
+    <el-card shadow="never" style="margin-bottom:16px">
+      <template #header>
+        <div style="display:flex; justify-content:space-between; align-items:center">
+          <span>Portal 状态</span>
+          <el-button size="small" :loading="statusLoading" @click="loadPortalStatus">刷新</el-button>
+        </div>
+      </template>
+      <el-alert v-if="statusErr" type="error" :closable="false" show-icon :title="statusErr" style="margin-bottom:12px" />
+      <el-descriptions :column="3" border size="small" style="margin-bottom:12px">
+        <el-descriptions-item label="在线">{{ portalStatus.online ? '是' : '否' }}</el-descriptions-item>
+        <el-descriptions-item label="在线数量">{{ portalStatus.online_count ?? 0 }}</el-descriptions-item>
+        <el-descriptions-item label="已认证客户端">{{ (portalStatus.clients || []).length }}</el-descriptions-item>
+      </el-descriptions>
+      <el-table :data="portalStatus.clients || []" border size="small" style="width:100%" empty-text="暂无在线客户端">
+        <el-table-column prop="mac" label="MAC" width="170" />
+        <el-table-column prop="ip" label="IP" width="150" />
+        <el-table-column label="已授权" width="90">
+          <template #default="{ row }">
+            <el-tag :type="row.authorized ? 'success' : 'info'">{{ row.authorized ? '是' : '否' }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="授权时间">
+          <template #default="{ row }">
+            {{ row.authorized_at ? new Date(row.authorized_at * 1000).toLocaleString() : '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="过期时间">
+          <template #default="{ row }">
+            {{ row.expires_at ? new Date(row.expires_at * 1000).toLocaleString() : '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="160">
+          <template #default="{ row }">
+            <el-button type="warning" size="small" :loading="logoutBusy === row.mac" @click="logoutClient(row)">登出</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div v-if="logoutResult" style="margin-top:8px; font-size:13px; color:#606266">
+        上次登出：revoked={{ logoutResult.revoked }}，online={{ logoutResult.online }}，online_count={{ logoutResult.online_count }}
+      </div>
+    </el-card>
+
     <!-- 客户端表格 -->
     <el-card shadow="never">
       <template #header>
@@ -176,9 +219,50 @@ async function revoke(row: PortalClient) {
   }
 }
 
+const portalStatus = ref<any>({ online: false, online_count: 0, clients: [] });
+const statusLoading = ref(false);
+const statusErr = ref('');
+const logoutBusy = ref('');
+const logoutResult = ref<any>(null);
+
+async function loadPortalStatus() {
+  statusLoading.value = true;
+  statusErr.value = '';
+  try {
+    const res = await api.get('/api/v1/portal/status');
+    portalStatus.value = res.data || { online: false, online_count: 0, clients: [] };
+  } catch (e: any) {
+    statusErr.value = e?.response?.data?.detail || e?.response?.data?.message || e?.message || '加载 Portal 状态失败';
+    ElMessage.error(statusErr.value);
+  } finally {
+    statusLoading.value = false;
+  }
+}
+
+async function logoutClient(row: PortalClient) {
+  try {
+    await ElMessageBox.confirm(`确认登出客户端 ${row.mac}（${row.ip}）？`, '登出确认', { type: 'warning' });
+  } catch {
+    return;
+  }
+  logoutBusy.value = row.mac;
+  try {
+    const res = await api.post('/api/v1/portal/logout', { mac: row.mac });
+    logoutResult.value = res.data || null;
+    ElMessage.success(`已登出 ${row.mac}（revoked=${res.data?.revoked ?? 0}）`);
+    await loadPortalStatus();
+    await loadClients();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.response?.data?.message || e?.message || '登出失败');
+  } finally {
+    logoutBusy.value = '';
+  }
+}
+
 onMounted(() => {
   loadConfig();
   loadClients();
+  loadPortalStatus();
 });
 </script>
 

@@ -42,6 +42,91 @@
         <pre class="code">{{ conf }}</pre>
       </el-card>
     </el-card>
+
+    <!-- 系统标识 / Identity -->
+    <el-card shadow="never" style="margin-top:16px">
+      <template #header><span>系统标识（Identity）</span></template>
+      <el-alert v-if="idErr" type="error" :closable="false" show-icon :title="idErr" style="margin-bottom:12px" />
+      <el-form label-width="140px" style="max-width:620px">
+        <el-form-item label="主机名 hostname">
+          <el-input v-model="identity.hostname" placeholder="router-re" />
+        </el-form-item>
+        <el-form-item label="域名 domain">
+          <el-input v-model="identity.domain" placeholder="lan" />
+        </el-form-item>
+        <el-form-item label="位置 location">
+          <el-input v-model="identity.location" placeholder="机房/位置（可空）" />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :loading="idSaving" @click="saveIdentity">保存并应用</el-button>
+          <el-button @click="loadIdentity">刷新</el-button>
+        </el-form-item>
+      </el-form>
+      <div v-if="idResult" style="margin-top:8px; font-size:13px; color:#606266">{{ idResult }}</div>
+    </el-card>
+
+    <!-- mDNS 中继 -->
+    <el-card shadow="never" style="margin-top:16px">
+      <template #header><span>mDNS 中继</span></template>
+      <el-alert v-if="mdnsErr" type="error" :closable="false" show-icon :title="mdnsErr" style="margin-bottom:12px" />
+      <el-form label-width="140px" style="max-width:620px">
+        <el-form-item label="启用">
+          <el-switch v-model="mdns.config.enabled" />
+        </el-form-item>
+        <el-form-item label="入接口 in_ifaces">
+          <el-input v-model="mdnsIn" placeholder="br-lan,eth0" />
+          <span class="hint">逗号分隔</span>
+        </el-form-item>
+        <el-form-item label="出接口 out_ifaces">
+          <el-input v-model="mdnsOut" placeholder="br-wan" />
+          <span class="hint">逗号分隔；入/出不能完全相同（组播环路）</span>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :loading="mdnsSaving" @click="saveMDNS">保存</el-button>
+          <el-button @click="loadMDNS">刷新</el-button>
+        </el-form-item>
+      </el-form>
+      <el-card v-if="mdns.avahi" shadow="never" style="margin-top:12px">
+        <template #header><span>生成的 avahi-daemon.conf 片段</span></template>
+        <pre class="code">{{ mdns.avahi }}</pre>
+      </el-card>
+    </el-card>
+
+    <!-- Web 管理端口 -->
+    <el-card shadow="never" style="margin-top:16px">
+      <template #header><span>Web 管理端口（WebAdmin）</span></template>
+      <el-alert v-if="waErr" type="error" :closable="false" show-icon :title="waErr" style="margin-bottom:12px" />
+      <el-form label-width="160px" style="max-width:620px">
+        <el-form-item label="HTTP 端口 http_port">
+          <el-input-number v-model="wa.config.http_port" :min="0" :max="65535" />
+          <span class="hint">0=关闭</span>
+        </el-form-item>
+        <el-form-item label="HTTPS 端口 https_port">
+          <el-input-number v-model="wa.config.https_port" :min="0" :max="65535" />
+          <span class="hint">0=关闭；两者不能同时为 0</span>
+        </el-form-item>
+        <el-form-item label="绑定地址 bind_addr">
+          <el-input v-model="wa.config.bind_addr" placeholder="0.0.0.0" />
+        </el-form-item>
+        <el-form-item label="HTTP 301 到 HTTPS">
+          <el-switch v-model="wa.config.redirect_http" />
+        </el-form-item>
+        <el-form-item label="空闲超时 idle_timeout_sec">
+          <el-input-number v-model="wa.config.idle_timeout_sec" :min="0" :max="86400" />
+          <span class="hint">0=默认；有效 60-86400</span>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :loading="waSaving" @click="saveWebAdmin">保存</el-button>
+          <el-button @click="loadWebAdmin">刷新</el-button>
+        </el-form-item>
+      </el-form>
+      <el-alert type="info" :closable="false" show-icon style="margin-top:8px"
+        title="配置已保存；实际生效需重新加载 nginx（本接口不会重启服务，避免把自己锁在外面）。" />
+      <el-card v-if="wa.nginx" shadow="never" style="margin-top:12px">
+        <template #header><span>生成的 nginx 配置</span></template>
+        <pre class="code">{{ wa.nginx }}</pre>
+      </el-card>
+    </el-card>
   </div>
 </template>
 
@@ -118,7 +203,113 @@ async function save(apply: boolean) {
   }
 }
 
-onMounted(load);
+const identity = ref<any>({ hostname: '', domain: '', location: '' });
+const idErr = ref('');
+const idSaving = ref(false);
+const idResult = ref('');
+
+async function loadIdentity() {
+  idErr.value = '';
+  try {
+    const res = await api.get('/api/v1/identity');
+    identity.value = { ...identity.value, ...(res.data?.identity || {}) };
+  } catch (e: any) {
+    idErr.value = e?.response?.data?.detail || e?.response?.data?.message || e?.message || '加载 identity 失败';
+    ElMessage.error(idErr.value);
+  }
+}
+
+async function saveIdentity() {
+  idSaving.value = true;
+  idErr.value = '';
+  try {
+    const res = await api.post('/api/v1/identity', identity.value);
+    if (res.data?.identity) identity.value = { ...identity.value, ...res.data.identity };
+    idResult.value = res.data?.detail || (res.data?.applied ? '已应用' : '未应用');
+    if (res.data?.applied) ElMessage.success('系统标识已应用');
+    else ElMessage.warning(idResult.value);
+  } catch (e: any) {
+    idErr.value = e?.response?.data?.detail || e?.response?.data?.message || e?.message || '保存 identity 失败';
+    ElMessage.error(idErr.value);
+  } finally {
+    idSaving.value = false;
+  }
+}
+
+const mdns = ref<any>({ config: { in_ifaces: [], out_ifaces: [], enabled: false }, avahi: '' });
+const mdnsIn = ref('');
+const mdnsOut = ref('');
+const mdnsErr = ref('');
+const mdnsSaving = ref(false);
+
+function splitIfaces(s: string): string[] {
+  return s.split(',').map(x => x.trim()).filter(Boolean);
+}
+
+async function loadMDNS() {
+  mdnsErr.value = '';
+  try {
+    const res = await api.get('/api/v1/mdns');
+    if (res.data?.config) mdns.value.config = { ...mdns.value.config, ...res.data.config };
+    mdns.value.avahi = res.data?.avahi || '';
+    mdnsIn.value = (mdns.value.config.in_ifaces || []).join(',');
+    mdnsOut.value = (mdns.value.config.out_ifaces || []).join(',');
+  } catch (e: any) {
+    mdnsErr.value = e?.response?.data?.detail || e?.response?.data?.message || e?.message || '加载 mDNS 失败';
+    ElMessage.error(mdnsErr.value);
+  }
+}
+
+async function saveMDNS() {
+  mdnsSaving.value = true;
+  mdnsErr.value = '';
+  try {
+    const cfg = { ...mdns.value.config, in_ifaces: splitIfaces(mdnsIn.value), out_ifaces: splitIfaces(mdnsOut.value) };
+    const res = await api.post('/api/v1/mdns', cfg);
+    if (res.data?.config) mdns.value.config = { ...mdns.value.config, ...res.data.config };
+    mdns.value.avahi = res.data?.avahi || mdns.value.avahi;
+    ElMessage.success('mDNS 配置已保存');
+  } catch (e: any) {
+    mdnsErr.value = e?.response?.data?.detail || e?.response?.data?.message || e?.message || '保存 mDNS 失败';
+    ElMessage.error(mdnsErr.value);
+  } finally {
+    mdnsSaving.value = false;
+  }
+}
+
+const wa = ref<any>({ config: { http_port: 0, https_port: 443, bind_addr: '0.0.0.0', redirect_http: true, idle_timeout_sec: 0 }, nginx: '' });
+const waErr = ref('');
+const waSaving = ref(false);
+
+async function loadWebAdmin() {
+  waErr.value = '';
+  try {
+    const res = await api.get('/api/v1/webadmin');
+    if (res.data?.config) wa.value.config = { ...wa.value.config, ...res.data.config };
+    wa.value.nginx = res.data?.nginx || '';
+  } catch (e: any) {
+    waErr.value = e?.response?.data?.detail || e?.response?.data?.message || e?.message || '加载 WebAdmin 失败';
+    ElMessage.error(waErr.value);
+  }
+}
+
+async function saveWebAdmin() {
+  waSaving.value = true;
+  waErr.value = '';
+  try {
+    const res = await api.post('/api/v1/webadmin', wa.value.config);
+    if (res.data?.config) wa.value.config = { ...wa.value.config, ...res.data.config };
+    wa.value.nginx = res.data?.nginx || wa.value.nginx;
+    ElMessage.success(res.data?.detail || 'WebAdmin 配置已保存');
+  } catch (e: any) {
+    waErr.value = e?.response?.data?.detail || e?.response?.data?.message || e?.message || '保存 WebAdmin 失败';
+    ElMessage.error(waErr.value);
+  } finally {
+    waSaving.value = false;
+  }
+}
+
+onMounted(() => { load(); loadIdentity(); loadMDNS(); loadWebAdmin(); });
 </script>
 
 <style scoped>
