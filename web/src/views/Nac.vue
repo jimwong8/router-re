@@ -58,6 +58,47 @@
     </el-card>
 
     <el-card shadow="never" style="margin-bottom: 16px;">
+      <template #header>MAC 过滤</template>
+      <el-form inline style="margin-bottom: 12px;">
+        <el-form-item label="启用">
+          <el-switch v-model="macFilterEnabled" />
+        </el-form-item>
+        <el-form-item label="默认动作">
+          <el-select v-model="macFilterMode" style="width: 140px;">
+            <el-option label="黑名单（列表内拒绝，其余放行）" value="blacklist" />
+            <el-option label="白名单（列表内放行，其余拒绝）" value="whitelist" />
+          </el-select>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :loading="macFilterSaving" @click="saveMacFilter">保存下发</el-button>
+          <el-button @click="loadMacFilter">加载</el-button>
+        </el-form-item>
+      </el-form>
+      <el-alert v-if="macFilterError" :title="macFilterError" type="error" show-icon :closable="false" style="margin-bottom: 12px;" />
+      <el-form inline @submit.prevent="addMacRule">
+        <el-form-item label="MAC">
+          <el-input v-model="newMac" placeholder="aa:bb:cc:dd:ee:ff" style="width: 200px;" />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" @click="addMacRule">添加</el-button>
+        </el-form-item>
+      </el-form>
+      <el-table :data="macFilterRules" border>
+        <el-table-column prop="mac" label="MAC 地址" />
+        <el-table-column label="操作" width="80">
+          <template #default="{ $index }">
+            <el-button type="danger" size="small" @click="macFilterRules.splice($index, 1)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-collapse v-if="macFilterNft" style="margin-top: 8px;">
+        <el-collapse-item title="nft 规则" name="macfilter">
+          <pre style="white-space: pre-wrap;">{{ macFilterNft }}</pre>
+        </el-collapse-item>
+      </el-collapse>
+    </el-card>
+
+    <el-card shadow="never" style="margin-bottom: 16px;">
       <template #header>连接数限制</template>
       <el-form inline style="margin-bottom: 12px;">
         <el-form-item label="名称">
@@ -123,6 +164,14 @@ const nacSaving = ref(false);
 const nacError = ref('');
 const nftText = ref('');
 const newDev = ref<any>({ mac: '', name: '', ip: '', policy: 'allow' });
+
+const macFilterEnabled = ref(false);
+const macFilterMode = ref('blacklist');
+const macFilterSaving = ref(false);
+const macFilterError = ref('');
+const macFilterNft = ref('');
+const macFilterRules = ref<any[]>([]);
+const newMac = ref('');
 
 const limits = ref<any[]>([]);
 const newLimit = ref<any>({ name: '', src_ip: '', max_conns: 100, max_per_sec: 0, enabled: true });
@@ -238,5 +287,47 @@ async function loadTop() {
   }
 }
 
-onMounted(() => { loadNAC(); loadConnlimits(); loadTop(); });
+async function loadMacFilter() {
+  macFilterError.value = '';
+  try {
+    const res = await api.get('/api/v1/acl/mac-filter');
+    const cfg = res.data?.config || {};
+    macFilterEnabled.value = cfg.mode !== 'off';
+    macFilterMode.value = cfg.mode === 'off' ? 'blacklist' : cfg.mode;
+    macFilterRules.value = (cfg.macs || []).map((mac: string) => ({ mac }));
+    macFilterNft.value = res.data?.nft || '';
+  } catch (e: any) {
+    macFilterError.value = e?.response?.data?.detail || e?.response?.data?.message || e.message || '加载失败';
+  }
+}
+
+async function saveMacFilter() {
+  macFilterSaving.value = true;
+  macFilterError.value = '';
+  try {
+    const mode = macFilterEnabled.value ? macFilterMode.value : 'off';
+    const res = await api.post('/api/v1/acl/mac-filter', {
+      mode,
+      macs: macFilterRules.value.map((r: any) => r.mac),
+    });
+    macFilterNft.value = res.data?.nft || '';
+    if (res.data?.applied) ElMessage.success('MAC 过滤已下发');
+    else ElMessage.warning(res.data?.detail || '未下发');
+  } catch (e: any) {
+    macFilterError.value = e?.response?.data?.detail || e?.response?.data?.message || e.message || '保存失败';
+    ElMessage.error(macFilterError.value);
+  } finally {
+    macFilterSaving.value = false;
+  }
+}
+
+function addMacRule() {
+  const mac = newMac.value.trim();
+  if (!mac) { ElMessage.warning('请输入 MAC'); return; }
+  if (macFilterRules.value.some((r: any) => r.mac === mac)) { ElMessage.warning('MAC 已存在'); return; }
+  macFilterRules.value.push({ mac });
+  newMac.value = '';
+}
+
+onMounted(() => { loadNAC(); loadConnlimits(); loadTop(); loadMacFilter(); });
 </script>

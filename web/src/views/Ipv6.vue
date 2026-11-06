@@ -98,6 +98,90 @@
       </el-form>
     </el-card>
 
+    <el-card shadow="never" style="margin-bottom: 16px;">
+      <template #header>ND 参数（邻居发现 sysctl）</template>
+      <el-alert v-if="ndError" :title="ndError" type="error" show-icon :closable="false" style="margin-bottom: 12px;" />
+      <el-form label-width="160px" style="max-width: 620px;">
+        <el-form-item label="接口">
+          <el-input v-model="nd.config.iface" placeholder="ens18" style="width: 180px;" @change="loadND" />
+        </el-form-item>
+        <el-form-item label="ra_interval_min(秒)">
+          <el-input-number v-model="nd.config.ra_interval_min" :min="0" :max="1350" />
+          <span class="hint">0 = 不修改该项</span>
+        </el-form-item>
+        <el-form-item label="ra_interval_max(秒)">
+          <el-input-number v-model="nd.config.ra_interval_max" :min="0" :max="1800" />
+          <span class="hint">0 = 不修改该项</span>
+        </el-form-item>
+        <el-form-item label="hop_limit">
+          <el-input-number v-model="nd.config.hop_limit" :min="0" :max="255" />
+        </el-form-item>
+        <el-form-item label="mtu">
+          <el-input-number v-model="nd.config.mtu" :min="0" :max="65535" :step="100" />
+          <span class="hint">0 = 不修改；有效范围 1280-65535</span>
+        </el-form-item>
+        <el-form-item label="reachable_time(ms)">
+          <el-input-number v-model="nd.config.reachable_time_ms" :min="0" :max="3600000" :step="1000" />
+        </el-form-item>
+        <el-form-item label="retrans_timer(ms)">
+          <el-input-number v-model="nd.config.retrans_timer_ms" :min="0" :max="3600000" :step="1000" />
+        </el-form-item>
+        <el-form-item label="dad_transmits">
+          <el-input-number v-model="nd.config.dad_transmits" :min="0" :max="10" />
+        </el-form-item>
+        <el-form-item label="accept_ra">
+          <el-switch v-model="nd.config.accept_ra" />
+        </el-form-item>
+        <el-form-item label="forwarding">
+          <el-switch v-model="nd.config.forwarding" />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :loading="ndSaving" @click="saveND">保存下发</el-button>
+          <el-button @click="loadND">刷新</el-button>
+        </el-form-item>
+      </el-form>
+      <el-alert v-if="ndResult" :title="ndResult" :type="ndApplied ? 'success' : 'warning'" show-icon :closable="false" style="margin-top: 8px;" />
+      <el-collapse v-if="Object.keys(nd.live).length" style="margin-top: 8px;">
+        <el-collapse-item title="当前内核实时值 (live)" name="ndlive">
+          <el-descriptions :column="2" border size="small">
+            <el-descriptions-item v-for="(v, k) in nd.live" :key="k" :label="String(k)">{{ v }}</el-descriptions-item>
+          </el-descriptions>
+        </el-collapse-item>
+      </el-collapse>
+    </el-card>
+
+    <el-card shadow="never" style="margin-bottom: 16px;">
+      <template #header>前缀委派 PD (dhcp6c)</template>
+      <el-alert v-if="pdError" :title="pdError" type="error" show-icon :closable="false" style="margin-bottom: 12px;" />
+      <el-form label-width="160px" style="max-width: 620px;">
+        <el-form-item label="启用">
+          <el-switch v-model="pd.config.enabled" />
+        </el-form-item>
+        <el-form-item label="上游接口">
+          <el-input v-model="pd.config.upstream_iface" placeholder="ppp0" style="width: 180px;" />
+        </el-form-item>
+        <el-form-item label="下游接口">
+          <el-input v-model="pd.config.downstream_iface" placeholder="ens18" style="width: 180px;" />
+        </el-form-item>
+        <el-form-item label="prefix_len">
+          <el-input-number v-model="pd.config.prefix_len" :min="32" :max="64" />
+        </el-form-item>
+        <el-form-item label="subnet_id_bits">
+          <el-input-number v-model="pd.config.subnet_id_bits" :min="0" :max="16" />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :loading="pdSaving" @click="savePD">保存下发</el-button>
+          <el-button @click="loadPD">加载</el-button>
+        </el-form-item>
+      </el-form>
+      <el-alert v-if="pdResult" :title="pdResult" :type="pdApplied ? 'success' : 'warning'" show-icon :closable="false" style="margin-top: 8px;" />
+      <el-collapse v-if="pd.dhcp6c" style="margin-top: 8px;">
+        <el-collapse-item title="dhcp6c.conf 预览" name="pdconf">
+          <pre style="white-space: pre-wrap;">{{ pd.dhcp6c }}</pre>
+        </el-collapse-item>
+      </el-collapse>
+    </el-card>
+
     <el-card shadow="never">
       <template #header>IPv6 状态</template>
       <el-descriptions :column="1" border>
@@ -131,6 +215,87 @@ const raDetail = ref('');
 const status = ref<any>({});
 const dhcpV6 = ref<any>({ v6_range_start: '', v6_range_end: '', v6_prefix_len: 64, enable_ra: false });
 const dhcpV6Saving = ref(false);
+
+// ND：GET /api/v1/ipv6/nd?iface=... -> {config, live}；POST raw NDConfig -> {applied, config, detail}
+const nd = ref<any>({ config: { iface: 'ens18', ra_interval_min: 0, ra_interval_max: 0, hop_limit: 0, mtu: 0, reachable_time_ms: 0, retrans_timer_ms: 0, dad_transmits: 1, accept_ra: false, forwarding: true }, live: {} });
+const ndError = ref('');
+const ndSaving = ref(false);
+const ndApplied = ref(false);
+const ndResult = ref('');
+
+function errMsg(e: any, fallback: string): string {
+  return e?.response?.data?.detail || e?.response?.data?.message || e.message || fallback;
+}
+
+async function loadND() {
+  ndError.value = '';
+  try {
+    const res = await api.get('/api/v1/ipv6/nd', { params: { iface: nd.value.config.iface || 'ens18' } });
+    if (res.data?.config) nd.value.config = { ...nd.value.config, ...res.data.config };
+    nd.value.live = res.data?.live || {};
+    if (nd.value.live?.error) ndError.value = String(nd.value.live.error);
+  } catch (e: any) {
+    ndError.value = errMsg(e, '加载 ND 配置失败');
+    ElMessage.error(ndError.value);
+  }
+}
+
+async function saveND() {
+  ndSaving.value = true;
+  ndError.value = '';
+  try {
+    const res = await api.post('/api/v1/ipv6/nd', nd.value.config);
+    ndApplied.value = !!res.data?.applied;
+    ndResult.value = res.data?.detail || (res.data?.applied ? 'ND 参数已下发并通过回读确认' : '未下发');
+    if (res.data?.config) nd.value.config = { ...nd.value.config, ...res.data.config };
+    if (res.data?.applied) ElMessage.success('ND 参数已下发');
+    else ElMessage.warning(ndResult.value);
+    await loadND();
+  } catch (e: any) {
+    ndError.value = errMsg(e, '保存 ND 配置失败');
+    ElMessage.error(ndError.value);
+  } finally {
+    ndSaving.value = false;
+  }
+}
+
+// PD：GET /api/v1/ipv6/pd -> {config, dhcp6c}；POST raw PDConfig -> {applied, config, dhcp6c, detail}
+const pd = ref<any>({ config: { upstream_iface: '', downstream_iface: 'ens18', prefix_len: 60, subnet_id_bits: 4, enabled: false }, dhcp6c: '' });
+const pdError = ref('');
+const pdSaving = ref(false);
+const pdApplied = ref(false);
+const pdResult = ref('');
+
+async function loadPD() {
+  pdError.value = '';
+  try {
+    const res = await api.get('/api/v1/ipv6/pd');
+    if (res.data?.config) pd.value.config = { ...pd.value.config, ...res.data.config };
+    pd.value.dhcp6c = res.data?.dhcp6c || '';
+  } catch (e: any) {
+    pdError.value = errMsg(e, '加载 PD 配置失败');
+    ElMessage.error(pdError.value);
+  }
+}
+
+async function savePD() {
+  pdSaving.value = true;
+  pdError.value = '';
+  try {
+    const res = await api.post('/api/v1/ipv6/pd', pd.value.config);
+    pdApplied.value = !!res.data?.applied;
+    pdResult.value = res.data?.detail || (res.data?.applied ? 'PD 配置已写入 dhcp6c.conf 并重启 dhcp6c' : '未下发');
+    if (res.data?.config) pd.value.config = { ...pd.value.config, ...res.data.config };
+    pd.value.dhcp6c = res.data?.dhcp6c || pd.value.dhcp6c;
+    if (res.data?.applied) ElMessage.success('PD 配置已下发');
+    else ElMessage.warning(pdResult.value);
+  } catch (e: any) {
+    pdError.value = errMsg(e, '保存 PD 配置失败');
+    ElMessage.error(pdError.value);
+  } finally {
+    pdSaving.value = false;
+  }
+}
 
 async function loadAddrs() {
   addrError.value = '';
@@ -236,6 +401,16 @@ onMounted(() => {
   loadAddrs();
   loadRA();
   loadDhcpV6();
+  loadND();
+  loadPD();
   loadStatus();
 });
 </script>
+
+<style scoped>
+.hint {
+  margin-left: 8px;
+  color: #909399;
+  font-size: 12px;
+}
+</style>

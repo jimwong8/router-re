@@ -14,8 +14,128 @@
       </template>
 
       <el-tabs v-model="proto" @tab-change="onTab">
-        <el-tab-pane label="PPTP" name="pptp" />
-        <el-tab-pane label="L2TP / IPSec" name="l2tp" />
+        <el-tab-pane label="PPTP" name="pptp">
+          <el-form label-width="110px" style="max-width:760px">
+            <el-form-item label="启用">
+              <el-switch v-model="cfg.enabled" active-text="保存后立即启停服务" />
+            </el-form-item>
+            <el-form-item label="服务端地址" required>
+              <el-input v-model="cfg.server_ip" placeholder="192.168.20.1" style="width:220px" />
+              <span class="hint">不能落在地址池内，否则与拨号客户端冲突</span>
+            </el-form-item>
+            <el-form-item label="监听端口">
+              <el-input-number v-model="cfg.server_port" :min="1" :max="65535" controls-position="right" />
+            </el-form-item>
+            <el-form-item label="地址池" required>
+              <el-input v-model="cfg.addr_pool" placeholder="192.168.20.100-192.168.20.150" />
+              <div class="hint">支持多段用逗号分隔，单段可简写 192.168.20.100-200；不要包含 .0 / .255</div>
+            </el-form-item>
+            <el-form-item label="MPPE 加密">
+              <el-radio-group v-model="cfg.open_mppe">
+                <el-radio-button :value="2">128 位（推荐）</el-radio-button>
+                <el-radio-button :value="1">40 位</el-radio-button>
+                <el-radio-button :value="0">不加密</el-radio-button>
+              </el-radio-group>
+            </el-form-item>
+            <el-form-item label="DNS">
+              <el-input v-model="cfg.dns1" placeholder="223.5.5.5" style="width:170px" />
+              <el-input v-model="cfg.dns2" placeholder="119.29.29.29" style="width:170px; margin-left:8px" />
+            </el-form-item>
+            <el-form-item label="MTU / MRU">
+              <el-input-number v-model="cfg.mtu" :min="1000" :max="1492" controls-position="right" />
+              <el-input-number v-model="cfg.mru" :min="1000" :max="1492" controls-position="right" style="margin-left:8px" />
+              <span class="hint">范围 1000-1492（PPTP 头部开销）</span>
+            </el-form-item>
+          </el-form>
+          <el-divider content-position="left">拨号账号</el-divider>
+          <el-table :data="users" size="small" empty-text="还没有账号">
+            <el-table-column label="用户名" width="180">
+              <template #default="{ row }"><el-input v-model="row.username" size="small" /></template>
+            </el-table-column>
+            <el-table-column label="密码" width="180">
+              <template #default="{ row }"><el-input v-model="row.password" size="small" show-password /></template>
+            </el-table-column>
+            <el-table-column label="固定地址（可选）" width="180">
+              <template #default="{ row }"><el-input v-model="row.ip" size="small" placeholder="须在地址池内" /></template>
+            </el-table-column>
+            <el-table-column label="备注">
+              <template #default="{ row }"><el-input v-model="row.comment" size="small" /></template>
+            </el-table-column>
+            <el-table-column width="70">
+              <template #default="{ $index }">
+                <el-button link type="danger" size="small" @click="users.splice($index, 1)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-button size="small" style="margin-top:10px" @click="users.push({ username: '', password: '', ip: '', comment: '' })">新增账号</el-button>
+        </el-tab-pane>
+        <el-tab-pane label="L2TP / IPSec" name="l2tp">
+          <el-form label-width="110px" style="max-width:760px">
+            <el-form-item label="启用">
+              <el-switch v-model="cfg.enabled" active-text="保存后立即启停服务" />
+            </el-form-item>
+            <el-form-item label="服务端地址" required>
+              <el-input v-model="cfg.server_ip" placeholder="192.168.20.1" style="width:220px" />
+              <span class="hint">不能落在地址池内，否则与拨号客户端冲突</span>
+            </el-form-item>
+            <el-form-item label="监听端口">
+              <el-input-number v-model="cfg.server_port" :min="1" :max="65535" controls-position="right" />
+            </el-form-item>
+            <el-form-item label="地址池" required>
+              <el-input v-model="cfg.addr_pool" placeholder="192.168.20.100-192.168.20.150" />
+              <div class="hint">支持多段用逗号分隔，单段可简写 192.168.20.100-200；不要包含 .0 / .255</div>
+            </el-form-item>
+            <el-form-item label="IPSec 密钥">
+              <el-input v-model="cfg.ipsec_secret" placeholder="至少 8 位" show-password style="width:260px" />
+              <el-checkbox v-model="forceIPSec" style="margin-left:12px">强制 IPSec</el-checkbox>
+              <span v-if="pskSet" class="hint" style="margin-left:12px">已配置，留空表示不修改</span>
+              <span v-else-if="forceIPSec" class="hint" style="margin-left:12px; color:#f56c6c">未配置，启用时必须填写</span>
+            </el-form-item>
+            <el-form-item label="IPSec 本端身份 (leftid)">
+              <el-input v-model="cfg.leftid" placeholder="可空，默认用服务端地址" style="width:260px" />
+            </el-form-item>
+            <el-form-item label="IPSec 对端身份 (rightid)">
+              <el-input v-model="cfg.rightid" placeholder="可空" style="width:260px" />
+            </el-form-item>
+            <el-form-item label="内网段 (left_subnet)">
+              <el-input v-model="cfg.left_subnet" placeholder="允许客户端访问的内网段 CIDR，可空" style="width:260px" />
+            </el-form-item>
+            <el-form-item label="最大会话数">
+              <el-input-number v-model="cfg.max_sessions" :min="0" :max="1024" controls-position="right" />
+              <span class="hint">0 表示不限</span>
+            </el-form-item>
+            <el-form-item label="DNS">
+              <el-input v-model="cfg.dns1" placeholder="223.5.5.5" style="width:170px" />
+              <el-input v-model="cfg.dns2" placeholder="119.29.29.29" style="width:170px; margin-left:8px" />
+            </el-form-item>
+            <el-form-item label="MTU / MRU">
+              <el-input-number v-model="cfg.mtu" :min="1000" :max="1492" controls-position="right" />
+              <el-input-number v-model="cfg.mru" :min="1000" :max="1492" controls-position="right" style="margin-left:8px" />
+              <span class="hint">范围 1000-1492（L2TP 头部开销）</span>
+            </el-form-item>
+          </el-form>
+          <el-divider content-position="left">拨号账号</el-divider>
+          <el-table :data="users" size="small" empty-text="还没有账号">
+            <el-table-column label="用户名" width="180">
+              <template #default="{ row }"><el-input v-model="row.username" size="small" /></template>
+            </el-table-column>
+            <el-table-column label="密码" width="180">
+              <template #default="{ row }"><el-input v-model="row.password" size="small" show-password /></template>
+            </el-table-column>
+            <el-table-column label="固定地址（可选）" width="180">
+              <template #default="{ row }"><el-input v-model="row.ip" size="small" placeholder="须在地址池内" /></template>
+            </el-table-column>
+            <el-table-column label="备注">
+              <template #default="{ row }"><el-input v-model="row.comment" size="small" /></template>
+            </el-table-column>
+            <el-table-column width="70">
+              <template #default="{ $index }">
+                <el-button link type="danger" size="small" @click="users.splice($index, 1)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-button size="small" style="margin-top:10px" @click="users.push({ username: '', password: '', ip: '', comment: '' })">新增账号</el-button>
+        </el-tab-pane>
         <el-tab-pane label="OpenVPN" name="openvpn" />
         <el-tab-pane label="EasyTier 组网" name="easytier" />
         <el-tab-pane label="Tailscale" name="tailscale" />
@@ -27,7 +147,7 @@
         title="只跑 xl2tpd 不配 IPSec 等于把明文 L2TP 暴露在公网，因此强制要求预共享密钥（除非显式关闭）。" />
 
       <!-- 公共基础设置（PPTP / L2TP / OpenVPN 共用；EasyTier 有自己的一套字段） -->
-      <template v-if="proto !== 'easytier' && proto !== 'tailscale'">
+      <template v-if="proto === 'openvpn'">
       <el-form label-width="110px" style="max-width:760px">
         <el-form-item label="启用">
           <el-switch v-model="cfg.enabled" active-text="保存后立即启停服务" />
@@ -374,6 +494,7 @@ const status = ref('');
 const saving = ref(false);
 const lastConf = ref('');
 const forceIPSec = ref(true);
+const pskSet = ref(false);
 
 const newClient = ref('');
 const remoteHost = ref('');
@@ -555,7 +676,7 @@ function defaults(): any {
     return { enabled: false, server_ip: '', server_port: 1723, addr_pool: '', dns1: '223.5.5.5', dns2: '119.29.29.29', open_mppe: 2, mtu: 1400, mru: 1400 };
   }
   if (proto.value === 'l2tp') {
-    return { enabled: false, server_ip: '', server_port: 1701, addr_pool: '', dns1: '223.5.5.5', dns2: '119.29.29.29', ipsec_secret: '', force_ipsec: 1, mtu: 1400, mru: 1400 };
+    return { enabled: false, server_ip: '', server_port: 1701, addr_pool: '', dns1: '223.5.5.5', dns2: '119.29.29.29', ipsec_secret: '', force_ipsec: 1, mtu: 1400, mru: 1400, leftid: '', rightid: '', left_subnet: '', max_sessions: 0 };
   }
   return { enabled: false, subnet: '10.8.0.0', mask: '255.255.255.0', proto: 'udp', port: 1194, tun_mtu: 1420, cipher: 'AES-256-GCM', dev_type: 'tun', topology: 'subnet', method: 0, dns1: '223.5.5.5', dns2: '119.29.29.29' };
 }
@@ -700,6 +821,7 @@ async function load() {
     }));
     status.value = res.data?.status || '';
     forceIPSec.value = cfg.value.force_ipsec !== 0;
+    pskSet.value = !!res.data?.psk_set;
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.message || e?.message || '加载失败');
   }

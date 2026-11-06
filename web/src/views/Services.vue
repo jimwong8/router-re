@@ -105,6 +105,40 @@
         </el-tab-pane>
       </el-tabs>
     </el-card>
+
+    <el-card shadow="never">
+      <template #header>
+        <div style="display:flex; justify-content:space-between; align-items:center">
+          <span>服务控制（init.d 开关）</span>
+          <el-button size="small" :loading="mgdLoading" @click="loadManaged">刷新</el-button>
+        </div>
+      </template>
+      <el-alert v-if="mgdError" :title="mgdError" type="error" show-icon :closable="false" style="margin-bottom:12px" />
+      <el-alert type="info" :closable="false" show-icon style="margin-bottom:12px"
+        title="这里管理的是 /etc/init.d 的 enabled/running 状态（ssh/telnet/ftp/dnsmasq），与上方 systemd 服务列表不是同一套接口。" />
+      <el-table :data="managed" v-loading="mgdLoading" size="small" style="width:100%" empty-text="没有受管服务">
+        <el-table-column prop="name" label="服务名" width="140" />
+        <el-table-column label="enabled" width="110">
+          <template #default="{ row }">
+            <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '已启用' : '已禁用' }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="running" width="110">
+          <template #default="{ row }">
+            <el-tag :type="row.running ? 'success' : 'danger'" size="small">{{ row.running ? '运行中' : '未运行' }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="220">
+          <template #default="{ row }">
+            <el-button size="small" type="success" :disabled="row.enabled" :loading="mgdBusy === row.name" @click="switchService(row, true)">启用</el-button>
+            <el-button size="small" type="danger" :disabled="!row.enabled" :loading="mgdBusy === row.name" @click="switchService(row, false)">禁用</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div v-if="lastMgdResult" style="margin-top:12px; font-size:13px; color:#606266">
+        上次操作：{{ lastMgdResult.name }} → enabled={{ lastMgdResult.enabled }}，status={{ lastMgdResult.status }}
+      </div>
+    </el-card>
   </div>
 </template>
 
@@ -277,5 +311,57 @@ async function killProc(row: Proc) {
   }
 }
 
-onMounted(() => { loadServices(); loadProcesses(); });
+onMounted(() => { loadServices(); loadProcesses(); loadManaged(); });
+
+// ---------- 服务控制（/api/v1/services/*，init.d 开关） ----------
+// GET /api/v1/services/status -> {services: [{name, enabled, running}]}（svcmgr.StatusAll）
+// POST /api/v1/services/{name} body {enabled: bool} -> {name, enabled, status}
+// 注意：后端是 enable/disable 开关，不是 start/stop/restart；勿与 /system/services 混用。
+interface MgdSvc { name: string; enabled: boolean; running: boolean }
+const managed = ref<MgdSvc[]>([]);
+const mgdLoading = ref(false);
+const mgdError = ref('');
+const mgdBusy = ref('');
+const lastMgdResult = ref<any>(null);
+
+async function loadManaged() {
+  mgdLoading.value = true;
+  mgdError.value = '';
+  try {
+    const res = await api.get('/api/v1/services/status');
+    managed.value = res.data?.services || [];
+  } catch (e: any) {
+    mgdError.value = e?.response?.data?.detail || e?.response?.data?.message || e?.message || '加载服务控制状态失败';
+    showError(e, '加载服务控制状态失败');
+  } finally {
+    mgdLoading.value = false;
+  }
+}
+
+async function switchService(row: MgdSvc, enabled: boolean) {
+  if (!enabled) {
+    const risky = row.running || row.name === 'ssh' || row.name === 'dnsmasq';
+    try {
+      await ElMessageBox.confirm(
+        risky
+          ? `禁用 ${row.name} 会影响远程管理或网络服务（当前 ${row.running ? '运行中' : '未运行'}），确认要禁用吗？`
+          : `确认禁用服务 ${row.name}？`,
+        '危险操作二次确认',
+        { confirmButtonText: '确认禁用', cancelButtonText: '取消', type: 'warning' });
+    } catch {
+      return;
+    }
+  }
+  mgdBusy.value = row.name;
+  try {
+    const res = await api.post(`/api/v1/services/${encodeURIComponent(row.name)}`, { enabled });
+    lastMgdResult.value = res.data || { name: row.name, enabled };
+    ElMessage.success(`${row.name} 已${enabled ? '启用' : '禁用'}`);
+    await loadManaged();
+  } catch (e: any) {
+    showError(e, `${row.name} ${enabled ? '启用' : '禁用'}失败`);
+  } finally {
+    mgdBusy.value = '';
+  }
+}
 </script>
