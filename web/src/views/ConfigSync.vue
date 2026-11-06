@@ -116,6 +116,64 @@
       </div>
       <el-alert v-if="restoreMsg" :title="restoreMsg" :type="restoreOk ? 'success' : 'error'" :closable="false" show-icon style="margin-top:10px" />
     </el-card>
+
+    <!-- 区块四：HA 高可用 -->
+    <el-card shadow="never">
+      <template #header><span>HA 高可用配置</span></template>
+
+      <el-form label-position="top" size="default">
+        <el-form-item label="对端 URL">
+          <el-input v-model="ha.peer_url" placeholder="https://peer-router:8443" clearable />
+        </el-form-item>
+        <el-form-item label="共享密钥（留空不修改）">
+          <el-input v-model="ha.secret" type="password" show-password placeholder="不修改则留空" clearable />
+        </el-form-item>
+        <el-form-item label="同步 sections">
+          <el-select
+            v-model="ha.sync_keys"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            placeholder="选择或输入 section 名"
+            style="width:100%"
+          >
+            <el-option v-for="k in haSectionOptions" :key="k" :label="k" :value="k" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px">
+        <el-button type="primary" :loading="haSaving" @click="saveHaConfig">保存配置</el-button>
+        <el-button :loading="haSyncing" @click="doHaSync">立即同步</el-button>
+        <el-button :loading="haStatusLoading" @click="loadHaStatus">刷新状态</el-button>
+      </div>
+
+      <!-- HA 状态 -->
+      <template v-if="haStatus">
+        <el-descriptions :column="2" border size="small" style="margin-top:14px">
+          <el-descriptions-item label="对端 URL">{{ haStatus.peer_url || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="最后同步时间">{{ haStatus.last_sync || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="最后结果">
+            <el-tag :type="haStatus.last_result === 'ok' ? 'success' : 'danger'" size="small">
+              {{ haStatus.last_result || '—' }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="最后错误" v-if="haStatus.last_error" :span="2">
+            <span style="color:#f56c6c">{{ haStatus.last_error }}</span>
+          </el-descriptions-item>
+        </el-descriptions>
+      </template>
+
+      <el-alert
+        v-if="haMsg"
+        :title="haMsg"
+        :type="haMsgOk ? 'success' : 'error'"
+        :closable="false"
+        show-icon
+        style="margin-top:10px"
+      />
+    </el-card>
   </div>
 </template>
 
@@ -312,6 +370,121 @@ function kindLabel(kind: string): string {
     default: return kind;
   }
 }
+
+// ── HA 高可用 ──
+const ha = ref({ peer_url: '', secret: '', sync_keys: [] as string[] });
+const haSaving = ref(false);
+const haSyncing = ref(false);
+const haStatusLoading = ref(false);
+const haStatus = ref<{ peer_url?: string; last_sync?: string; last_result?: string; last_error?: string } | null>(null);
+const haMsg = ref('');
+const haMsgOk = ref(false);
+
+const haSectionOptions = computed(() => {
+  if (currentBundle.value) return Object.keys(currentBundle.value.sections ?? {});
+  return ['network', 'firewall', 'qos', 'dns', 'dhcp', 'wan', 'system'];
+});
+
+function showError(body: any, fallback: string) {
+  const parts: string[] = [];
+  if (body?.code) parts.push(`[${body.code}]`);
+  if (body?.message) parts.push(body.message);
+  if (body?.detail) parts.push(String(body.detail));
+  return parts.length ? parts.join(' ') : fallback;
+}
+
+async function loadHaConfig() {
+  try {
+    const res = await fetch('/api/v1/ha/config', { headers: { Authorization: token() } });
+    if (res.ok) {
+      const d = await res.json();
+      ha.value = {
+        peer_url: d.peer_url || '',
+        secret: d.has_secret ? '••••••' : '',
+        sync_keys: d.sync_keys || [],
+      };
+    }
+  } catch { /* silent */ }
+}
+
+async function loadHaStatus() {
+  haStatusLoading.value = true;
+  try {
+    const res = await fetch('/api/v1/ha/status', { headers: { Authorization: token() } });
+    if (res.ok) {
+      haStatus.value = await res.json();
+    } else {
+      haStatus.value = null;
+    }
+  } catch {
+    haStatus.value = null;
+  } finally {
+    haStatusLoading.value = false;
+  }
+}
+
+async function saveHaConfig() {
+  haSaving.value = true;
+  haMsg.value = '';
+  haMsgOk.value = false;
+  try {
+    const body: Record<string, any> = { peer_url: ha.value.peer_url, sync_keys: ha.value.sync_keys };
+    if (ha.value.secret && ha.value.secret !== '••••••') {
+      body.secret = ha.value.secret;
+    }
+    const res = await fetch('/api/v1/ha/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: token() },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const b = await safeJson(res);
+      haMsg.value = showError(b, `保存失败（HTTP ${res.status}）`);
+      haMsgOk.value = false;
+    } else {
+      haMsg.value = 'HA 配置已保存';
+      haMsgOk.value = true;
+      ha.value.secret = '';
+      loadHaStatus();
+    }
+  } catch (e: any) {
+    haMsg.value = e?.message || '保存失败';
+    haMsgOk.value = false;
+  } finally {
+    haSaving.value = false;
+  }
+}
+
+async function doHaSync() {
+  haSyncing.value = true;
+  haMsg.value = '';
+  haMsgOk.value = false;
+  try {
+    const res = await fetch('/api/v1/ha/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: token() },
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) {
+      const b = await safeJson(res);
+      haMsg.value = showError(b, `同步失败（HTTP ${res.status}）`);
+      haMsgOk.value = false;
+    } else {
+      haMsg.value = '同步指令已发送';
+      haMsgOk.value = true;
+      loadHaStatus();
+    }
+  } catch (e: any) {
+    haMsg.value = e?.message || '同步失败';
+    haMsgOk.value = false;
+  } finally {
+    haSyncing.value = false;
+  }
+}
+
+// 初始化加载
+loadHaConfig();
+loadHaStatus();
 </script>
 
 <style scoped>

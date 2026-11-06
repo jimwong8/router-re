@@ -129,6 +129,81 @@
       </el-form>
     </el-card>
 
+    <!-- FRP 内网穿透 -->
+    <el-card shadow="never">
+      <template #header>
+        <div style="display:flex; align-items:center; gap:12px; justify-content:space-between; flex-wrap:wrap">
+          <span>FRP 内网穿透</span>
+          <div style="display:flex; align-items:center; gap:8px">
+            <el-tag :type="frpStatus.running ? 'success' : 'info'" size="small">{{ frpStatus.running ? '运行中' : '未运行' }}</el-tag>
+            <el-button size="small" :loading="frpSaving" @click="saveFrp">保存</el-button>
+            <el-button size="small" type="primary" :loading="frpApplying" @click="applyFrp">应用</el-button>
+            <el-button size="small" danger :loading="frpStopping" @click="stopFrp">停止</el-button>
+            <el-button size="small" @click="loadFrp">刷新</el-button>
+          </div>
+        </div>
+      </template>
+
+      <el-form label-width="110px" label-position="left">
+        <el-form-item label="服务器地址">
+          <el-input v-model="frp.server_addr" placeholder="frp.example.com" />
+        </el-form-item>
+        <el-form-item label="服务器端口">
+          <el-input-number v-model="frp.server_port" :min="1" :max="65535" />
+        </el-form-item>
+        <el-form-item label="Token">
+          <el-input v-model="frp.token" show-password />
+        </el-form-item>
+
+        <el-form-item label="隧道列表">
+          <el-table :data="frp.tunnels" size="small" stripe>
+            <el-table-column prop="name" label="名称" min-width="140" />
+            <el-table-column prop="type" label="类型" min-width="80" />
+            <el-table-column prop="local_ip" label="本地 IP" min-width="120" />
+            <el-table-column prop="local_port" label="本地端口" min-width="100" />
+            <el-table-column prop="remote_port" label="远程端口" min-width="100" />
+            <el-table-column label="操作" width="100">
+              <template #default="{ row }">
+                <el-button size="small" danger @click="removeTunnel(row)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-form inline class="add-tunnel-form" style="margin-top:8px">
+            <el-form-item label="名称">
+              <el-input v-model="newTunnel.name" placeholder="如 SSH" style="width:120px" />
+            </el-form-item>
+            <el-form-item label="类型">
+              <el-select v-model="newTunnel.type" style="width:100px">
+                <el-option label="tcp" value="tcp" />
+                <el-option label="udp" value="udp" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="本地 IP">
+              <el-input v-model="newTunnel.local_ip" placeholder="127.0.0.1" style="width:120px" />
+            </el-form-item>
+            <el-form-item label="本地端口">
+              <el-input-number v-model="newTunnel.local_port" :min="1" :max="65535" style="width:120px" />
+            </el-form-item>
+            <el-form-item label="远程端口">
+              <el-input-number v-model="newTunnel.remote_port" :min="1" :max="65535" style="width:120px" />
+            </el-form-item>
+            <el-form-item>
+              <el-button size="small" @click="addTunnel">添加隧道</el-button>
+            </el-form-item>
+          </el-form>
+        </el-form-item>
+
+        <el-form-item label="状态">
+          <div class="status-line">
+            <span>运行={{ frpStatus.running ? '是' : '否' }}</span>
+            <span v-if="frpStatus.pid">PID={{ frpStatus.pid }}</span>
+            <span v-if="frpStatus.binary !== undefined">客户端={{ frpStatus.binary_exists ? frpStatus.binary : '未找到' }}</span>
+            <span v-if="frpStatus.config">配置={{ frpStatus.config }}</span>
+          </div>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
   </div>
 </template>
 
@@ -152,6 +227,9 @@ interface TimeCfg {
 }
 interface TimeStatus { [k: string]: string }
 interface WOLTarget { name: string; mac: string; iface: string; broadcast: string }
+interface FrpTunnel { name: string; type: string; local_ip: string; local_port: number; remote_port: number }
+interface FrpConfig { server_addr: string; server_port: number; token: string; tunnels: FrpTunnel[] }
+interface FrpStatus { running: boolean; pid?: number; binary?: string; config?: string; binary_exists?: boolean }
 
 const access = ref<Access>({ ssh_enabled: false, ssh_port: 22, web_enabled: true, web_port: 443, allow_sources: [], telnet_enabled: false });
 const accessSaving = ref(false);
@@ -166,6 +244,13 @@ const targets = ref<WOLTarget[]>([]);
 const targetSaving = ref(false);
 const waking = ref('');
 const newTarget = ref<WOLTarget>({ name: '', mac: '', iface: 'eth0', broadcast: '' });
+
+const frp = ref<FrpConfig>({ server_addr: '', server_port: 7000, token: '', tunnels: [] });
+const frpStatus = ref<FrpStatus>({ running: false });
+const frpSaving = ref(false);
+const frpApplying = ref(false);
+const frpStopping = ref(false);
+const newTunnel = ref<FrpTunnel>({ name: '', type: 'tcp', local_ip: '127.0.0.1', local_port: 0, remote_port: 0 });
 
 let timer: number | undefined;
 
@@ -246,10 +331,87 @@ async function wakeTarget(t: WOLTarget) {
   }
 }
 
+function showError(e: any) {
+  const d = e?.response?.data || {};
+  const parts: string[] = [];
+  if (d.code !== undefined) parts.push(`code=${d.code}`);
+  if (d.message) parts.push(d.message);
+  else if (e.message) parts.push(e.message);
+  if (d.detail !== undefined && d.detail !== null) parts.push(`detail=${String(d.detail)}`);
+  ElMessage.error(parts.join(' | ') || '未知错误');
+}
+
+async function loadFrp() {
+  try {
+    const [cfg, st] = await Promise.all([
+      api.get('/api/v1/frp/config'),
+      api.get('/api/v1/frp/status'),
+    ]);
+    const c = cfg.data?.config;
+    if (c) frp.value = { server_addr: '', server_port: 7000, token: '', tunnels: [], ...c };
+    if (!Array.isArray(frp.value.tunnels)) frp.value.tunnels = [];
+    frpStatus.value = st.data || {};
+  } catch (e: any) {
+    showError(e);
+  }
+}
+
+async function saveFrp() {
+  frpSaving.value = true;
+  try {
+    await api.post('/api/v1/frp/config', frp.value);
+    ElMessage.success('FRP 配置已保存');
+  } catch (e: any) {
+    showError(e);
+  } finally {
+    frpSaving.value = false;
+  }
+}
+
+async function applyFrp() {
+  frpApplying.value = true;
+  try {
+    const res = await api.post('/api/v1/frp/apply');
+    ElMessage.success('FRP 已应用并启动');
+    frpStatus.value = res.data?.status || {};
+  } catch (e: any) {
+    showError(e);
+  } finally {
+    frpApplying.value = false;
+  }
+}
+
+async function stopFrp() {
+  frpStopping.value = true;
+  try {
+    await api.post('/api/v1/frp/stop');
+    ElMessage.success('FRP 已停止');
+    frpStatus.value = { running: false };
+  } catch (e: any) {
+    showError(e);
+  } finally {
+    frpStopping.value = false;
+  }
+}
+
+function addTunnel() {
+  if (!newTunnel.value.name || !newTunnel.value.local_port || !newTunnel.value.remote_port) {
+    ElMessage.warning('请填写名称、本地端口和远程端口');
+    return;
+  }
+  frp.value.tunnels.push({ ...newTunnel.value });
+  newTunnel.value = { name: '', type: 'tcp', local_ip: '127.0.0.1', local_port: 0, remote_port: 0 };
+}
+
+function removeTunnel(row: FrpTunnel) {
+  const idx = frp.value.tunnels.indexOf(row);
+  if (idx >= 0) frp.value.tunnels.splice(idx, 1);
+}
+
 function startRefresh() { stopRefresh(); timer = window.setInterval(loadAll, 5000); }
 function stopRefresh() { if (timer) { clearInterval(timer); timer = undefined; } }
 
-onMounted(() => { loadAll(); startRefresh(); });
+onMounted(() => { loadAll(); loadFrp(); startRefresh(); });
 onBeforeUnmount(stopRefresh);
 </script>
 

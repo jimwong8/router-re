@@ -71,6 +71,101 @@
       </div>
     </el-card>
 
+    <!-- SMTP 邮件通知 -->
+    <el-card shadow="never" style="margin-bottom:16px">
+      <template #header><span>SMTP 邮件通知</span></template>
+      <el-form :model="smtp" label-width="100px" size="small">
+        <el-form-item label="服务器">
+          <el-input v-model="smtp.config.host" placeholder="smtp.example.com" style="width:240px" />
+        </el-form-item>
+        <el-form-item label="端口">
+          <el-input-number v-model="smtp.config.port" :min="1" :max="65535" style="width:140px" />
+        </el-form-item>
+        <el-form-item label="TLS">
+          <el-select v-model="smtp.config.tls" style="width:140px">
+            <el-option label="不加密 (none)" value="none" />
+            <el-option label="STARTTLS" value="starttls" />
+            <el-option label="SSL/TLS" value="ssl" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="用户名">
+          <el-input v-model="smtp.config.username" placeholder="SMTP 用户名" style="width:240px" />
+        </el-form-item>
+        <el-form-item label="密码">
+          <el-input v-model="smtp.config.password" type="password" show-password placeholder="SMTP 密码" style="width:240px" />
+        </el-form-item>
+        <el-form-item label="发件人">
+          <el-input v-model="smtp.config.from" placeholder="alert@router.local" style="width:240px" />
+        </el-form-item>
+        <el-form-item label="收件人">
+          <el-select
+            v-model="smtp.config.to"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            placeholder="输入邮箱后回车添加"
+            style="width:100%"
+          />
+        </el-form-item>
+        <el-form-item label="启用">
+          <el-switch v-model="smtp.config.enabled" />
+        </el-form-item>
+      </el-form>
+      <div style="display:flex; gap:8px; flex-wrap:wrap">
+        <el-button type="primary" size="small" :loading="smtpSaving" @click="saveSmtp">保存 SMTP 配置</el-button>
+        <el-button size="small" :loading="smtpPreviewing" @click="previewSmtp">生成预览</el-button>
+      </div>
+      <pre v-if="smtpPreview" class="smtp-preview">{{ smtpPreview }}</pre>
+      <el-alert
+        v-if="smtpMsg"
+        :title="smtpMsg"
+        :type="smtpMsgOk ? 'success' : 'error'"
+        :closable="false"
+        show-icon
+        style="margin-top:10px"
+      />
+    </el-card>
+
+    <!-- SNMP Trap 通知 -->
+    <el-card shadow="never" style="margin-bottom:16px">
+      <template #header><span>SNMP Trap 通知</span></template>
+      <el-form :model="trap" label-width="100px" size="small">
+        <el-form-item label="目标主机">
+          <el-input v-model="trap.target.host" placeholder="10.0.0.100" style="width:200px" />
+        </el-form-item>
+        <el-form-item label="端口">
+          <el-input-number v-model="trap.target.port" :min="1" :max="65535" style="width:120px" />
+        </el-form-item>
+        <el-form-item label="版本">
+          <el-select v-model="trap.target.version" style="width:100px">
+            <el-option label="v1" value="v1" />
+            <el-option label="v2c" value="v2c" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="Community">
+          <el-input v-model="trap.target.community" placeholder="public" style="width:200px" />
+        </el-form-item>
+        <el-form-item label="启用">
+          <el-switch v-model="trap.target.enabled" />
+        </el-form-item>
+      </el-form>
+      <el-descriptions :column="1" size="small" style="margin-top:8px" v-if="trap.sink">
+        <el-descriptions-item label="Sink">{{ trap.sink }}</el-descriptions-item>
+      </el-descriptions>
+      <div style="margin-top:10px">
+        <el-button type="primary" size="small" :loading="trapSaving" @click="saveTrap">保存 Trap 配置</el-button>
+      </div>
+      <el-alert
+        v-if="trapMsg"
+        :title="trapMsg"
+        :type="trapMsgOk ? 'success' : 'error'"
+        :closable="false"
+        show-icon
+        style="margin-top:10px"
+      />
+    </el-card>
+
     <el-dialog v-model="dialog" title="新增告警规则" width="560px">
       <el-form :model="form" label-width="100px" size="small">
         <el-form-item label="规则名">
@@ -235,5 +330,127 @@ async function runTest() {
   }
 }
 
-onMounted(load);
+// ── SMTP ──
+const smtp = ref({
+  config: {
+    host: '', port: 587, tls: 'starttls',
+    username: '', password: '',
+    from: '', to: [] as string[],
+    enabled: true,
+  },
+});
+const smtpSaving = ref(false);
+const smtpPreviewing = ref(false);
+const smtpMsg = ref('');
+const smtpMsgOk = ref(false);
+const smtpPreview = ref('');
+
+async function loadSmtp() {
+  try {
+    const res = await api.get('/api/v1/notify/smtp');
+    if (res.data?.config) smtp.value.config = { ...smtp.value.config, ...res.data.config };
+  } catch { /* silent */ }
+}
+
+async function saveSmtp() {
+  smtpSaving.value = true;
+  smtpMsg.value = '';
+  smtpMsgOk.value = false;
+  try {
+    await api.post('/api/v1/notify/smtp', smtp.value.config);
+    smtpMsg.value = 'SMTP 配置已保存';
+    smtpMsgOk.value = true;
+  } catch (e: any) {
+    smtpMsg.value = errText(e, 'SMTP 保存失败');
+    smtpMsgOk.value = false;
+  } finally {
+    smtpSaving.value = false;
+  }
+}
+
+async function previewSmtp() {
+  smtpPreviewing.value = true;
+  smtpMsg.value = '';
+  smtpMsgOk.value = false;
+  try {
+    const res = await api.post('/api/v1/notify/smtp/preview', {
+      subject: 'Router 告警测试',
+      body: '这是一封由 router-re 生成的告警预览邮件。',
+    });
+    smtpPreview.value = String(res.data || '');
+    smtpMsg.value = '预览内容已生成（不会发信）';
+    smtpMsgOk.value = true;
+  } catch (e: any) {
+    smtpMsg.value = errText(e, '预览生成失败');
+    smtpMsgOk.value = false;
+  } finally {
+    smtpPreviewing.value = false;
+  }
+}
+
+// ── SNMP Trap ──
+const trap = ref({
+  target: { host: '', port: 162, version: 'v2c', community: 'public', enabled: true },
+  sink: '',
+});
+const trapSaving = ref(false);
+const trapMsg = ref('');
+const trapMsgOk = ref(false);
+
+async function loadTrap() {
+  try {
+    const res = await api.get('/api/v1/notify/trap');
+    if (res.data?.target) trap.value.target = { ...trap.value.target, ...res.data.target };
+    trap.value.sink = res.data?.sink || '';
+  } catch { /* silent */ }
+}
+
+async function saveTrap() {
+  trapSaving.value = true;
+  trapMsg.value = '';
+  trapMsgOk.value = false;
+  try {
+    await api.post('/api/v1/notify/trap', trap.value.target);
+    trapMsg.value = 'SNMP Trap 配置已保存';
+    trapMsgOk.value = true;
+    loadTrap();
+  } catch (e: any) {
+    trapMsg.value = errText(e, 'Trap 保存失败');
+    trapMsgOk.value = false;
+  } finally {
+    trapSaving.value = false;
+  }
+}
+
+// 辅助：从 axios error 提取 {code, message, detail}
+function errText(e: any, fallback: string): string {
+  const d = e?.response?.data;
+  if (!d) return fallback;
+  const parts: string[] = [];
+  if (d.code) parts.push(`[${d.code}]`);
+  if (d.message) parts.push(d.message);
+  if (d.detail) parts.push(String(d.detail));
+  return parts.length ? parts.join(' ') : fallback;
+}
+
+onMounted(() => {
+  load();
+  loadSmtp();
+  loadTrap();
+});
 </script>
+
+<style scoped>
+.smtp-preview {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: #f5f7fa;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 12px;
+  max-height: 260px;
+  overflow: auto;
+}
+</style>

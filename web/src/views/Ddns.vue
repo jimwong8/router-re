@@ -1,5 +1,71 @@
 <template>
   <div>
+
+    <!-- DDNS 服务配置 -->
+    <el-card shadow="never" style="margin-bottom:16px">
+      <template #header>
+        <div style="display:flex; align-items:center; gap:12px; justify-content:space-between">
+          <span>DDNS 服务配置</span>
+          <el-button size="small" :loading="configSaving" @click="saveConfig">保存</el-button>
+        </div>
+      </template>
+      <el-alert v-if="configDetail" type="error" :closable="false" show-icon :title="configDetail" style="margin-bottom:10px" />
+      <el-form label-width="100px" label-position="left" size="small">
+        <el-form-item label="服务商">
+          <el-select v-model="ddnsConfig.provider" style="width:180px">
+            <el-option label="Cloudflare" value="cloudflare" />
+            <el-option label="AliDNS" value="alidns" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="域名">
+          <el-input v-model="ddnsConfig.domain" placeholder="example.com" />
+        </el-form-item>
+        <el-form-item label="子域名">
+          <el-input v-model="ddnsConfig.subdomain" placeholder="@" />
+        </el-form-item>
+        <el-form-item label="Token">
+          <el-input v-model="ddnsConfig.token" type="password" show-password
+            :placeholder="ddnsConfig.token ? '已设置（掩码，留空不修改）' : 'API Token'"
+            @input="onConfigTokenInput" />
+          <span class="hint">GET 返回掩码；仅在手动改动时提交，未改动时后端保留旧值</span>
+        </el-form-item>
+        <el-form-item label="Record ID">
+          <el-input v-model="ddnsConfig.record_id" placeholder="可选" />
+        </el-form-item>
+        <el-form-item label="Zone ID">
+          <el-input v-model="ddnsConfig.zone_id" placeholder="可选" />
+        </el-form-item>
+        <el-form-item label="启用">
+          <el-switch v-model="ddnsConfig.enabled" />
+        </el-form-item>
+      </el-form>
+    </el-card>
+
+    <!-- DDNS 状态 -->
+    <el-card shadow="never" style="margin-bottom:16px">
+      <template #header>
+        <div style="display:flex; align-items:center; gap:12px; justify-content:space-between">
+          <span>DDNS 状态</span>
+          <div style="display:flex; align-items:center; gap:6px">
+            <el-button size="small" :loading="checking" @click="checkIP">检测公网 IP</el-button>
+            <el-button type="primary" size="small" :loading="updating" @click="updateDDNS">立即更新</el-button>
+            <el-button size="small" :loading="statusLoading" @click="refreshStatus">刷新状态</el-button>
+          </div>
+        </div>
+      </template>
+      <el-alert v-if="statusDetail" type="error" :closable="false" show-icon :title="statusDetail" style="margin-bottom:10px" />
+      <el-form label-width="100px" label-position="left" size="small">
+        <el-form-item label="服务商">{{ ddnsStatus.provider || '-' }}</el-form-item>
+        <el-form-item label="公网 IP">{{ ddnsStatus.ip || '-' }}</el-form-item>
+        <el-form-item label="状态">
+          <el-tag :type="ddnsStatus.ok ? 'success' : 'warning'" size="small">
+            {{ ddnsStatus.status || ddnsStatus.detail || '-' }}
+          </el-tag>
+        </el-form-item>
+        <el-form-item label="详情">{{ ddnsStatus.detail || '-' }}</el-form-item>
+      </el-form>
+    </el-card>
+
     <el-card shadow="never" style="margin-bottom:16px">
       <template #header>
         <div style="display:flex; justify-content:space-between; align-items:center">
@@ -119,6 +185,13 @@ interface Record {
   last_ip: string; last_ok: number; last_error: string;
 }
 interface Provider { key: string; name: string; needs_token: boolean; needs_user: boolean; endpoint: string }
+interface DdnsConfig {
+  provider: string; domain: string; subdomain: string; token: string;
+  record_id: string; zone_id: string; enabled: boolean;
+}
+interface DdnsStatus {
+  status: string; ip: string; provider: string; detail: string; ok: boolean;
+}
 
 const loading = ref(false);
 const saving = ref(false);
@@ -136,6 +209,15 @@ const source = ref('');
 const needUpdate = ref(false);
 const note = ref('');
 const checkReason = ref('');
+
+const ddnsConfig = ref<DdnsConfig>({ provider: '', domain: '', subdomain: '', token: '', record_id: '', zone_id: '', enabled: true });
+const ddnsStatus = ref<DdnsStatus>({ status: '', ip: '', provider: '', detail: '', ok: false });
+const configDetail = ref('');
+const statusDetail = ref('');
+const configSaving = ref(false);
+const statusLoading = ref(false);
+const updating = ref(false);
+const configTokenDirty = ref(false);
 
 const form = ref<any>({
   id: '', provider: '', domain: '', subdomain: '',
@@ -190,18 +272,14 @@ async function checkIP() {
   checking.value = true;
   checkAvailable.value = null;
   try {
-    const res = await api.get('/api/v1/ddns/check');
+    const res = await api.get('/api/v1/ddns/ip');
     const d = res.data || {};
-    if (d.available === false) {
-      checkAvailable.value = false;
-      checkReason.value = d.reason || '检测失败';
-    } else {
-      checkAvailable.value = true;
-      currentIP.value = d.current_ip || '';
-      source.value = d.source || '';
-      needUpdate.value = !!d.need_update;
-      note.value = d.note || '';
-    }
+    const ip = d.ip || '';
+    currentIP.value = ip;
+    source.value = d.source || 'ddns/ip';
+    checkAvailable.value = !!ip;
+    needUpdate.value = records.value.some(r => r.enabled && r.last_ip && r.last_ip !== ip);
+    note.value = ip ? `当前公网 IP：${ip}` : '未获取到公网 IP';
   } catch (e: any) {
     checkAvailable.value = false;
     checkReason.value = e?.response?.data?.detail || e?.response?.data?.message || e?.message || '检测失败';
@@ -286,5 +364,84 @@ async function removeRow(idx: number, row: Record) {
   await saveAll();
 }
 
-onMounted(() => { load(); checkIP(); });
+function onConfigTokenInput() {
+  configTokenDirty.value = true;
+}
+
+function buildConfigBody() {
+  const body: any = {
+    provider: ddnsConfig.value.provider,
+    domain: ddnsConfig.value.domain,
+    subdomain: ddnsConfig.value.subdomain,
+    record_id: ddnsConfig.value.record_id,
+    zone_id: ddnsConfig.value.zone_id,
+    enabled: ddnsConfig.value.enabled,
+  };
+  // GET 返回掩码；仅在用户手动改过 token 时提交，未改动时省略，由后端保留旧值
+  if (configTokenDirty.value && ddnsConfig.value.token) {
+    body.token = ddnsConfig.value.token;
+  }
+  return body;
+}
+
+async function loadConfig() {
+  try {
+    const res = await api.get('/api/v1/ddns/config');
+    const c = res.data?.config || {};
+    ddnsConfig.value = { provider: '', domain: '', subdomain: '', token: '', record_id: '', zone_id: '', enabled: true, ...c };
+    configTokenDirty.value = false;
+  } catch (e: any) {
+    showError(e, '加载 DDNS 配置失败');
+  }
+}
+
+async function saveConfig() {
+  configSaving.value = true;
+  configDetail.value = '';
+  try {
+    const res = await api.post('/api/v1/ddns/config', buildConfigBody());
+    const d = res.data || {};
+    if (d.saved) ElMessage.success('DDNS 配置已保存');
+    const c = d.config || {};
+    ddnsConfig.value = { ...ddnsConfig.value, ...c };
+    configTokenDirty.value = false;
+  } catch (e: any) {
+    showError(e, '保存 DDNS 配置失败');
+  } finally {
+    configSaving.value = false;
+  }
+}
+
+async function refreshStatus() {
+  statusLoading.value = true;
+  statusDetail.value = '';
+  try {
+    const res = await api.get('/api/v1/ddns/status');
+    const d = res.data || {};
+    ddnsStatus.value = { status: '', ip: '', provider: '', detail: '', ok: false, ...d };
+  } catch (e: any) {
+    showError(e, '获取 DDNS 状态失败');
+  } finally {
+    statusLoading.value = false;
+  }
+}
+
+async function updateDDNS() {
+  updating.value = true;
+  statusDetail.value = '';
+  try {
+    const res = await api.post('/api/v1/ddns/update');
+    const d = res.data || {};
+    ddnsStatus.value = { ...ddnsStatus.value, ok: !!d.ok, status: d.ok ? 'updated' : 'failed', detail: d.detail || '', ip: d.ip || '', provider: d.provider || '' };
+    ElMessage.success(d.detail || 'DDNS 更新完成');
+    await refreshStatus();
+    await load();
+  } catch (e: any) {
+    showError(e, 'DDNS 立即更新失败');
+  } finally {
+    updating.value = false;
+  }
+}
+
+onMounted(() => { load(); checkIP(); loadConfig(); refreshStatus(); });
 </script>

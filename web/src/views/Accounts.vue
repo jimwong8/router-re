@@ -135,6 +135,110 @@
           </el-descriptions>
         </el-card>
       </el-tab-pane>
+
+      <!-- 登录方式 -->
+      <el-tab-pane label="登录方式" name="login">
+        <!-- SMS 卡片 -->
+        <el-card shadow="never" style="margin-bottom:16px">
+          <template #header>
+            <div style="display:flex; justify-content:space-between; align-items:center">
+              <span>短信验证码登录（SMS）</span>
+              <el-tag :type="smsConfigured ? 'success' : 'info'" size="small">
+                {{ smsConfigured ? '已配置' : '未配置' }}
+              </el-tag>
+            </div>
+          </template>
+          <el-alert v-if="smsError" type="error" :closable="false" show-icon :title="smsError" style="margin-bottom:10px" />
+          <el-form label-width="110px" label-position="left" size="small">
+            <el-form-item label="网关 URL">
+              <el-input v-model="smsConfig.url" placeholder="https://sms.example.com/send" />
+            </el-form-item>
+            <el-form-item label="请求方法">
+              <el-select v-model="smsConfig.method" style="width:120px">
+                <el-option label="POST" value="POST" />
+                <el-option label="GET" value="GET" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="正文模板">
+              <el-input v-model="smsConfig.body_template" type="textarea" :rows="3"
+                placeholder="您的验证码是 {{code}}，5分钟内有效" />
+            </el-form-item>
+            <el-form-item label="HTTP Headers">
+              <el-table :data="smsHeaders" border size="small" style="width:100%; margin-top:6px">
+                <el-table-column prop="key" label="Key" width="160" />
+                <el-table-column prop="value" label="Value" />
+                <el-table-column label="操作" width="80">
+                  <template #default="{ row }">
+                    <el-button size="small" type="danger" @click="removeHeader(row)">删</el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+              <div style="display:flex; gap:6px; margin-top:6px">
+                <el-input v-model="newHeaderKey" placeholder="key" style="width:120px" />
+                <el-input v-model="newHeaderValue" placeholder="value" style="width:160px" />
+                <el-button size="small" @click="addHeader">+</el-button>
+              </div>
+            </el-form-item>
+          </el-form>
+          <div style="display:flex; gap:8px; margin-top:12px">
+            <el-button type="primary" :loading="smsSaving" @click="saveSmsConfig">保存配置</el-button>
+            <el-button :loading="smsTesting" @click="testSms">测试发送</el-button>
+          </div>
+          <el-card shadow="never" style="margin-top:12px">
+            <template #header>验证码校验测试</template>
+            <el-form inline style="margin-bottom:8px">
+              <el-form-item label="手机号">
+                <el-input v-model="smsTestPhone" placeholder="13800138000" style="width:160px" />
+              </el-form-item>
+              <el-form-item label="验证码">
+                <el-input v-model="smsTestCode" placeholder="6位码" style="width:120px" />
+              </el-form-item>
+              <el-form-item>
+                <el-button type="primary" :loading="smsVerifying" @click="verifySms">校验验证码</el-button>
+              </el-form-item>
+            </el-form>
+          </el-card>
+        </el-card>
+
+        <!-- 微信卡片 -->
+        <el-card shadow="never">
+          <template #header>
+            <div style="display:flex; justify-content:space-between; align-items:center">
+              <span>微信登录</span>
+              <el-tag :type="wechatConfigured ? 'success' : 'info'" size="small">
+                {{ wechatConfigured ? '已配置' : '未配置' }}
+              </el-tag>
+            </div>
+          </template>
+          <el-alert v-if="wechatError" type="error" :closable="false" show-icon :title="wechatError" style="margin-bottom:10px" />
+          <el-form label-width="110px" label-position="left" size="small">
+            <el-form-item label="AppID">
+              <el-input v-model="wechatConfig.appid" placeholder="wx..." />
+            </el-form-item>
+            <el-form-item label="AppSecret">
+              <el-input v-model="wechatConfig.appsecret" type="password" show-password
+                :placeholder="wechatSecretSet ? '已设置（掩码，留空不修改）' : 'AppSecret'"
+                @input="onWechatSecretInput" />
+              <span class="hint" style="color:#909399">GET 返回掩码；仅在手动改动时提交，未改动时后端保留旧值</span>
+            </el-form-item>
+          </el-form>
+          <div style="display:flex; gap:8px; margin-top:12px">
+            <el-button type="primary" :loading="wechatSaving" @click="saveWechatConfig">保存配置</el-button>
+            <el-button :loading="wechatLogining" @click="wechatLogin">测试登录</el-button>
+          </div>
+          <el-card shadow="never" style="margin-top:12px">
+            <template #header>Code 换 OpenID 测试</template>
+            <el-form inline style="margin-bottom:8px">
+              <el-form-item label="微信 code">
+                <el-input v-model="wechatTestCode" placeholder="前端页面换取的 code" style="width:260px" />
+              </el-form-item>
+              <el-form-item>
+                <el-button type="primary" :loading="wechatVerifying" @click="verifyWechat">换取 openid</el-button>
+              </el-form-item>
+            </el-form>
+          </el-card>
+        </el-card>
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -162,6 +266,20 @@ interface Plan {
   price_yuan: number;
   days: number;
   quota_mb: number;
+}
+
+interface HeaderKV { key: string; value: string }
+
+interface SmsConfig {
+  url: string;
+  method: string;
+  body_template: string;
+  headers: Record<string, string>;
+}
+
+interface WechatConfig {
+  appid: string;
+  appsecret: string;
 }
 
 const tab = ref('accounts');
@@ -193,6 +311,38 @@ const form = reactive({
 });
 
 const planForm = reactive<Plan>({ name: '', price_yuan: 0, days: 30, quota_mb: 0 });
+
+// ---- SMS ----
+const smsConfig = ref<SmsConfig>({ url: '', method: 'POST', body_template: '', headers: {} });
+const smsHeaders = ref<HeaderKV[]>([]);
+const newHeaderKey = ref('');
+const newHeaderValue = ref('');
+const smsConfigured = ref(false);
+const smsError = ref('');
+const smsSaving = ref(false);
+const smsTesting = ref(false);
+const smsVerifying = ref(false);
+const smsTestPhone = ref('');
+const smsTestCode = ref('');
+
+// ---- WeChat ----
+const wechatConfig = ref<WechatConfig>({ appid: '', appsecret: '' });
+const wechatConfigured = ref(false);
+const wechatSecretSet = ref(false);
+const wechatError = ref('');
+const wechatSaving = ref(false);
+const wechatLogining = ref(false);
+const wechatVerifying = ref(false);
+const wechatTestCode = ref('');
+
+function showError(e: any, fallback: string) {
+  const d = e?.response?.data;
+  if (d?.message) {
+    ElMessage.error(d.detail ? `${d.message}：${d.detail}` : d.message);
+  } else {
+    ElMessage.error(fallback);
+  }
+}
 
 function statusOf(row: Account): string {
   const now = Math.floor(Date.now() / 1000);
@@ -360,6 +510,168 @@ async function removeAccount(row: Account) {
   }
 }
 
+async function loadSmsConfig() {
+  smsError.value = '';
+  try {
+    const res = await api.get('/api/v1/auth/sms/config');
+    const d = res.data || {};
+    smsConfigured.value = !!d.configured;
+    if (d.configured) {
+      smsConfig.value = {
+        url: d.url || '',
+        method: d.method || 'POST',
+        body_template: d.body_template || '',
+        headers: d.headers || {},
+      };
+      smsHeaders.value = Object.entries(d.headers || {}).map(([k, v]) => ({ key: k, value: String(v) }));
+    }
+  } catch (e: any) {
+    showError(e, '加载 SMS 配置失败');
+  }
+}
+
+function headersToMap() {
+  const m: Record<string, string> = {};
+  for (const h of smsHeaders.value) {
+    if (h.key) m[h.key] = h.value;
+  }
+  return m;
+}
+
+async function saveSmsConfig() {
+  smsSaving.value = true;
+  smsError.value = '';
+  try {
+    const body = {
+      url: smsConfig.value.url,
+      method: smsConfig.value.method,
+      body_template: smsConfig.value.body_template,
+      headers: headersToMap(),
+    };
+    await api.post('/api/v1/auth/sms/config', body);
+    smsConfigured.value = true;
+    ElMessage.success('SMS 配置已保存');
+    await loadSmsConfig();
+  } catch (e: any) {
+    showError(e, '保存 SMS 配置失败');
+  } finally {
+    smsSaving.value = false;
+  }
+}
+
+async function addHeader() {
+  if (!newHeaderKey.value) {
+    ElMessage.warning('Header key 必填');
+    return;
+  }
+  smsHeaders.value.push({ key: newHeaderKey.value, value: newHeaderValue.value });
+  newHeaderKey.value = '';
+  newHeaderValue.value = '';
+}
+
+function removeHeader(row: HeaderKV) {
+  const i = smsHeaders.value.indexOf(row);
+  if (i >= 0) smsHeaders.value.splice(i, 1);
+}
+
+async function testSms() {
+  if (!smsTestPhone.value) {
+    ElMessage.warning('手机号必填');
+    return;
+  }
+  smsTesting.value = true;
+  smsError.value = '';
+  try {
+    await api.post('/api/v1/auth/sms/send', { phone: smsTestPhone.value });
+    ElMessage.success('验证码已发送');
+  } catch (e: any) {
+    showError(e, '发送验证码失败');
+  } finally {
+    smsTesting.value = false;
+  }
+}
+
+async function verifySms() {
+  if (!smsTestPhone.value || !smsTestCode.value) {
+    ElMessage.warning('手机号和验证码必填');
+    return;
+  }
+  smsVerifying.value = true;
+  smsError.value = '';
+  try {
+    await api.post('/api/v1/auth/sms/verify', { phone: smsTestPhone.value, code: smsTestCode.value });
+    ElMessage.success('验证码校验通过');
+  } catch (e: any) {
+    showError(e, '验证码校验失败');
+  } finally {
+    smsVerifying.value = false;
+  }
+}
+
+async function loadWechatConfig() {
+  wechatError.value = '';
+  try {
+    const res = await api.get('/api/v1/auth/wechat/config');
+    const d = res.data || {};
+    wechatConfigured.value = !!d.secret_set;
+    wechatSecretSet.value = !!d.secret_set;
+    wechatConfig.value = {
+      appid: d.appid || '',
+      appsecret: '',
+    };
+  } catch (e: any) {
+    showError(e, '加载微信配置失败');
+  }
+}
+
+function onWechatSecretInput() {
+  // 只要用户输入，就视为已改动，提交时会带上 appsecret
+}
+
+async function saveWechatConfig() {
+  wechatSaving.value = true;
+  wechatError.value = '';
+  try {
+    // appsecret 为空时，后端会保留旧值（掩码原样提交也会被忽略）
+    await api.post('/api/v1/auth/wechat/config', {
+      appid: wechatConfig.value.appid,
+      appsecret: wechatConfig.value.appsecret,
+    });
+    wechatConfigured.value = true;
+    wechatSecretSet.value = true;
+    ElMessage.success('微信配置已保存');
+    await loadWechatConfig();
+  } catch (e: any) {
+    showError(e, '保存微信配置失败');
+  } finally {
+    wechatSaving.value = false;
+  }
+}
+
+async function wechatLogin() {
+  if (!wechatTestCode.value) {
+    ElMessage.warning('code 必填');
+    return;
+  }
+  wechatLogining.value = true;
+  wechatVerifying.value = true;
+  wechatError.value = '';
+  try {
+    const res = await api.post('/api/v1/auth/wechat/login', { code: wechatTestCode.value });
+    const d = res.data || {};
+    ElMessage.success(`登录成功，openid=${d.openid || '-'}`);
+  } catch (e: any) {
+    showError(e, '微信登录失败');
+  } finally {
+    wechatLogining.value = false;
+    wechatVerifying.value = false;
+  }
+}
+
+async function verifyWechat() {
+  return wechatLogin();
+}
+
 async function savePlans() {
   if (!planForm.name) {
     ElMessage.warning('套餐名称必填');
@@ -385,6 +697,8 @@ async function savePlans() {
 
 onMounted(() => {
   loadAll();
+  loadSmsConfig();
+  loadWechatConfig();
 });
 </script>
 

@@ -64,6 +64,86 @@
         </el-table>
         <el-button type="primary" style="margin-top: 12px" @click="loadConntrack">刷新</el-button>
       </el-tab-pane>
+
+      <!-- 日志轮转 -->
+      <el-tab-pane label="日志轮转" name="rotate">
+        <el-form label-width="110px" label-position="left" size="small" style="margin-bottom:12px">
+          <el-form-item label="日志路径">
+            <el-input v-model="rotateConfig.path" placeholder="/var/log/router-re/app.log" />
+          </el-form-item>
+          <el-form-item label="最大大小(MB)">
+            <el-input-number v-model="rotateConfig.max_size_mb" :min="1" :max="10240" style="width:140px" />
+          </el-form-item>
+          <el-form-item label="保留份数">
+            <el-input-number v-model="rotateConfig.keep_files" :min="1" :max="100" style="width:140px" />
+          </el-form-item>
+          <el-form-item label="间隔">
+            <el-select v-model="rotateConfig.interval" style="width:140px">
+              <el-option label="daily" value="daily" />
+              <el-option label="weekly" value="weekly" />
+              <el-option label="none (size-based)" value="none" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="压缩">
+            <el-switch v-model="rotateConfig.compress" />
+          </el-form-item>
+        </el-form>
+        <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap">
+          <el-button :loading="rotateDryRun" @click="dryRunRotate">dry-run 预览</el-button>
+          <el-button type="primary" :loading="rotateApplying" @click="applyRotate">确认应用</el-button>
+          <el-button :loading="rotateLoading" @click="loadRotate">刷新</el-button>
+        </div>
+        <el-alert v-if="rotateDetail" type="error" :closable="false" show-icon :title="rotateDetail" style="margin-bottom:8px" />
+        <el-alert v-if="rotateDryResult" type="info" :closable="false" show-icon :title="rotateDryResult" style="margin-bottom:8px" />
+        <div v-if="rotateRendered" style="margin-top:10px">
+          <div style="font-size:12px; color:#909399; margin-bottom:4px">渲染的 logrotate 配置</div>
+          <pre class="cmd-output">{{ rotateRendered }}</pre>
+        </div>
+      </el-tab-pane>
+
+      <!-- Syslog 外发 -->
+      <el-tab-pane label="Syslog 外发" name="syslog">
+        <el-form label-width="110px" label-position="left" size="small" style="margin-bottom:12px">
+          <el-form-item label="名称">
+            <el-input v-model="syslogTarget.name" placeholder="远程 syslog" />
+          </el-form-item>
+          <el-form-item label="地址 (host:port)">
+            <el-input v-model="syslogTarget.address" placeholder="192.168.1.100:514" />
+          </el-form-item>
+          <el-form-item label="协议">
+            <el-select v-model="syslogTarget.protocol" style="width:140px">
+              <el-option label="udp" value="udp" />
+              <el-option label="tcp" value="tcp" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="格式">
+            <el-select v-model="syslogTarget.format" style="width:140px">
+              <el-option label="rfc5424" value="rfc5424" />
+              <el-option label="rfc3164" value="rfc3164" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="设施">
+            <el-select v-model="syslogTarget.facility" style="width:140px">
+              <el-option v-for="f in ['local0','local1','local2','local3','local4','local5','local6','local7']" :key="f" :label="f" :value="f" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="启用">
+            <el-switch v-model="syslogTarget.enabled" />
+          </el-form-item>
+        </el-form>
+        <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap">
+          <el-button type="primary" :loading="syslogSaving" @click="saveSyslog">保存</el-button>
+          <el-button :loading="syslogTesting" @click="testSyslog">测试连通</el-button>
+          <el-button :loading="syslogLoading" @click="loadSyslog">刷新</el-button>
+        </div>
+        <el-alert v-if="syslogDetail" type="error" :closable="false" show-icon :title="syslogDetail" style="margin-bottom:8px" />
+        <el-alert v-if="syslogTestOk" type="success" :closable="false" show-icon :title="syslogTestDetail" style="margin-bottom:8px" />
+        <el-alert v-if="syslogTestFail" type="error" :closable="false" show-icon :title="syslogTestDetail" style="margin-bottom:8px" />
+        <div v-if="syslogRendered" style="margin-top:10px">
+          <div style="font-size:12px; color:#909399; margin-bottom:4px">渲染的 rsyslog 行</div>
+          <pre class="cmd-output">{{ syslogRendered }}</pre>
+        </div>
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -72,6 +152,13 @@
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import api from '../api';
+
+interface RotateConfig {
+  path: string; max_size_mb: number; keep_files: number; compress: boolean; interval: string;
+}
+interface SyslogTarget {
+  name: string; address: string; protocol: string; format: string; facility: string; enabled: boolean;
+}
 
 const activeTab = ref('logs');
 
@@ -86,6 +173,35 @@ const logOffset = ref(0);
 const logHasMore = ref(false);
 const logTotal = ref(-1);
 let refreshTimer: any = null;
+
+// ---- 日志轮转 ----
+const rotateConfig = ref<RotateConfig>({ path: '/var/log/router-re/app.log', max_size_mb: 100, keep_files: 5, compress: true, interval: 'daily' });
+const rotateRendered = ref('');
+const rotateDetail = ref('');
+const rotateDryResult = ref('');
+const rotateLoading = ref(false);
+const rotateDryRun = ref(false);
+const rotateApplying = ref(false);
+
+// ---- Syslog 外发 ----
+const syslogTarget = ref<SyslogTarget>({ name: '', address: '', protocol: 'udp', format: 'rfc5424', facility: 'local0', enabled: false });
+const syslogRendered = ref('');
+const syslogDetail = ref('');
+const syslogTestOk = ref(false);
+const syslogTestFail = ref(false);
+const syslogTestDetail = ref('');
+const syslogLoading = ref(false);
+const syslogSaving = ref(false);
+const syslogTesting = ref(false);
+
+function showError(e: any, fallback: string) {
+  const d = e?.response?.data;
+  if (d?.message) {
+    ElMessage.error(d.detail ? `${d.message}：${d.detail}` : d.message);
+  } else {
+    ElMessage.error(fallback);
+  }
+}
 
 function priorityTagType(p: string) {
   switch (p) {
@@ -135,6 +251,111 @@ function prevLogs() {
   loadLogs(newOffset);
 }
 
+async function loadRotate() {
+  rotateLoading.value = true;
+  rotateDetail.value = '';
+  try {
+    const res = await api.get('/api/v1/logs/rotate');
+    const d = res.data || {};
+    const c = d.config || {};
+    rotateConfig.value = { path: '', max_size_mb: 100, keep_files: 5, compress: true, interval: 'daily', ...c };
+    rotateRendered.value = d.logrotate || '';
+  } catch (e: any) {
+    showError(e, '加载日志轮转配置失败');
+  } finally {
+    rotateLoading.value = false;
+  }
+}
+
+async function dryRunRotate() {
+  rotateDryRun.value = true;
+  rotateDetail.value = '';
+  rotateDryResult.value = '';
+  try {
+    const res = await api.post('/api/v1/logs/rotate', { confirm: false, config: rotateConfig.value });
+    const d = res.data || {};
+    rotateRendered.value = d.logrotate || '';
+    rotateDryResult.value = d.detail || 'dry-run：未写入，配置语法已通过';
+    ElMessage.success('dry-run 通过，未写入文件');
+  } catch (e: any) {
+    showError(e, 'dry-run 失败');
+  } finally {
+    rotateDryRun.value = false;
+  }
+}
+
+async function applyRotate() {
+  rotateApplying.value = true;
+  rotateDetail.value = '';
+  try {
+    const res = await api.post('/api/v1/logs/rotate', { confirm: true, config: rotateConfig.value });
+    const d = res.data || {};
+    rotateRendered.value = d.logrotate || '';
+    ElMessage.success(d.detail || '日志轮转已应用');
+    await loadRotate();
+  } catch (e: any) {
+    showError(e, '应用日志轮转失败');
+  } finally {
+    rotateApplying.value = false;
+  }
+}
+
+async function loadSyslog() {
+  syslogLoading.value = true;
+  syslogDetail.value = '';
+  try {
+    const res = await api.get('/api/v1/logs/syslog');
+    const d = res.data || {};
+    const t = d.target || {};
+    syslogTarget.value = { name: '', address: '', protocol: 'udp', format: 'rfc5424', facility: 'local0', enabled: false, ...t };
+    syslogRendered.value = d.rsyslog || '';
+  } catch (e: any) {
+    showError(e, '加载 Syslog 配置失败');
+  } finally {
+    syslogLoading.value = false;
+  }
+}
+
+async function saveSyslog() {
+  syslogSaving.value = true;
+  syslogDetail.value = '';
+  try {
+    const res = await api.post('/api/v1/logs/syslog', syslogTarget.value);
+    const d = res.data || {};
+    syslogRendered.value = d.rsyslog || '';
+    ElMessage.success('Syslog 目标已保存');
+  } catch (e: any) {
+    showError(e, '保存 Syslog 失败');
+  } finally {
+    syslogSaving.value = false;
+  }
+}
+
+async function testSyslog() {
+  syslogTesting.value = true;
+  syslogTestOk.value = false;
+  syslogTestFail.value = false;
+  syslogTestDetail.value = '';
+  try {
+    const res = await api.post('/api/v1/logs/syslog/test', syslogTarget.value);
+    const d = res.data || {};
+    if (d.ok) {
+      syslogTestOk.value = true;
+      syslogTestDetail.value = d.detail || '测试消息已发送';
+      ElMessage.success(syslogTestDetail.value);
+    } else {
+      syslogTestFail.value = true;
+      syslogTestDetail.value = d.detail || '测试失败';
+      ElMessage.error(syslogTestDetail.value);
+    }
+  } catch (e: any) {
+    syslogTestFail.value = true;
+    showError(e, 'Syslog 测试失败');
+  } finally {
+    syslogTesting.value = false;
+  }
+}
+
 // ---- 连接跟踪 Tab ----
 const connEntries = ref<any[]>([]);
 const connSummary = ref<Record<string, number>>({});
@@ -170,6 +391,8 @@ onMounted(() => {
   loadSources();
   loadLogs();
   loadConntrack();
+  loadRotate();
+  loadSyslog();
 });
 
 onBeforeUnmount(() => {

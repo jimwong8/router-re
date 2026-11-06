@@ -33,6 +33,14 @@ func (s *Server) handleSetDDNSConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, errBody(10110, "json decode fail", err.Error()))
 		return
 	}
+	// GET returns a masked token; the UI omits it when the user did not edit it,
+	// and older clients may post the mask back. Preserve the stored secret.
+	if raw, _ := s.store.Get("ddns", "config"); raw != "" {
+		var old ddns.Config
+		if json.Unmarshal([]byte(raw), &old) == nil && (cfg.Token == "" || cfg.Token == "***") {
+			cfg.Token = old.Token
+		}
+	}
 	b, _ := json.Marshal(cfg)
 	_ = s.store.Set("ddns", "config", string(b))
 	out := cfg

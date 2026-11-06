@@ -178,6 +178,15 @@ func (s *Server) handleSetSMTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 422, errBody(10310, "invalid body", err.Error()))
 		return
 	}
+	// GET returns the password masked as "***"; preserve the stored secret when
+	// the UI posts that sentinel back without the user editing it.
+	raw, _ := s.store.Get("notify", smtpStoreKey)
+	if raw != "" {
+		var old notify.SMTPConfig
+		if json.Unmarshal([]byte(raw), &old) == nil && cfg.Password == "***" {
+			cfg.Password = old.Password
+		}
+	}
 	if err := notify.ValidateSMTP(cfg); err != nil {
 		writeJSON(w, 422, errBody(10311, "invalid smtp config", err.Error()))
 		return
@@ -228,6 +237,15 @@ func (s *Server) handleSetTrap(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&t); err != nil {
 		writeJSON(w, 422, errBody(10314, "invalid body", err.Error()))
 		return
+	}
+	// GET masks the community as "***"; keep the stored value on an unchanged
+	// round-trip instead of persisting the mask literally.
+	raw, _ := s.store.Get("notify", trapStoreKey)
+	if raw != "" {
+		var old notify.TrapTarget
+		if json.Unmarshal([]byte(raw), &old) == nil && t.Community == "***" {
+			t.Community = old.Community
+		}
 	}
 	if err := notify.ValidateTrap(t); err != nil {
 		writeJSON(w, 422, errBody(10315, "invalid trap target", err.Error()))

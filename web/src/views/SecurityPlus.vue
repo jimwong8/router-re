@@ -230,6 +230,182 @@
             </template>
           </el-dialog>
         </el-tab-pane>
+
+        <!-- ===== Tab 3: Firewall Rules ===== -->
+        <el-tab-pane label="防火墙规则" name="firewall">
+          <el-alert v-if="fwDetail" type="error" :closable="false" show-icon :title="fwDetail" style="margin-bottom:12px" />
+          <el-form inline size="small" label-width="70px" style="margin-bottom:10px">
+            <el-form-item>
+              <el-button type="primary" size="small" :loading="fwLoading" @click="loadFirewall">加载</el-button>
+              <el-button type="primary" size="small" :loading="fwSaving" @click="saveFirewall" style="margin-left:8px">保存</el-button>
+            </el-form-item>
+          </el-form>
+          <el-table :data="fwRules" size="small" border style="width:100%" empty-text="暂无防火墙规则">
+            <el-table-column prop="Chain" label="链" width="100" />
+            <el-table-column prop="Src" label="源地址" min-width="150">
+              <template #default="scope">
+                <el-input v-model="scope.row.Src" size="small" placeholder="如 10.0.0.0/8 或留空" style="width:100%" />
+              </template>
+            </el-table-column>
+            <el-table-column prop="Dst" label="目的地址" min-width="150">
+              <template #default="scope">
+                <el-input v-model="scope.row.Dst" size="small" placeholder="如 192.168.1.0/24 或留空" style="width:100%" />
+              </template>
+            </el-table-column>
+            <el-table-column prop="Proto" label="协议" width="100">
+              <template #default="scope">
+                <el-select v-model="scope.row.Proto" size="small" placeholder="任意" style="width:100%">
+                  <el-option label="任意" value="" />
+                  <el-option label="tcp" value="tcp" />
+                  <el-option label="udp" value="udp" />
+                  <el-option label="icmp" value="icmp" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column prop="DPort" label="目的端口" width="120">
+              <template #default="scope">
+                <el-input v-model="scope.row.DPort" size="small" placeholder="如 80 或 8000-9000" style="width:100%" />
+              </template>
+            </el-table-column>
+            <el-table-column prop="Action" label="动作" width="120">
+              <template #default="scope">
+                <el-select v-model="scope.row.Action" size="small" style="width:100%">
+                  <el-option label="接受 accept" value="accept" />
+                  <el-option label="丢弃 drop" value="drop" />
+                  <el-option label="拒绝 reject" value="reject" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="90">
+              <template #default="scope">
+                <el-button size="small" type="danger" @click="removeFirewallRule(scope.$index)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <div style="display:flex; gap:8px; margin-top:10px">
+            <el-button type="primary" size="small" @click="addFirewallRule">新增规则</el-button>
+          </div>
+          <div v-if="fwNft" style="margin-top:12px">
+            <div style="font-weight:bold; margin-bottom:4px">渲染的 nftables：</div>
+            <pre class="tool-pre">{{ fwNft }}</pre>
+          </div>
+        </el-tab-pane>
+
+        <!-- ===== Tab 4: NAT Rules ===== -->
+        <el-tab-pane label="NAT 规则" name="nat">
+          <el-alert v-if="natDetail" type="error" :closable="false" show-icon :title="natDetail" style="margin-bottom:12px" />
+          <el-form inline size="small" label-width="70px" style="margin-bottom:10px">
+            <el-form-item>
+              <el-button type="primary" size="small" :loading="natLoading" @click="loadNAT">加载</el-button>
+              <el-button type="primary" size="small" :loading="natSaving" @click="saveNAT" style="margin-left:8px">保存</el-button>
+            </el-form-item>
+          </el-form>
+          <el-table :data="natRules" size="small" border style="width:100%" empty-text="暂无 NAT 规则">
+            <el-table-column prop="Type" label="类型" width="120">
+              <template #default="scope">
+                <el-select v-model="scope.row.Type" size="small" style="width:100%">
+                  <el-option label="源 NAT (masquerade)" value="masquerade" />
+                  <el-option label="端口映射 (portforward)" value="portforward" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column prop="Interface" label="出接口" width="120">
+              <template #default="scope">
+                <el-input v-model="scope.row.Interface" size="small" placeholder="如 eth0" style="width:100%" />
+              </template>
+            </el-table-column>
+            <el-table-column prop="Proto" label="协议" width="90">
+              <template #default="scope">
+                <el-select v-model="scope.row.Proto" size="small" placeholder="任意" style="width:100%">
+                  <el-option label="任意" value="" />
+                  <el-option label="tcp" value="tcp" />
+                  <el-option label="udp" value="udp" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column prop="SrcPort" label="源端口" width="120">
+              <template #default="scope">
+                <el-input v-model="scope.row.SrcPort" size="small" placeholder="如 80" style="width:100%" />
+              </template>
+            </el-table-column>
+            <el-table-column prop="DstAddr" label="目的地址" width="140">
+              <template #default="scope">
+                <el-input v-model="scope.row.DstAddr" size="small" placeholder="如 192.168.1.10" style="width:100%" />
+              </template>
+            </el-table-column>
+            <el-table-column prop="DstPort" label="目的端口" width="120">
+              <template #default="scope">
+                <el-input v-model="scope.row.DstPort" size="small" placeholder="如 80" style="width:100%" />
+              </template>
+            </el-table-column>
+            <el-table-column prop="ToPort" label="映射端口" width="120">
+              <template #default="scope">
+                <el-input v-model="scope.row.ToPort" size="small" placeholder="如 8080" style="width:100%" />
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="90">
+              <template #default="scope">
+                <el-button size="small" type="danger" @click="removeNATRule(scope.$index)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <div style="display:flex; gap:8px; margin-top:10px">
+            <el-button type="primary" size="small" @click="addNATRule">新增规则</el-button>
+          </div>
+          <div v-if="natNft" style="margin-top:12px">
+            <div style="font-weight:bold; margin-bottom:4px">渲染的 nftables：</div>
+            <pre class="tool-pre">{{ natNft }}</pre>
+          </div>
+        </el-tab-pane>
+
+        <!-- ===== Tab 5: Webfilter ===== -->
+        <el-tab-pane label="Web 过滤" name="webfilter">
+          <el-alert v-if="wfDetail" type="error" :closable="false" show-icon :title="wfDetail" style="margin-bottom:12px" />
+          <el-form inline size="small" label-width="70px" style="margin-bottom:10px">
+            <el-form-item>
+              <el-button type="primary" size="small" :loading="wfLoading" @click="loadWebfilter">加载规则</el-button>
+              <el-button type="primary" size="small" :loading="wfSaving" @click="saveWebfilter" style="margin-left:8px">保存规则</el-button>
+              <el-button type="success" size="small" :loading="wfApplying" @click="applyWebfilter" style="margin-left:8px">应用到系统</el-button>
+              <el-button size="small" :loading="wfStatusLoading" @click="loadWebfilterStatus" style="margin-left:8px">应用状态</el-button>
+            </el-form-item>
+          </el-form>
+          <el-table :data="wfRules" size="small" border style="width:100%" empty-text="暂无过滤规则">
+            <el-table-column prop="Domain" label="域名 / IP" min-width="220">
+              <template #default="scope">
+                <el-input v-model="scope.row.Domain" size="small" placeholder="如 example.com 或 1.2.3.4" style="width:100%" />
+              </template>
+            </el-table-column>
+            <el-table-column prop="Action" label="动作" width="120">
+              <template #default="scope">
+                <el-select v-model="scope.row.Action" size="small" style="width:100%">
+                  <el-option label="拦截 block" value="block" />
+                  <el-option label="允许 allow" value="allow" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column prop="Enabled" label="启用" width="80">
+              <template #default="scope">
+                <el-switch v-model="scope.row.Enabled" />
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="90">
+              <template #default="scope">
+                <el-button size="small" type="danger" @click="removeWebfilterRule(scope.$index)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <div style="display:flex; gap:8px; margin-top:10px">
+            <el-button type="primary" size="small" @click="addWebfilterRule">新增规则</el-button>
+          </div>
+          <div v-if="wfDnsmasq" style="margin-top:12px">
+            <div style="font-weight:bold; margin-bottom:4px">dnsmasq 配置预览：</div>
+            <pre class="tool-pre">{{ wfDnsmasq }}</pre>
+          </div>
+          <div v-if="wfApplyStatus" style="margin-top:12px">
+            <div style="font-weight:bold; margin-bottom:4px">最近应用状态：</div>
+            <pre class="tool-pre">{{ wfApplyStatus }}</pre>
+          </div>
+        </el-tab-pane>
       </el-tabs>
     </el-card>
   </div>
@@ -466,6 +642,232 @@ async function applyTimeSchedule() {
     showError(e, '应用时间段规则失败');
   } finally {
     tsApplying.value = false;
+  }
+}
+
+// ---------- Tab 3: Firewall Rules ----------
+const fwLoading = ref(false);
+const fwSaving = ref(false);
+const fwDetail = ref('');
+const fwRules = ref<{Chain: string; Src: string; Dst: string; Proto: string; DPort: string; Action: string}[]>([]);
+const fwNft = ref('');
+
+async function loadFirewall() {
+  fwLoading.value = true;
+  fwDetail.value = '';
+  fwNft.value = '';
+  try {
+    const res = await api.get('/api/v1/firewall/rules');
+    const d = res.data || {};
+    fwRules.value = d.rules || [];
+    if (d.nft) fwNft.value = d.nft;
+  } catch (e: any) {
+    fwDetail.value = errDetail(e) || '加载防火墙规则失败';
+    showError(e, '加载防火墙规则失败');
+  } finally {
+    fwLoading.value = false;
+  }
+}
+
+function addFirewallRule() {
+  fwRules.value.push({ Chain: 'input', Src: '', Dst: '', Proto: '', DPort: '', Action: 'accept' });
+}
+
+function removeFirewallRule(index: number) {
+  fwRules.value.splice(index, 1);
+}
+
+async function saveFirewall() {
+  fwSaving.value = true;
+  fwDetail.value = '';
+  fwNft.value = '';
+  try {
+    const res = await api.post('/api/v1/firewall/rules', { rules: fwRules.value });
+    const d = res.data || {};
+    fwRules.value = d.rules || [];
+    if (d.nft) fwNft.value = d.nft;
+  } catch (e: any) {
+    fwDetail.value = errDetail(e) || '保存防火墙规则失败';
+    showError(e, '保存防火墙规则失败');
+  } finally {
+    fwSaving.value = false;
+  }
+}
+
+// ---------- Tab 4: NAT Rules ----------
+const natLoading = ref(false);
+const natSaving = ref(false);
+const natDetail = ref('');
+const natRules = ref<{Type: string; Interface: string; Proto: string; SrcPort: string; DstAddr: string; DstPort: string; ToPort: string}[]>([]);
+const natNft = ref('');
+
+async function loadNAT() {
+  natLoading.value = true;
+  natDetail.value = '';
+  natNft.value = '';
+  try {
+    const res = await api.get('/api/v1/nat/rules');
+    const d = res.data || {};
+    natRules.value = (d.rules || []).map((r: any) => ({
+      Type: r.type ?? r.Type ?? 'masquerade',
+      Interface: r.interface ?? r.Interface ?? '',
+      Proto: r.proto ?? r.Proto ?? '',
+      SrcPort: r.src_port ?? r.SrcPort ?? '',
+      DstAddr: r.dst_addr ?? r.DstAddr ?? '',
+      DstPort: r.dst_port ?? r.DstPort ?? '',
+      ToPort: r.to_port ?? r.ToPort ?? '',
+    }));
+    if (d.nft) natNft.value = d.nft;
+  } catch (e: any) {
+    natDetail.value = errDetail(e) || '加载 NAT 规则失败';
+    showError(e, '加载 NAT 规则失败');
+  } finally {
+    natLoading.value = false;
+  }
+}
+
+function addNATRule() {
+  natRules.value.push({ Type: 'masquerade', Interface: '', Proto: '', SrcPort: '', DstAddr: '', DstPort: '', ToPort: '' });
+}
+
+function removeNATRule(index: number) {
+  natRules.value.splice(index, 1);
+}
+
+async function saveNAT() {
+  natSaving.value = true;
+  natDetail.value = '';
+  natNft.value = '';
+  try {
+    const wire = natRules.value.map((r) => ({
+      type: r.Type, interface: r.Interface, proto: r.Proto,
+      src_port: r.SrcPort, dst_addr: r.DstAddr, dst_port: r.DstPort, to_port: r.ToPort,
+    }));
+    const res = await api.post('/api/v1/nat/rules', { rules: wire });
+    const d = res.data || {};
+    natRules.value = (d.rules || []).map((r: any) => ({
+      Type: r.type ?? r.Type ?? 'masquerade',
+      Interface: r.interface ?? r.Interface ?? '',
+      Proto: r.proto ?? r.Proto ?? '',
+      SrcPort: r.src_port ?? r.SrcPort ?? '',
+      DstAddr: r.dst_addr ?? r.DstAddr ?? '',
+      DstPort: r.dst_port ?? r.DstPort ?? '',
+      ToPort: r.to_port ?? r.ToPort ?? '',
+    }));
+    if (d.nft) natNft.value = d.nft;
+  } catch (e: any) {
+    natDetail.value = errDetail(e) || '保存 NAT 规则失败';
+    showError(e, '保存 NAT 规则失败');
+  } finally {
+    natSaving.value = false;
+  }
+}
+
+// ---------- Tab 5: Webfilter ----------
+const wfLoading = ref(false);
+const wfSaving = ref(false);
+const wfApplying = ref(false);
+const wfStatusLoading = ref(false);
+const wfDetail = ref('');
+const wfRules = ref<{Domain: string; Action: string; Enabled: boolean}[]>([]);
+const wfDnsmasq = ref('');
+const wfApplyStatus = ref<string>('');
+
+async function loadWebfilter() {
+  wfLoading.value = true;
+  wfDetail.value = '';
+  wfDnsmasq.value = '';
+  try {
+    const res = await api.get('/api/v1/webfilter/rules');
+    const d = res.data || {};
+    wfRules.value = (d.rules || []).map((r: any) => ({
+      Domain: r.domain ?? r.Domain ?? '',
+      Action: r.action ?? r.Action ?? 'block',
+      Enabled: r.enabled ?? r.Enabled ?? false,
+    }));
+    if (d.dnsmasq) wfDnsmasq.value = d.dnsmasq;
+  } catch (e: any) {
+    wfDetail.value = errDetail(e) || '加载 Web 过滤规则失败';
+    showError(e, '加载 Web 过滤规则失败');
+  } finally {
+    wfLoading.value = false;
+  }
+}
+
+function addWebfilterRule() {
+  wfRules.value.push({ Domain: '', Action: 'block', Enabled: true });
+}
+
+function removeWebfilterRule(index: number) {
+  wfRules.value.splice(index, 1);
+}
+
+async function saveWebfilter() {
+  wfSaving.value = true;
+  wfDetail.value = '';
+  wfDnsmasq.value = '';
+  try {
+    const wire = wfRules.value.map((r) => ({ domain: r.Domain, action: r.Action, enabled: r.Enabled }));
+    const res = await api.post('/api/v1/webfilter/rules', { rules: wire });
+    const d = res.data || {};
+    wfRules.value = (d.rules || []).map((r: any) => ({
+      Domain: r.domain ?? r.Domain ?? '',
+      Action: r.action ?? r.Action ?? 'block',
+      Enabled: r.enabled ?? r.Enabled ?? false,
+    }));
+    if (d.dnsmasq) wfDnsmasq.value = d.dnsmasq;
+    if (d.detail) {
+      wfDetail.value = d.detail;
+      if (d.applied) ElMessage.success(d.detail);
+      else ElMessage.warning(d.detail);
+    }
+  } catch (e: any) {
+    wfDetail.value = errDetail(e) || '保存 Web 过滤规则失败';
+    showError(e, '保存 Web 过滤规则失败');
+  } finally {
+    wfSaving.value = false;
+  }
+}
+
+async function applyWebfilter() {
+  wfApplying.value = true;
+  wfDetail.value = '';
+  wfApplyStatus.value = '';
+  try {
+    const wire = wfRules.value.map((r) => ({ domain: r.Domain, action: r.Action, enabled: r.Enabled }));
+    const res = await api.post('/api/v1/webfilter/apply', { rules: wire });
+    const d = res.data || {};
+    if (d.ok) {
+      ElMessage.success('应用成功');
+      if (d.script) wfApplyStatus.value = d.script;
+    } else {
+      wfDetail.value = '应用失败';
+    }
+  } catch (e: any) {
+    wfDetail.value = errDetail(e) || '应用 Web 过滤失败';
+    showError(e, '应用 Web 过滤失败');
+  } finally {
+    wfApplying.value = false;
+  }
+}
+
+async function loadWebfilterStatus() {
+  wfStatusLoading.value = true;
+  wfApplyStatus.value = '';
+  try {
+    const res = await api.get('/api/v1/webfilter/apply-status');
+    const d = res.data || {};
+    const parts: string[] = [];
+    parts.push(`ok: ${d.ok}`);
+    if (d.error) parts.push(`error: ${d.error}`);
+    if (d.script) parts.push(`script:\n${d.script}`);
+    if (d.applied_at) parts.push(`applied_at: ${new Date(d.applied_at * 1000).toLocaleString()}`);
+    wfApplyStatus.value = parts.join('\n');
+  } catch (e: any) {
+    wfApplyStatus.value = errDetail(e) || '获取应用状态失败';
+    showError(e, '获取应用状态失败');
+  } finally {
+    wfStatusLoading.value = false;
   }
 }
 
