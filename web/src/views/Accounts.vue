@@ -136,6 +136,103 @@
         </el-card>
       </el-tab-pane>
 
+      <el-tab-pane label="流量计费/账单" name="accounting">
+        <el-card shadow="never" style="margin-bottom:16px">
+          <template #header>计费状态</template>
+          <el-alert v-if="acctError" type="error" :closable="false" show-icon :title="acctError" style="margin-bottom:10px" />
+          <el-descriptions :column="2" border>
+            <el-descriptions-item label="连接计费">
+              <el-tag :type="acctStatus.acct_enabled ? 'success' : 'danger'">
+                {{ acctStatus.acct_enabled ? '已启用' : '未启用' }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="数据可用">
+              <el-tag :type="acctStatus.available ? 'success' : 'warning'">
+                {{ acctStatus.available ? '可用' : '不可用' }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="连接总数">{{ acctStatus.conntrack_total }}</el-descriptions-item>
+            <el-descriptions-item label="带字节字段">{{ acctStatus.entries_with_bytes }}</el-descriptions-item>
+          </el-descriptions>
+          <div v-if="acctStatus.reason" style="margin-top:8px; color:#f56c6c; font-size:13px">{{ acctStatus.reason }}</div>
+        </el-card>
+
+        <el-card shadow="never" style="margin-bottom:16px">
+          <template #header>用量报表</template>
+          <el-table :data="acctReport" border style="width:100%">
+            <el-table-column prop="username" label="账号" width="150" />
+            <el-table-column prop="used_mb" label="已用(MB)" width="110" />
+            <el-table-column prop="quota_mb" label="配额(MB)" width="110">
+              <template #default="{ row }">{{ row.quota_mb > 0 ? row.quota_mb : '不限' }}</template>
+            </el-table-column>
+            <el-table-column prop="percent" label="使用率" width="100">
+              <template #default="{ row }">{{ row.percent }}%</template>
+            </el-table-column>
+            <el-table-column label="超量" width="90">
+              <template #default="{ row }">
+                <el-tag :type="row.exceeded ? 'danger' : 'success'" size="small">
+                  {{ row.exceeded ? '超额' : '正常' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="last_seen" label="最近活跃" width="170">
+              <template #default="{ row }">
+                {{ row.last_seen ? new Date(row.last_seen * 1000).toLocaleString() : '-' }}
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-if="!acctReport.length" description="暂无用量数据" :image-size="60" />
+        </el-card>
+
+        <el-card shadow="never" style="margin-bottom:16px">
+          <template #header>账单管理</template>
+          <div style="display:flex; gap:8px; margin-bottom:12px; align-items:center">
+            <el-button type="primary" :loading="generatingBills" @click="generateBills">生成账单</el-button>
+            <el-input-number v-model="periodDays" :min="1" :max="365" :step="1" style="width:120px" />
+            <span style="color:#666; font-size:13px">周期天数</span>
+          </div>
+          <el-alert v-if="billGenError" type="error" :closable="false" show-icon :title="billGenError" style="margin-bottom:10px" />
+          <el-alert v-if="skippedBills.length" type="warning" :closable="false" show-icon style="margin-bottom:10px">
+            <div v-for="(s, i) in skippedBills" :key="i">{{ s }}</div>
+          </el-alert>
+          <el-table :data="bills" border style="width:100%">
+            <el-table-column prop="id" label="账单ID" width="200" />
+            <el-table-column prop="username" label="账号" width="120" />
+            <el-table-column prop="plan_id" label="套餐" width="100" />
+            <el-table-column prop="amount" label="金额(元)" width="100">
+              <template #default="{ row }">{{ row.amount.toFixed(2) }}</template>
+            </el-table-column>
+            <el-table-column prop="used_mb" label="已用(MB)" width="100" />
+            <el-table-column prop="quota_mb" label="配额(MB)" width="100">
+              <template #default="{ row }">{{ row.quota_mb > 0 ? row.quota_mb : '不限' }}</template>
+            </el-table-column>
+            <el-table-column prop="status" label="状态" width="90">
+              <template #default="{ row }">
+                <el-tag :type="row.status === 'paid' ? 'success' : row.status === 'overdue' ? 'danger' : row.status === 'waived' ? 'info' : 'warning'" size="small">
+                  {{ row.status }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="created_at" label="创建时间" width="170">
+              <template #default="{ row }">
+                {{ row.created_at ? new Date(row.created_at * 1000).toLocaleString() : '-' }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="period_start" label="周期开始" width="170">
+              <template #default="{ row }">
+                {{ row.period_start ? new Date(row.period_start * 1000).toLocaleString() : '-' }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="period_end" label="周期结束" width="170">
+              <template #default="{ row }">
+                {{ row.period_end ? new Date(row.period_end * 1000).toLocaleString() : '-' }}
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-if="!bills.length" description="暂无账单" :image-size="60" />
+        </el-card>
+      </el-tab-pane>
+
       <!-- 登录方式 -->
       <el-tab-pane label="登录方式" name="login">
         <!-- SMS 卡片 -->
@@ -695,10 +792,89 @@ async function savePlans() {
   }
 }
 
+const periodDays = ref(30);
+const acctStatus = reactive({
+  acct_enabled: false,
+  conntrack_total: 0,
+  entries_with_bytes: 0,
+  available: false,
+  reason: '',
+});
+const acctReport = ref<any[]>([]);
+const acctError = ref('');
+const bills = ref<any[]>([]);
+const generatingBills = ref(false);
+const billGenError = ref('');
+const skippedBills = ref<string[]>([]);
+
+async function loadAccountingStatus() {
+  acctError.value = '';
+  try {
+    const res = await api.get('/api/v1/accounting/status');
+    const d = res.data || {};
+    acctStatus.acct_enabled = !!d.acct_enabled;
+    acctStatus.conntrack_total = d.conntrack_total || 0;
+    acctStatus.entries_with_bytes = d.entries_with_bytes || 0;
+    acctStatus.available = !!d.available;
+    acctStatus.reason = d.reason || '';
+  } catch (e: any) {
+    showError(e, '加载计费状态失败');
+    acctError.value = e?.response?.data?.detail || e?.response?.data?.message || e.message;
+  }
+}
+
+async function loadAccountingReport() {
+  try {
+    const res = await api.get('/api/v1/accounting/report');
+    acctReport.value = res.data?.report || [];
+  } catch (e: any) {
+    showError(e, '加载用量报表失败');
+  }
+}
+
+async function loadBills() {
+  try {
+    const res = await api.get('/api/v1/billing/bills');
+    bills.value = res.data?.bills || [];
+  } catch (e: any) {
+    showError(e, '加载账单列表失败');
+  }
+}
+
+async function generateBills() {
+  try {
+    await ElMessageBox.confirm(`确认生成周期为 ${periodDays.value} 天的账单？`, '生成账单', { type: 'warning' });
+  } catch {
+    return;
+  }
+  generatingBills.value = true;
+  billGenError.value = '';
+  skippedBills.value = [];
+  try {
+    const res = await api.post('/api/v1/billing/bills/generate', { period_days: periodDays.value });
+    const d = res.data || {};
+    bills.value = d.generated || [];
+    skippedBills.value = d.skipped || [];
+    ElMessage.success(`已生成 ${d.count || 0} 条账单`);
+    await loadBills();
+  } catch (e: any) {
+    const msg = e?.response?.data?.detail || e?.response?.data?.message || e.message;
+    ElMessage.error(msg);
+    billGenError.value = msg;
+  } finally {
+    generatingBills.value = false;
+  }
+}
+
+async function loadAccountingAll() {
+  await Promise.all([loadAccountingStatus(), loadAccountingReport(), loadBills()]);
+}
+
 onMounted(() => {
   loadAll();
   loadSmsConfig();
   loadWechatConfig();
+  loadAccountingAll();
 });
 </script>
 

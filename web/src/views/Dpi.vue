@@ -320,7 +320,7 @@ async function saveDpiRules() {
     ElMessage.warning('请先添加规则');
     return;
   }
-  savingDpiRules = true;
+  savingDpiRules.value = true;
   try {
     const res = await api.post('/api/v1/dpi/rules', {
       rules: dpiRules,
@@ -335,7 +335,7 @@ async function saveDpiRules() {
     ElMessage.error(msg);
     rulesError.value = msg;
   } finally {
-    savingDpiRules = false;
+    savingDpiRules.value = false;
   }
 }
 
@@ -346,7 +346,7 @@ const classifyResult = ref<any>(null);
 const classifyError = ref('');
 
 async function runClassify() {
-  classifying = true;
+  classifying.value = true;
   classifyResult.value = null;
   classifyError.value = '';
   try {
@@ -359,7 +359,7 @@ async function runClassify() {
     ElMessage.error(msg);
     classifyError.value = msg;
   } finally {
-    classifying = false;
+    classifying.value = false;
   }
 }
 

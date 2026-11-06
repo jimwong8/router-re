@@ -406,6 +406,46 @@
             <pre class="tool-pre">{{ wfApplyStatus }}</pre>
           </div>
         </el-tab-pane>
+        <!-- ===== Tab 6: 防火墙日志分析 ===== -->
+        <el-tab-pane label="防火墙日志分析" name="fwlog">
+          <el-alert v-if="fwlogDetail" type="error" :closable="false" show-icon :title="fwlogDetail" style="margin-bottom:12px" />
+          <div style="display:flex; gap:8px; margin-bottom:12px">
+            <el-button type="primary" size="small" :loading="fwlogLoading" @click="loadFwLogAnalysis">加载分析</el-button>
+            <el-button size="small" :loading="fwlogSuggLoading" @click="loadFwLogSuggestions">加载封禁建议</el-button>
+          </div>
+
+          <el-alert v-if="fwlogAvailable === false" type="warning" :closable="false" show-icon
+            :title="fwlogReason || '防火墙日志不可用'" style="margin-bottom:12px" />
+
+          <el-descriptions v-if="fwlogSummary" :column="4" border size="small" style="margin-bottom:12px">
+            <el-descriptions-item label="日志条数">{{ fwlogCount }}</el-descriptions-item>
+            <el-descriptions-item v-for="(v, k) in fwlogSummary" :key="k" :label="String(k)">
+              <pre style="margin:0; white-space:pre-wrap">{{ typeof v === 'object' ? JSON.stringify(v) : v }}</pre>
+            </el-descriptions-item>
+          </el-descriptions>
+
+          <el-divider content-position="left">Top Talkers（按丢弃数降序）</el-divider>
+          <el-table :data="fwlogTopTalkers" size="small" border style="width:100%" empty-text="暂无数据">
+            <el-table-column prop="ip" label="源 IP" min-width="160" />
+            <el-table-column prop="total" label="总数" width="90" />
+            <el-table-column prop="dropped" label="丢弃" width="90" />
+            <el-table-column prop="bytes" label="字节" width="120" />
+          </el-table>
+
+          <el-divider content-position="left">可疑来源（60s 窗口内 drop>50）</el-divider>
+          <el-tag v-for="ip in fwlogSuspicious" :key="ip" type="danger" style="margin:0 6px 6px 0">{{ ip }}</el-tag>
+          <el-empty v-if="!fwlogSuspicious.length" description="无可疑来源" :image-size="40" style="padding:8px 0" />
+
+          <el-divider content-position="left">封禁建议（仅建议，不会自动封禁）</el-divider>
+          <el-alert type="info" :closable="false" show-icon title="这些只是建议，不会自动封禁；请手动加入防火墙规则。" style="margin-bottom:8px" />
+          <el-table :data="fwlogSuggestions" size="small" border style="width:100%" empty-text="暂无建议">
+            <el-table-column prop="src_ip" label="源 IP" min-width="160" />
+            <el-table-column prop="count" label="丢弃次数" width="110" />
+            <el-table-column prop="reason" label="原因" min-width="180" />
+          </el-table>
+          <div v-if="fwlogNote" style="margin-top:8px; font-size:13px; color:#606266">{{ fwlogNote }}</div>
+          <div v-if="fwlogApplied !== null" style="margin-top:4px; font-size:13px; color:#606266">applied={{ fwlogApplied }}</div>
+        </el-tab-pane>
       </el-tabs>
     </el-card>
   </div>
@@ -872,6 +912,65 @@ async function loadWebfilterStatus() {
 }
 
 onMounted(() => { loadDDoS(); loadTimeSchedule(); });
+
+// ---------- 防火墙日志分析 ----------
+// GET /api/v1/firewall/log/analysis -> {available, reason?, count, summary, top_talkers, suspicious, suggestions}
+// GET /api/v1/firewall/log/suggestions -> {available, reason?, suggestions, applied, note}
+const fwlogLoading = ref(false);
+const fwlogSuggLoading = ref(false);
+const fwlogDetail = ref('');
+const fwlogAvailable = ref<boolean | null>(null);
+const fwlogReason = ref('');
+const fwlogCount = ref(0);
+const fwlogSummary = ref<any>(null);
+const fwlogTopTalkers = ref<any[]>([]);
+const fwlogSuspicious = ref<string[]>([]);
+const fwlogSuggestions = ref<any[]>([]);
+const fwlogNote = ref('');
+const fwlogApplied = ref<boolean | null>(null);
+
+function fwlogErr(e: any, fallback: string) {
+  fwlogDetail.value = errDetail(e) || fallback;
+  showError(e, fallback);
+}
+
+async function loadFwLogAnalysis() {
+  fwlogLoading.value = true;
+  fwlogDetail.value = '';
+  try {
+    const res = await api.get('/api/v1/firewall/log/analysis');
+    const d = res.data || {};
+    fwlogAvailable.value = d.available !== false;
+    fwlogReason.value = d.reason || '';
+    fwlogCount.value = d.count || 0;
+    fwlogSummary.value = d.summary || null;
+    fwlogTopTalkers.value = d.top_talkers || [];
+    fwlogSuspicious.value = d.suspicious || [];
+    fwlogSuggestions.value = d.suggestions || [];
+  } catch (e: any) {
+    fwlogErr(e, '加载防火墙日志分析失败');
+  } finally {
+    fwlogLoading.value = false;
+  }
+}
+
+async function loadFwLogSuggestions() {
+  fwlogSuggLoading.value = true;
+  fwlogDetail.value = '';
+  try {
+    const res = await api.get('/api/v1/firewall/log/suggestions');
+    const d = res.data || {};
+    fwlogAvailable.value = d.available !== false;
+    fwlogReason.value = d.reason || '';
+    fwlogSuggestions.value = d.suggestions || [];
+    fwlogApplied.value = (d.applied === undefined ? null : !!d.applied);
+    fwlogNote.value = d.note || '';
+  } catch (e: any) {
+    fwlogErr(e, '加载封禁建议失败');
+  } finally {
+    fwlogSuggLoading.value = false;
+  }
+}
 </script>
 
 <style scoped>

@@ -438,7 +438,7 @@ const iperf = reactive({
   protocol: 'tcp',
 });
 const iperfLoading = ref(false);
-const iperfResult: any = null;
+const iperfResult = ref<any>(null);
 let iperfPollTimer: ReturnType<typeof setInterval> | null = null;
 
 async function runIperf() {
@@ -451,7 +451,7 @@ async function runIperf() {
       protocol: iperf.protocol,
     });
     const d = res.data || {};
-    iperfResult = d;
+    iperfResult.value = d;
     if (d.ok) {
       ElMessage.success('IPerf3 测速完成');
     } else {
@@ -468,7 +468,7 @@ async function refreshIperfStatus() {
   try {
     const res = await api.get('/api/v1/tools/iperf/status');
     const d = res.data || {};
-    iperfResult = d;
+    iperfResult.value = d;
   } catch (e: any) {
     showError(e, '获取 IPerf3 状态失败');
   }
@@ -480,7 +480,7 @@ async function refreshIperfStatus() {
 const subnet = reactive({
   cidr: '192.168.1.0/24',
 });
-const subnetResult: any = null;
+const subnetResult = ref<any>(null);
 
 async function calcSubnet() {
   if (!subnet.cidr.trim()) {
@@ -492,7 +492,7 @@ async function calcSubnet() {
       params: { cidr: subnet.cidr.trim() },
     });
     const d = res.data || {};
-    subnetResult = d;
+    subnetResult.value = d;
     ElMessage.success('子网计算完成');
   } catch (e: any) {
     showError(e, '子网计算失败');
