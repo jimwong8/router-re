@@ -82,6 +82,19 @@
       <pre class="report-pre">{{ report || '暂无策略，报告为空' }}</pre>
     </el-card>
 
+    <!-- 配额报表（/api/v1/quota/report） -->
+    <el-card shadow="never">
+      <template #header>
+        <div style="display:flex; justify-content:space-between; align-items:center">
+          <span>配额报表</span>
+          <el-button size="small" :loading="reportLoading" @click="loadQuotaReport">刷新</el-button>
+        </div>
+      </template>
+      <el-alert v-if="reportErr" type="error" :closable="false" show-icon :title="reportErr" style="margin-bottom:12px" />
+      <div style="margin-bottom:8px; font-size:13px; color:#606266">策略数量：{{ quotaReportCount }}</div>
+      <pre class="report-pre">{{ quotaReportLines.length ? quotaReportLines.join('\n') : '暂无报表数据' }}</pre>
+    </el-card>
+
     <!-- 内核 nft 表内容 -->
     <el-card v-if="nftContent" shadow="never">
       <template #header><span>内核 router_quota 表内容</span></template>
@@ -274,7 +287,27 @@ async function nftRefresh() {
   }
 }
 
-onMounted(load);
+const reportLoading = ref(false);
+const reportErr = ref('');
+const quotaReportCount = ref(0);
+const quotaReportLines = ref<string[]>([]);
+
+async function loadQuotaReport() {
+  reportLoading.value = true;
+  reportErr.value = '';
+  try {
+    const res = await api.get('/api/v1/quota/report');
+    quotaReportCount.value = res.data?.count ?? 0;
+    quotaReportLines.value = res.data?.report || [];
+  } catch (e: any) {
+    reportErr.value = e?.response?.data?.detail || e?.response?.data?.message || e?.message || '加载配额报表失败';
+    ElMessage.error(reportErr.value);
+  } finally {
+    reportLoading.value = false;
+  }
+}
+
+onMounted(() => { load(); loadQuotaReport(); });
 </script>
 
 <style scoped>

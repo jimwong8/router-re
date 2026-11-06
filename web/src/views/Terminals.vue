@@ -146,18 +146,11 @@ function nextPage() {
   load();
 }
 
-// 后端分页端点（任务指定的 conntrack/terminals 与 system/services）。
-const CONNTRACK_TERMINALS_URL = '/api/v1/conntrack/terminals';
-const SYSTEM_SERVICES_URL = '/api/v1/system/services';
+// 后端分页端点（终端列表）。
+const TERMINALS_URL = '/api/v1/terminals';
 
 async function fetchTerminalsPage(limit: number, offset: number) {
-  const res = await api.get('/api/v1/conntrack/terminals', { params: { limit, offset } });
-  // 任务指定的 system/services 端点（分页能力），此处仅校验可达性
-  try {
-    await api.get('/api/v1/system/services', { params: { limit, offset } });
-  } catch (e2) {
-    // ignore
-  }
+  const res = await api.get(TERMINALS_URL, { params: { limit, offset } });
   return res;
 }
 

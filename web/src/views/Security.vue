@@ -71,6 +71,41 @@
       />
     </el-card>
 
+    <!--  攻击防护卡片 -->
+    <el-card shadow="never" style="margin-bottom:20px">
+      <template #header>
+        <div style="display:flex; justify-content:space-between; align-items:center">
+          <span>攻击防护（/api/v1/security/attack-guard）</span>
+          <el-button type="primary" size="small" :loading="attackGuardSaving" @click="saveAttackGuard">保存下发</el-button>
+        </div>
+      </template>
+      <el-form :model="attackGuardForm" label-width="130px">
+        <el-form-item label="启用">
+          <el-switch v-model="attackGuardForm.enabled" />
+        </el-form-item>
+        <el-form-item label="SYN Flood PPS">
+          <el-input-number v-model="attackGuardForm.syn_flood_pps" :min="1" :max="1000000" style="width:160px" />
+          <span style="color:#909399; font-size:12px; margin-left:8px">每秒 SYN 包阈值</span>
+        </el-form-item>
+        <el-form-item label="ICMP Flood PPS">
+          <el-input-number v-model="attackGuardForm.icmp_flood_pps" :min="1" :max="1000000" style="width:160px" />
+          <span style="color:#909399; font-size:12px; margin-left:8px">每秒 ICMP 包阈值</span>
+        </el-form-item>
+        <el-form-item label="单 IP 连接限制">
+          <el-input-number v-model="attackGuardForm.conn_limit_per_ip" :min="1" :max="1000000" style="width:160px" />
+          <span style="color:#909399; font-size:12px; margin-left:8px">每 IP 最大并发连接数</span>
+        </el-form-item>
+      </el-form>
+      <el-alert v-if="attackGuardError" :title="attackGuardError" type="error" :closable="false" style="margin:12px 0" />
+      <div v-if="attackGuardNft" style="margin-top:12px">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px">
+          <span>nftables 规则</span>
+          <el-button type="primary" link size="small" @click="copyAttackGuardNft">复制</el-button>
+        </div>
+        <pre style="background:#1e1e1e; color:#d4d4d4; padding:12px; border-radius:4px; min-height:80px; white-space:pre-wrap; word-break:break-all">{{ attackGuardNft }}</pre>
+      </div>
+    </el-card>
+
     <!--  ARP 防护卡片 -->
     <el-card shadow="never">
       <template #header><span>ARP 欺骗防护</span></template>
@@ -129,6 +164,61 @@ const saving = ref(false);
 const form = ref({
   src_ip: '', dst_ip: '', dst_port: 0, proto: 'tcp', action: 'accept', name: '',
 });
+
+const attackGuardForm = ref({
+  enabled: false,
+  syn_flood_pps: 1000,
+  icmp_flood_pps: 1000,
+  conn_limit_per_ip: 100,
+});
+const attackGuardSaving = ref(false);
+const attackGuardError = ref('');
+const attackGuardNft = ref('');
+
+async function loadAttackGuard() {
+  try {
+    const res = await api.get('/api/v1/security/attack-guard');
+    const cfg = res.data?.config || {};
+    attackGuardForm.value = {
+      enabled: !!cfg.enabled,
+      syn_flood_pps: cfg.syn_flood_pps || 1000,
+      icmp_flood_pps: cfg.icmp_flood_pps || 1000,
+      conn_limit_per_ip: cfg.conn_limit_per_ip || 100,
+    };
+    attackGuardNft.value = res.data?.nft || '';
+  } catch (e: any) {
+    attackGuardError.value = e?.response?.data?.detail || e?.response?.data?.message || e.message;
+    ElMessage.error(attackGuardError.value);
+  }
+}
+
+async function saveAttackGuard() {
+  attackGuardSaving.value = true;
+  attackGuardError.value = '';
+  try {
+    const res = await api.post('/api/v1/security/attack-guard', attackGuardForm.value);
+    const d = res.data || {};
+    attackGuardNft.value = d.nft || '';
+    if (d.applied) {
+      ElMessage.success(d.detail || '攻击防护已下发');
+    } else {
+      ElMessage.warning(d.detail || '已保存但未下发');
+    }
+  } catch (e: any) {
+    attackGuardError.value = e?.response?.data?.detail || e?.response?.data?.message || e.message;
+    ElMessage.error(attackGuardError.value);
+  } finally {
+    attackGuardSaving.value = false;
+  }
+}
+
+function copyAttackGuardNft() {
+  navigator.clipboard.writeText(attackGuardNft.value || '').then(() => {
+    ElMessage.success('已复制到剪贴板');
+  }).catch(() => {
+    ElMessage.error('复制失败');
+  });
+}
 
 const arpIface = ref('');
 const arpSysctls = ref<Record<string, string>>({});
@@ -250,6 +340,7 @@ onMounted(() => {
   loadRules();
   loadIfaces();
   loadArpStatus();
+  loadAttackGuard();
 });
 </script>
 

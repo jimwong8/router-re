@@ -204,6 +204,39 @@
       <pre v-if="htbScript" class="cmd-output" style="margin-top:10px; max-height:300px; overflow:auto">{{ htbScript }}</pre>
       <el-empty v-if="!htbScript && !htbMsg" description="保存配置或 Dry-run 后此处显示渲染脚本" :image-size="50" />
     </el-card>
+    <!-- HTB 限速规则（只读） -->
+    <el-card shadow="never" style="margin-top:16px">
+      <template #header>
+        <div style="display:flex; justify-content:space-between; align-items:center">
+          <span>HTB 限速规则（/api/v1/htb/limit-rules）</span>
+          <div style="display:flex; gap:8px; align-items:center">
+            <el-input v-model="limitRulesIface" placeholder="接口" style="width:120px" />
+            <el-button size="small" :loading="limitRulesLoading" @click="loadLimitRules">刷新</el-button>
+          </div>
+        </div>
+      </template>
+      <el-alert v-if="limitRulesError" :title="limitRulesError" type="error" :closable="false" style="margin-bottom:10px" />
+      <el-descriptions v-if="limitRulesData.iface" :column="2" border style="margin-bottom:10px">
+        <el-descriptions-item label="接口">{{ limitRulesData.iface }}</el-descriptions-item>
+        <el-descriptions-item label="根带宽 (Mbit)">{{ limitRulesData.root_rate_mbit }}</el-descriptions-item>
+        <el-descriptions-item label="默认类">{{ limitRulesData.default_class || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="启用">{{ limitRulesData.enabled ? '是' : '否' }}</el-descriptions-item>
+      </el-descriptions>
+      <el-table v-if="limitRulesData.classes && limitRulesData.classes.length" :data="limitRulesData.classes" border size="small" style="width:100%">
+        <el-table-column prop="name" label="名称" width="120" />
+        <el-table-column prop="rate_mbit" label="保证 (Mbit)" width="110" />
+        <el-table-column prop="ceil_mbit" label="峰值 (Mbit)" width="110" />
+        <el-table-column prop="priority" label="优先级" width="80" />
+        <el-table-column prop="match_mark" label="fwmark" width="90" />
+        <el-table-column label="匹配端口" min-width="120">
+          <template #default="{ row }">{{ (row.match_ports || []).join(',') || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="匹配目的 IP" min-width="140">
+          <template #default="{ row }">{{ (row.match_dst_ips || []).join(',') || '-' }}</template>
+        </el-table-column>
+      </el-table>
+      <el-empty v-if="!limitRulesData.iface && !limitRulesError" description="请输入接口并点击刷新" :image-size="60" />
+    </el-card>
 </template>
 
 <script setup lang="ts">
@@ -576,10 +609,31 @@ function errDetail(e: any, fallback: string): string {
   return parts.length ? parts.join(' ') : fallback;
 }
 
+const limitRulesIface = ref('eth0');
+const limitRulesLoading = ref(false);
+const limitRulesError = ref('');
+const limitRulesData = ref<any>({});
+
+async function loadLimitRules() {
+  limitRulesLoading.value = true;
+  limitRulesError.value = '';
+  limitRulesData.value = {};
+  try {
+    const res = await api.get('/api/v1/htb/limit-rules', { params: { iface: limitRulesIface.value } });
+    limitRulesData.value = res.data || {};
+  } catch (e: any) {
+    limitRulesError.value = e?.response?.data?.detail || e?.response?.data?.message || e.message;
+    ElMessage.error(limitRulesError.value);
+  } finally {
+    limitRulesLoading.value = false;
+  }
+}
+
 onMounted(() => {
   load();
   loadClientLimits();
   loadHtbConfig();
+  loadLimitRules();
 });
 </script>
 

@@ -71,6 +71,7 @@
         <div style="display:flex; justify-content:space-between; align-items:center">
           <span>动态域名 DDNS</span>
           <div>
+            <el-button size="small" :loading="checkingDDNS" @click="checkDDNS">检查 DDNS</el-button>
             <el-button size="small" :loading="checking" @click="checkIP">重新检测</el-button>
             <el-button type="primary" size="small" @click="openNew">新增记录</el-button>
           </div>
@@ -93,6 +94,29 @@
           </template>
           <span v-else style="color:#909399">检测中…</span>
         </div>
+      </el-card>
+
+      <!-- DDNS 检查结果 -->
+      <el-card shadow="never" style="margin-bottom:16px; background:#f5f7fa" v-if="checkResult && checkResult.records && checkResult.records.length > 0">
+        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap">
+          <span style="font-weight:600">DDNS 检查结果：</span>
+          <el-tag :type="checkResult.need_update ? 'warning' : 'success'" size="small">
+            {{ checkResult.need_update ? '有记录需要更新' : '所有记录IP一致' }}
+          </el-tag>
+          <span v-if="checkResult.current_ip" style="color:#409eff">当前公网 IP：{{ checkResult.current_ip }}</span>
+          <span v-if="checkResult.note" style="color:#909399; font-size:12px; margin-left:8px">{{ checkResult.note }}</span>
+        </div>
+        <el-table :data="checkResult.records" size="small" style="width:100%; margin-top:8px">
+          <el-table-column prop="domain" label="域名" />
+          <el-table-column prop="last_ip" label="记录 IP" width="140" />
+          <el-table-column label="是否需要更新" width="120">
+            <template #default="{ row }">
+              <el-tag :type="row.needs_update ? 'danger' : 'success'" size="small">
+                {{ row.needs_update ? '需要更新' : '一致' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+        </el-table>
       </el-card>
 
       <el-table :data="records" v-loading="loading" size="small" style="width:100%" empty-text="还没有 DDNS 记录">
@@ -196,6 +220,7 @@ interface DdnsStatus {
 const loading = ref(false);
 const saving = ref(false);
 const checking = ref(false);
+const checkingDDNS = ref(false);
 const dialog = ref(false);
 const editing = ref(false);
 const editIndex = ref(-1);
@@ -209,6 +234,7 @@ const source = ref('');
 const needUpdate = ref(false);
 const note = ref('');
 const checkReason = ref('');
+const checkResult = ref<any>({ need_update: false, current_ip: '', records: [] as any[], note: '' });
 
 const ddnsConfig = ref<DdnsConfig>({ provider: '', domain: '', subdomain: '', token: '', record_id: '', zone_id: '', enabled: true });
 const ddnsStatus = ref<DdnsStatus>({ status: '', ip: '', provider: '', detail: '', ok: false });
@@ -288,6 +314,41 @@ async function checkIP() {
   }
 }
 
+async function checkDDNS() {
+  checkingDDNS.value = true;
+  checkResult.value = { need_update: false, current_ip: '', records: [], note: '' };
+  try {
+    const res = await api.get('/api/v1/ddns/check');
+    const d = res.data || {};
+    if (!d.available) {
+      checkResult.value = {
+        need_update: false,
+        current_ip: '',
+        records: [],
+        note: d.reason || d.detail || '检查不可用',
+      };
+      ElMessage.warning(checkResult.value.note);
+      return;
+    }
+    checkResult.value = {
+      need_update: !!d.need_update,
+      current_ip: d.current_ip || '',
+      records: d.records || [],
+      note: d.note || '',
+    };
+    if (d.need_update) {
+      ElMessage.warning('有 DDNS 记录的 IP 已变化，需要更新');
+    } else {
+      ElMessage.success('所有 DDNS 记录 IP 一致，无需更新');
+    }
+  } catch (e: any) {
+    const msg = e?.response?.data?.detail || e?.response?.data?.message || e?.message || 'DDNS 检查失败';
+    ElMessage.error(msg);
+  } finally {
+    checkingDDNS.value = false;
+  }
+}
+
 function openNew() {
   editing.value = false;
   editIndex.value = -1;
@@ -360,8 +421,19 @@ async function removeRow(idx: number, row: Record) {
   } catch {
     return;
   }
-  records.value.splice(idx, 1);
-  await saveAll();
+  try {
+    const res = await api.delete(`/api/v1/ddns/records/${encodeURIComponent(row.id)}`);
+    const d = res.data || {};
+    if (d.deleted) {
+      records.value.splice(idx, 1);
+      ElMessage.success('记录已删除');
+    } else {
+      ElMessage.warning('记录不存在，可能已被删除');
+    }
+    await load();
+  } catch (e: any) {
+    showError(e, '删除记录失败');
+  }
 }
 
 function onConfigTokenInput() {

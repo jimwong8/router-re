@@ -7,7 +7,31 @@
         </div>
       </template>
 
-      <!-- 镜像检查 -->
+      <!-- 固件检查（inspect） -->
+    <el-card shadow="never" style="margin-bottom:16px">
+      <template #header><span>固件检查（inspect，只读元数据）</span></template>
+      <el-form :inline="true" label-width="90px">
+        <el-form-item label="镜像路径">
+          <el-input v-model="inspectPath" placeholder="/tmp/openwrt-sysupgrade.bin" style="width:320px" />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :loading="inspecting" @click="inspectFirmware">检查固件</el-button>
+        </el-form-item>
+      </el-form>
+      <el-alert v-if="inspectError" :title="inspectError" type="error" :closable="false" style="margin-bottom:12px" />
+      <div v-if="inspectImage">
+        <el-descriptions title="镜像元数据" :column="2" border style="margin-bottom:12px">
+          <el-descriptions-item label="路径">{{ inspectImage.path }}</el-descriptions-item>
+          <el-descriptions-item label="大小">{{ inspectImage.size }} bytes</el-descriptions-item>
+          <el-descriptions-item label="SHA256">{{ inspectImage.sha256 }}</el-descriptions-item>
+          <el-descriptions-item label="版本">{{ inspectImage.version || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="板型">{{ inspectImage.board || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="魔数">{{ inspectImage.magic || '-' }}</el-descriptions-item>
+        </el-descriptions>
+      </div>
+    </el-card>
+
+    <!-- 镜像检查 -->
       <el-card shadow="never" style="margin-bottom:16px">
         <template #header><span>镜像检查</span></template>
         <el-form :inline="true" label-width="90px">
@@ -192,6 +216,27 @@ async function applyUpgrade() {
     ElMessage.error(applyError.value);
   } finally {
     applying.value = false;
+  }
+}
+
+const inspectPath = ref('/tmp/openwrt-sysupgrade.bin');
+const inspecting = ref(false);
+const inspectError = ref('');
+const inspectImage = ref<any>(null);
+
+async function inspectFirmware() {
+  inspecting.value = true;
+  inspectError.value = '';
+  inspectImage.value = null;
+  try {
+    const res = await api.get('/api/v1/firmware/inspect', { params: { path: inspectPath.value } });
+    inspectImage.value = res.data?.image ?? null;
+    ElMessage.success('固件检查完成');
+  } catch (e: any) {
+    inspectError.value = e?.response?.data?.detail || e?.response?.data?.message || e?.message || '检查固件失败';
+    ElMessage.error(inspectError.value);
+  } finally {
+    inspecting.value = false;
   }
 }
 
