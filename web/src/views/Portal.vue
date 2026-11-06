@@ -232,7 +232,7 @@ async function loadPortalStatus() {
     const res = await api.get('/api/v1/portal/status');
     portalStatus.value = res.data || { online: false, online_count: 0, clients: [] };
   } catch (e: any) {
-    statusErr.value = e?.response?.data?.detail || e?.response?.data?.message || e?.message || '加载 Portal 状态失败';
+    statusErr.value = e?.response?.data?.message || e?.response?.data?.detail || e?.message || '加载 Portal 状态失败';
     ElMessage.error(statusErr.value);
   } finally {
     statusLoading.value = false;
@@ -253,7 +253,7 @@ async function logoutClient(row: PortalClient) {
     await loadPortalStatus();
     await loadClients();
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || e?.response?.data?.message || e?.message || '登出失败');
+    ElMessage.error(e?.response?.data?.message || e?.response?.data?.detail || e?.message || '登出失败');
   } finally {
     logoutBusy.value = '';
   }

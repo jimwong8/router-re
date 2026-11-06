@@ -224,7 +224,7 @@ const ndApplied = ref(false);
 const ndResult = ref('');
 
 function errMsg(e: any, fallback: string): string {
-  return e?.response?.data?.detail || e?.response?.data?.message || e.message || fallback;
+  return e?.response?.data?.message || e?.response?.data?.detail || e.message || fallback;
 }
 
 async function loadND() {
@@ -303,7 +303,7 @@ async function loadAddrs() {
     const res = await api.get('/api/v1/ipv6/addresses');
     addrs.value = res.data?.addresses || [];
   } catch (e: any) {
-    addrError.value = e?.response?.data?.detail || e?.response?.data?.message || e.message || '加载地址失败';
+    addrError.value = e?.response?.data?.message || e?.response?.data?.detail || e.message || '加载地址失败';
     ElMessage.error(addrError.value);
   }
 }
@@ -317,7 +317,7 @@ async function addAddr() {
     ElMessage.success('地址已添加');
     newAddr.value = { iface: '', addr: '', prefix_len: 64 };
   } catch (e: any) {
-    addrError.value = e?.response?.data?.detail || e?.response?.data?.message || e.message || '添加失败';
+    addrError.value = e?.response?.data?.message || e?.response?.data?.detail || e.message || '添加失败';
     ElMessage.error(addrError.value);
   } finally {
     addrSaving.value = false;
@@ -330,7 +330,7 @@ async function delAddr(row: any) {
     ElMessage.success('已删除');
     await loadAddrs();
   } catch (e: any) {
-    const msg = e?.response?.data?.detail || e?.response?.data?.message || e.message || '删除失败';
+    const msg = e?.response?.data?.message || e?.response?.data?.detail || e.message || '删除失败';
     addrError.value = msg;
     ElMessage.error(msg);
   }
@@ -343,7 +343,7 @@ async function loadRA() {
     ra.value = res.data?.config || ra.value;
     radvdText.value = res.data?.radvd || '';
   } catch (e: any) {
-    raError.value = e?.response?.data?.detail || e?.response?.data?.message || e.message || '加载 RA 配置失败';
+    raError.value = e?.response?.data?.message || e?.response?.data?.detail || e.message || '加载 RA 配置失败';
   }
 }
 
@@ -359,7 +359,7 @@ async function saveRA() {
     if (res.data?.applied) ElMessage.success('RA 已下发');
     else ElMessage.warning(raDetail.value);
   } catch (e: any) {
-    raError.value = e?.response?.data?.detail || e?.response?.data?.message || e.message || '保存失败';
+    raError.value = e?.response?.data?.message || e?.response?.data?.detail || e.message || '保存失败';
     ElMessage.error(raError.value);
   } finally {
     raSaving.value = false;
@@ -371,7 +371,7 @@ async function loadDhcpV6() {
     const res = await api.get('/api/v1/dhcp/v6');
     dhcpV6.value = res.data?.config || dhcpV6.value;
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || e?.response?.data?.message || e.message || '加载 DHCPv6 失败');
+    ElMessage.error(e?.response?.data?.message || e?.response?.data?.detail || e.message || '加载 DHCPv6 失败');
   }
 }
 
@@ -382,7 +382,7 @@ async function saveDhcpV6() {
     dhcpV6.value = res.data?.config || dhcpV6.value;
     ElMessage.success('DHCPv6 已保存');
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || e?.response?.data?.message || e.message || '保存 DHCPv6 失败');
+    ElMessage.error(e?.response?.data?.message || e?.response?.data?.detail || e.message || '保存 DHCPv6 失败');
   } finally {
     dhcpV6Saving.value = false;
   }
@@ -393,7 +393,7 @@ async function loadStatus() {
     const res = await api.get('/api/v1/ipv6/status');
     status.value = res.data;
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || e?.response?.data?.message || e.message || '状态获取失败');
+    ElMessage.error(e?.response?.data?.message || e?.response?.data?.detail || e.message || '状态获取失败');
   }
 }
 

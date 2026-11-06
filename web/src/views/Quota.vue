@@ -300,7 +300,7 @@ async function loadQuotaReport() {
     quotaReportCount.value = res.data?.count ?? 0;
     quotaReportLines.value = res.data?.report || [];
   } catch (e: any) {
-    reportErr.value = e?.response?.data?.detail || e?.response?.data?.message || e?.message || '加载配额报表失败';
+    reportErr.value = e?.response?.data?.message || e?.response?.data?.detail || e?.message || '加载配额报表失败';
     ElMessage.error(reportErr.value);
   } finally {
     reportLoading.value = false;

@@ -214,7 +214,7 @@ async function loadIdentity() {
     const res = await api.get('/api/v1/identity');
     identity.value = { ...identity.value, ...(res.data?.identity || {}) };
   } catch (e: any) {
-    idErr.value = e?.response?.data?.detail || e?.response?.data?.message || e?.message || '加载 identity 失败';
+    idErr.value = e?.response?.data?.message || e?.response?.data?.detail || e?.message || '加载 identity 失败';
     ElMessage.error(idErr.value);
   }
 }
@@ -229,7 +229,7 @@ async function saveIdentity() {
     if (res.data?.applied) ElMessage.success('系统标识已应用');
     else ElMessage.warning(idResult.value);
   } catch (e: any) {
-    idErr.value = e?.response?.data?.detail || e?.response?.data?.message || e?.message || '保存 identity 失败';
+    idErr.value = e?.response?.data?.message || e?.response?.data?.detail || e?.message || '保存 identity 失败';
     ElMessage.error(idErr.value);
   } finally {
     idSaving.value = false;
@@ -255,7 +255,7 @@ async function loadMDNS() {
     mdnsIn.value = (mdns.value.config.in_ifaces || []).join(',');
     mdnsOut.value = (mdns.value.config.out_ifaces || []).join(',');
   } catch (e: any) {
-    mdnsErr.value = e?.response?.data?.detail || e?.response?.data?.message || e?.message || '加载 mDNS 失败';
+    mdnsErr.value = e?.response?.data?.message || e?.response?.data?.detail || e?.message || '加载 mDNS 失败';
     ElMessage.error(mdnsErr.value);
   }
 }
@@ -270,7 +270,7 @@ async function saveMDNS() {
     mdns.value.avahi = res.data?.avahi || mdns.value.avahi;
     ElMessage.success('mDNS 配置已保存');
   } catch (e: any) {
-    mdnsErr.value = e?.response?.data?.detail || e?.response?.data?.message || e?.message || '保存 mDNS 失败';
+    mdnsErr.value = e?.response?.data?.message || e?.response?.data?.detail || e?.message || '保存 mDNS 失败';
     ElMessage.error(mdnsErr.value);
   } finally {
     mdnsSaving.value = false;
@@ -288,7 +288,7 @@ async function loadWebAdmin() {
     if (res.data?.config) wa.value.config = { ...wa.value.config, ...res.data.config };
     wa.value.nginx = res.data?.nginx || '';
   } catch (e: any) {
-    waErr.value = e?.response?.data?.detail || e?.response?.data?.message || e?.message || '加载 WebAdmin 失败';
+    waErr.value = e?.response?.data?.message || e?.response?.data?.detail || e?.message || '加载 WebAdmin 失败';
     ElMessage.error(waErr.value);
   }
 }
@@ -302,7 +302,7 @@ async function saveWebAdmin() {
     wa.value.nginx = res.data?.nginx || wa.value.nginx;
     ElMessage.success(res.data?.detail || 'WebAdmin 配置已保存');
   } catch (e: any) {
-    waErr.value = e?.response?.data?.detail || e?.response?.data?.message || e?.message || '保存 WebAdmin 失败';
+    waErr.value = e?.response?.data?.message || e?.response?.data?.detail || e?.message || '保存 WebAdmin 失败';
     ElMessage.error(waErr.value);
   } finally {
     waSaving.value = false;

@@ -232,7 +232,7 @@ async function loadServices() {
     svcHasMore.value = !!d.has_more;
   } catch (e: any) {
     showError(e, '加载服务失败');
-    svcError.value = e?.response?.data?.detail || e?.response?.data?.message || e?.message || '加载失败';
+    svcError.value = e?.response?.data?.message || e?.response?.data?.detail || e?.message || '加载失败';
   } finally {
     svcLoading.value = false;
   }
@@ -281,7 +281,7 @@ async function loadProcesses() {
     procTotal.value = d.total || processes.value.length;
   } catch (e: any) {
     showError(e, '加载进程失败');
-    procError.value = e?.response?.data?.detail || e?.response?.data?.message || e?.message || '加载失败';
+    procError.value = e?.response?.data?.message || e?.response?.data?.detail || e?.message || '加载失败';
   } finally {
     procLoading.value = false;
   }
@@ -331,7 +331,7 @@ async function loadManaged() {
     const res = await api.get('/api/v1/services/status');
     managed.value = res.data?.services || [];
   } catch (e: any) {
-    mgdError.value = e?.response?.data?.detail || e?.response?.data?.message || e?.message || '加载服务控制状态失败';
+    mgdError.value = e?.response?.data?.message || e?.response?.data?.detail || e?.message || '加载服务控制状态失败';
     showError(e, '加载服务控制状态失败');
   } finally {
     mgdLoading.value = false;
